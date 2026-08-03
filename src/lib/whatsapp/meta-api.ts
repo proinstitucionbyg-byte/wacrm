@@ -1071,7 +1071,7 @@ export async function uploadMedia(
 
   form.append(
     'file',
-    new Blob([buffer], { type: contentType }),
+    new Blob([new Uint8Array(buffer)], { type: contentType }),
     fileName,
   )
 
