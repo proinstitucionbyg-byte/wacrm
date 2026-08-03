@@ -297,7 +297,10 @@ export async function sendMediaMessage(
   // Audio accepts neither caption nor filename per Meta's spec — adding
   // either yields a 400. image/video/document accept a caption; only
   // document accepts a filename.
-  const media: Record<string, unknown> = { link }
+  const media: Record<string, unknown> =
+  link.startsWith("http://") || link.startsWith("https://")
+    ? { link }
+    : { id: link }
   if (caption && kind !== 'audio') media.caption = caption
   if (kind === 'document' && filename) media.filename = filename
 
@@ -1041,4 +1044,91 @@ export async function downloadMedia(
     response.headers.get('content-type') || 'application/octet-stream'
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
+}
+
+export interface UploadMediaArgs {
+  phoneNumberId: string
+  accessToken: string
+  buffer: Buffer
+  contentType: string
+  fileName: string
+}
+
+export async function uploadMedia(
+  args: UploadMediaArgs,
+): Promise<{ mediaId: string }> {
+  const {
+    phoneNumberId,
+    accessToken,
+    buffer,
+    contentType,
+    fileName,
+  } = args
+
+  const form = new FormData()
+
+  form.append('messaging_product', 'whatsapp')
+
+  form.append(
+    'file',
+    new Blob([buffer], { type: contentType }),
+    fileName,
+  )
+
+  const response = await fetch(
+    `${META_API_BASE}/${phoneNumberId}/media`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: form,
+    },
+  )
+
+  if (!response.ok) {
+    await throwMetaError(
+      response,
+      `Media upload failed: ${response.status}`,
+    )
+  }
+
+  const data = await response.json()
+
+  if (!data.id) {
+    throw new Error('Meta did not return a media id.')
+  }
+
+  return { mediaId: data.id }
+}
+export interface GetCatalogsArgs {
+  businessId: string
+  accessToken: string
+}
+
+export async function getCatalogs(
+  args: GetCatalogsArgs,
+): Promise<any[]> {
+  const { businessId, accessToken } = args
+
+  const response = await fetch(
+    `${META_API_BASE}/${businessId}/product_catalogs`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  )
+
+  if (!response.ok) {
+  const errorText = await response.text();
+
+  throw new Error(
+    `STATUS ${response.status}\n\n${errorText}`
+  );
+}
+
+  const data = await response.json()
+
+  return data.data ?? []
 }

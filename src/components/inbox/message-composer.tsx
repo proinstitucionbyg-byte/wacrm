@@ -745,7 +745,7 @@ export function MessageComposer({
             // The placeholder text also surfaces the read-only state.
             title={readOnly ? t("readOnlyTitle") : undefined}
             className={cn(
-              "flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50",
+              "flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-white placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20",
               (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
             )}
           />
@@ -756,9 +756,9 @@ export function MessageComposer({
             gateReason="send messages"
             disabled={!text.trim() || sessionExpired || sending}
             onClick={handleSend}
-            className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
+            className="h-11 w-11 shrink-0 rounded-xl bg-sky-500 p-0 shadow-lg shadow-sky-500/30 transition-all duration-200 hover:bg-sky-600 hover:scale-105 disabled:opacity-40"
           >
-            <Send className="h-4 w-4" />
+            <Send className="h-5 w-5" />
           </GatedButton>
         </div>
       )}
@@ -767,7 +767,7 @@ export function MessageComposer({
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge. */}
       {!draft && !recording && (
-        <p className="mt-1 pl-[5.5rem] text-[10px] text-muted-foreground">
+        <p className="mt-2 pl-[5.5rem] text-[10px] text-slate-500">
           {t("draftHint")}
         </p>
       )}

@@ -69,8 +69,9 @@ export function useRealtime({
         }
       )
       .subscribe((status) => {
-        setIsConnected(status === "SUBSCRIBED");
-      });
+  console.log("[Realtime] status:", status);
+  setIsConnected(status === "SUBSCRIBED");
+});
 
     channelRef.current = channel;
 

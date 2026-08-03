@@ -46,9 +46,11 @@ export function MessageActions({
     message.sender_type === "agent" || message.sender_type === "bot";
 
   const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setTouchOpen(true);
-  };
+  console.log("MESSAGE ACTIONS");
+
+  e.preventDefault();
+  setTouchOpen(true);
+};
 
   const handleCopy = async () => {
     const text = message.content_text ?? "";

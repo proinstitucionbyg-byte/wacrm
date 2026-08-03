@@ -136,12 +136,12 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
         <div className="p-4">
           {/* Contact Info */}
           <div className="flex flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-lg font-semibold text-foreground">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-700 text-xl font-bold text-white shadow-xl shadow-sky-500/30">
               {contact.avatar_url ? (
                 <img
                   src={contact.avatar_url}
                   alt={displayName}
-                  className="h-16 w-16 rounded-full object-cover"
+                  className="h-20 w-20 rounded-full object-cover ring-2 ring-sky-400 shadow-lg"
                 />
               ) : (
                 initials
@@ -267,11 +267,11 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                   onChange={(e) => setNewNote(e.target.value)}
                   placeholder={tSidebar("addNotePlaceholder")}
                   rows={2}
-                  className="flex-1 resize-none rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder-muted-foreground outline-none focus:border-primary/50"
+                  className="flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-xs text-white placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
                 />
                 <Button
                   size="sm"
-                  className="h-auto bg-primary px-2 hover:bg-primary/90"
+                  className="h-10 rounded-xl bg-sky-500 px-3 shadow-lg shadow-sky-500/30 hover:bg-sky-600"
                   onClick={handleAddNote}
                   disabled={!newNote.trim() || addingNote}
                 >
@@ -283,7 +283,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 {notes.map((note) => (
                   <div
                     key={note.id}
-                    className="rounded-lg bg-muted px-3 py-2"
+                    className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3"
                   >
                     <p className="whitespace-pre-wrap text-xs text-muted-foreground">
                       {note.note_text}

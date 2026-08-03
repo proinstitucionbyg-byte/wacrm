@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
@@ -15,6 +16,7 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquare,
+  Package,
   Radio,
   Settings,
   Shield,
@@ -97,6 +99,7 @@ const navItems: NavItem[] = [
   { href: "/pipelines", labelKey: "pipelines", icon: GitBranch },
   { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
   { href: "/automations", labelKey: "automations", icon: Zap },
+  { href: "/catalogs", labelKey: "catalogs", icon: Package },
   { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
 ];
@@ -174,27 +177,32 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       />
 
       <aside
-        className={cn(
-          // Mobile: fixed drawer that slides in from the left.
-          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-border bg-card",
+      className={cn(
+        "fixed inset-y-0 left-0 z-40 flex h-full w-72 flex-col border-r border-sky-900/40 bg-[#0B1220] shadow-[30px_0_80px_rgba(0,0,0,.35)] backdrop-blur-xl",
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
           // Desktop: static, always visible — reset all the mobile framing.
-          "lg:static lg:z-0 lg:w-60 lg:translate-x-0 lg:transition-none",
+          "lg:static lg:z-0 lg:w-72 lg:translate-x-0 lg:transition-none",
         )}
         aria-label="Primary"
       >
         {/* Logo row. On mobile we put a close button here; on desktop the
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <MessageSquare className="h-4 w-4" />
-            </div>
-            <span className="text-sm font-semibold text-foreground">
-              {t("title")}
-            </span>
-          </Link>
+          <Link href="/dashboard" className="flex w-full items-center">
+
+
+  <div className="flex h-12 items-center">
+  <Image
+  src="/logos/logo-horizontal.png"
+  alt="Insticrece"
+  width={530}
+  height={201}
+  className="h-14 w-auto object-contain"
+  priority
+/>
+</div>
+</Link>
           <button
             type="button"
             onClick={onClose}
@@ -228,15 +236,30 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   <Link
                     href={item.href}
                     className={cn(
-                      // Taller on mobile so fingers can hit the row reliably (≥44px).
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
+  "group flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200",
+  isActive
+  ? "border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/15 to-transparent text-white shadow-[0_8px_24px_rgba(14,165,233,.15)]"
+  : "text-slate-400 hover:bg-slate-800/40 hover:text-white"
+)}
                   >
-                    <item.icon className="h-4 w-4" />
-                    <span className="flex-1">{t(item.labelKey as string)}</span>
+                    <item.icon
+  className={cn(
+    "h-5 w-5 transition-all duration-200",
+    isActive
+  ? "text-sky-300"
+  : "text-slate-500 group-hover:text-sky-300",
+  )}
+/>
+                    <span
+  className={cn(
+    "flex-1 transition-colors",
+    isActive
+  ? "font-semibold text-white"
+  : "text-slate-300 group-hover:text-white"
+  )}
+>
+  {t(item.labelKey as string)}
+</span>
                     {item.beta && (
                       <span
                         aria-label={t("beta")}

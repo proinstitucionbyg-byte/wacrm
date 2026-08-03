@@ -19,11 +19,12 @@ export const THEME_IDS = [
   "cobalt",
   "amber",
   "rose",
+  "neo",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
 
-export const DEFAULT_THEME: ThemeId = "violet";
+export const DEFAULT_THEME: ThemeId = "neo";
 
 export const STORAGE_KEY = "wacrm.theme";
 
@@ -97,6 +98,12 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
     tagline: "Bold and modern — D2C, creator-economy, lifestyle.",
     swatch: "oklch(0.645 0.22 16)",
   },
+  {
+  id: "neo",
+  name: "Neo",
+  tagline: "Modern blue dashboard.",
+  swatch: "#3b82f6",
+},
 ];
 
 export function isThemeId(value: unknown): value is ThemeId {

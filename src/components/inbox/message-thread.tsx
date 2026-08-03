@@ -203,6 +203,35 @@ export function MessageThread({
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
 
+  const [selectionMode, setSelectionMode] = useState(false);
+
+const [selectedMessages, setSelectedMessages] = useState<string[]>([]);
+
+const [forwardModalOpen, setForwardModalOpen] = useState(false);
+const [forwardConversations, setForwardConversations] = useState<Conversation[]>([]);
+const [loadingForwardConversations, setLoadingForwardConversations] = useState(false);
+const [forwarding, setForwarding] = useState(false);
+const toggleMessageSelection = (messageId: string) => {
+  console.log("toggleMessageSelection", messageId);
+  setSelectedMessages((current) => {
+    if (current.includes(messageId)) {
+      const updated = current.filter((id) => id !== messageId);
+
+      if (updated.length === 0) {
+        setSelectionMode(false);
+      }
+
+      return updated;
+    }
+
+    if (!selectionMode) {
+      setSelectionMode(true);
+    }
+
+    return [...current, messageId];
+  });
+};
+
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
   // shape ready for shared-team workspaces without a refactor.
@@ -415,6 +444,33 @@ export function MessageThread({
   useEffect(() => {
     setReplyTo(null);
   }, [conversationId]);
+  useEffect(() => {
+  if (!forwardModalOpen) return;
+
+  const loadConversations = async () => {
+    setLoadingForwardConversations(true);
+
+    const supabase = createClient();
+
+    const { data, error } = await supabase
+      .from("conversations")
+      .select(`
+  *,
+  contact:contacts(*)
+`)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to load conversations:", error);
+    } else {
+      setForwardConversations(data ?? []);
+    }
+
+    setLoadingForwardConversations(false);
+  };
+
+  loadConversations();
+}, [forwardModalOpen]);
 
   // Reset the server-side unread_count to 0 whenever an unread count
   // surfaces on the active conversation — covers both (a) opening a
@@ -709,6 +765,44 @@ export function MessageThread({
     },
     [conversation, onNewMessage, onUpdateMessage],
   );
+  const handleForward = useCallback(
+  async (targetConversationId: string) => {
+    if (selectedMessages.length === 0) return;
+
+    try {
+      setForwarding(true);
+
+      for (const messageId of selectedMessages) {
+        const response = await fetch("/api/whatsapp/forward", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messageId,
+            conversationId: targetConversationId,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || "Forward failed");
+        }
+      }
+
+      setForwardModalOpen(false);
+      setSelectionMode(false);
+      setSelectedMessages([]);
+    } catch (error) {
+      console.error("Forward failed:", error);
+      toast.error("No se pudo reenviar el mensaje");
+    } finally {
+      setForwarding(false);
+    }
+  },
+  [selectedMessages],
+);
 
   // Build a quick id → Message map so reply quotes can be rendered without
   // an extra fetch — the thread already holds the full conversation.
@@ -880,7 +974,48 @@ export function MessageThread({
     <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
+      {selectionMode ? (
+  <div className="flex items-center justify-between border-b border-border bg-card px-3 py-3 sm:px-4">
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => {
+          setSelectionMode(false);
+          setSelectedMessages([]);
+        }}
+        className="rounded-md p-2 hover:bg-muted"
+      >
+        <ArrowLeft className="h-5 w-5" />
+      </button>
+
+      <span className="font-medium">
+        {selectedMessages.length} seleccionado
+        {selectedMessages.length !== 1 ? "s" : ""}
+      </span>
+    </div>
+
+    <div className="flex items-center gap-2">
+  <button
+  type="button"
+  onClick={() => setForwardModalOpen(true)}
+  className="rounded-md p-2 hover:bg-muted"
+  title="Reenviar"
+>
+  ↗️
+</button>
+
+  <button
+    type="button"
+    disabled
+    className="cursor-not-allowed rounded-md p-2 opacity-40"
+    title="Próximamente: eliminar para todos"
+  >
+    🗑️
+  </button>
+</div>
+  </div>
+) : (
+  <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -894,20 +1029,27 @@ export function MessageThread({
               <ArrowLeft className="h-5 w-5" />
             </button>
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+          <div
+  className={cn(
+    "flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white transition-all duration-200",
+    "bg-gradient-to-br from-sky-500 to-blue-700 shadow-lg shadow-sky-500/30"
+  )}
+>
             {displayName.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            <h2 className="truncate text-base font-semibold text-white">{displayName}</h2>
+            <p className="truncate text-xs text-slate-400">{contact.phone}</p>
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
           <Badge
             variant="outline"
             className={cn(
-              "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
-              sessionInfo.expired ? "text-red-400" : "text-primary"
+              "ml-2 hidden gap-1 rounded-full border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] sm:inline-flex",
+              sessionInfo.expired
+  ? "border-red-500/40 bg-red-500/10 text-red-300"
+  : "border-sky-500/40 bg-sky-500/10 text-sky-300"
             )}
           >
             <Clock className="h-3 w-3" />
@@ -956,7 +1098,7 @@ export function MessageThread({
               aria-label={t("refreshConversation")}
               title={t("refresh")}
               className={cn(
-                "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60",
+                "inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 text-slate-300 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-60",
               )}
             >
               <RefreshCw
@@ -968,7 +1110,7 @@ export function MessageThread({
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
-                  "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20",
                   currentStatus?.color ?? "text-muted-foreground"
                 )}>
                 {currentStatus ? t(`status${currentStatus.label}`) : t("status")}
@@ -994,7 +1136,7 @@ export function MessageThread({
           <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(
-                "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20",
                 assignedAgentId ? "text-primary" : "text-muted-foreground"
               )}
             >
@@ -1056,6 +1198,7 @@ export function MessageThread({
           </DropdownMenu>
         </div>
       </div>
+)}
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
@@ -1122,6 +1265,10 @@ export function MessageThread({
                           reactions={msgReactions}
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
+                          selectionMode={selectionMode}
+selected={selectedMessages.includes(msg.id)}
+onToggleSelection={() => toggleMessageSelection(msg.id)}
+onStartSelection={() => toggleMessageSelection(msg.id)}
                         />
                       </MessageActions>
                     );
@@ -1166,6 +1313,52 @@ export function MessageThread({
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
       />
+      {forwardModalOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div className="w-[420px] rounded-lg bg-card p-6 shadow-xl">
+      <h2 className="mb-4 text-lg font-semibold">
+        Reenviar mensaje
+      </h2>
+
+      <div className="mb-6 max-h-80 overflow-y-auto rounded-md border">
+  {loadingForwardConversations ? (
+    <div className="p-4 text-sm text-muted-foreground">
+      Cargando conversaciones...
+    </div>
+  ) : (
+    forwardConversations.map((conv) => (
+      <button
+        key={conv.id}
+        type="button"
+        onClick={() => handleForward(conv.id)}
+disabled={forwarding}
+        className="flex w-full items-center justify-between border-b p-3 text-left hover:bg-muted last:border-b-0"
+      >
+        <div>
+          <div className="font-medium">
+            {conv.contact?.name || conv.contact?.phone}
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            {conv.contact?.phone}
+          </div>
+        </div>
+      </button>
+    ))
+  )}
+</div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={() => setForwardModalOpen(false)}
+          className="rounded-md border px-4 py-2"
+        >
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }

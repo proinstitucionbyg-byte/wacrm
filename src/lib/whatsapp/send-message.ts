@@ -27,6 +27,8 @@ import {
   sendMediaMessage,
   sendInteractiveButtons,
   sendInteractiveList,
+  downloadMedia,
+  uploadMedia,
   type MediaKind,
 } from '@/lib/whatsapp/meta-api';
 import {
@@ -180,6 +182,45 @@ export function validateSendMessageParams(params: {
   }
 }
 
+async function resolveForwardMediaLink(args: {
+  mediaLink: string
+  phoneNumberId: string
+  accessToken: string
+  filename?: string | null
+}) {
+  let { mediaLink, phoneNumberId, accessToken, filename } = args
+
+  if (mediaLink.includes("/api/whatsapp/media/")) {
+    const mediaId = mediaLink.substring(
+      mediaLink.lastIndexOf("/") + 1
+    )
+
+    const { getMediaUrl } = await import("@/lib/whatsapp/meta-api")
+
+    const mediaInfo = await getMediaUrl({
+      mediaId,
+      accessToken,
+    })
+
+    const { buffer, contentType } = await downloadMedia({
+      downloadUrl: mediaInfo.url,
+      accessToken,
+    })
+
+    const { mediaId: uploadedMediaId } = await uploadMedia({
+      phoneNumberId,
+      accessToken,
+      buffer,
+      contentType,
+      fileName:
+        filename || `media.${contentType.split("/")[1] || "bin"}`,
+    })
+
+    mediaLink = uploadedMediaId
+  }
+
+  return mediaLink
+}
 export async function sendMessageToConversation(
   db: SupabaseClient,
   accountId: string,
@@ -345,12 +386,19 @@ export async function sendMessageToConversation(
       return result.messageId;
     }
     if (isMediaKind) {
+      let mediaLink = await resolveForwardMediaLink({
+  mediaLink: mediaUrl!,
+  phoneNumberId: config.phone_number_id,
+  accessToken,
+  filename,
+});
+
       const result = await sendMediaMessage({
         phoneNumberId: config.phone_number_id,
         accessToken,
         to: phone,
         kind: messageType as MediaKind,
-        link: mediaUrl!,
+        link: mediaLink,
         caption: contentText || undefined,
         filename: filename || undefined,
         contextMessageId,

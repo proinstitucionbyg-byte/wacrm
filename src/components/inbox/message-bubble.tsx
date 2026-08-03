@@ -20,6 +20,7 @@ import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
 import { InteractivePreview } from "@/components/interactive/interactive-preview";
 import { useTranslations } from "next-intl";
+import { MediaViewer } from "@/components/media/media-viewer";
 
 interface MessageBubbleProps {
   message: Message;
@@ -28,6 +29,10 @@ interface MessageBubbleProps {
   reactions?: MessageReaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string) => void;
+  selectionMode: boolean;
+selected: boolean;
+onToggleSelection: () => void;
+onStartSelection: () => void;
 }
 
 function StatusIcon({ status }: { status: Message["status"] }) {
@@ -56,7 +61,15 @@ function MediaUnavailable({ label, t }: { label: string, t: ReturnType<typeof us
   );
 }
 
-function MediaImage({ url, alt }: { url: string; alt: string }) {
+function MediaImage({
+  url,
+  alt,
+  onOpen,
+}: {
+  url: string;
+  alt: string;
+  onOpen: (url: string) => void;
+}) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -111,15 +124,26 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
 
   return (
     <img
-      src={src ?? ""}
-      alt={alt}
-      className="max-h-64 max-w-60 rounded-lg object-cover"
-      onError={() => setError(true)}
-    />
+  src={src ?? ""}
+  alt={alt}
+  className="max-h-72 max-w-72 rounded-2xl object-cover cursor-pointer shadow-lg"
+  onClick={() => {
+    if (src) onOpen(src);
+  }}
+  onError={() => setError(true)}
+/>
   );
 }
 
-function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof useTranslations> }) {
+function MessageContent({
+  message,
+  t,
+  onOpenImage,
+}: {
+  message: Message;
+  t: ReturnType<typeof useTranslations>;
+  onOpenImage: (url: string) => void;
+}) {
   switch (message.content_type) {
     case "text":
       return (
@@ -132,7 +156,11 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
       return (
         <div>
           {message.media_url ? (
-            <MediaImage url={message.media_url} alt="Shared image" />
+            <MediaImage
+  url={message.media_url}
+  alt="Shared image"
+  onOpen={onOpenImage}
+/>
           ) : (
             <MediaUnavailable label={t("photo")} t={t} />
           )}
@@ -151,7 +179,7 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
             <video
               src={message.media_url}
               controls
-              className="max-h-64 max-w-60 rounded-lg"
+              className="max-h-72 max-w-72 rounded-2xl shadow-lg"
             />
           ) : (
             <MediaUnavailable label={t("video")} t={t} />
@@ -264,8 +292,15 @@ export function MessageBubble({
   reactions,
   currentUserId,
   onToggleReaction,
+  selectionMode,
+  selected,
+  onToggleSelection,
+  onStartSelection,
 }: MessageBubbleProps) {
   const t = useTranslations("Inbox.bubble");
+
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
   const time = format(new Date(message.created_at), "HH:mm");
@@ -274,19 +309,41 @@ export function MessageBubble({
   // group matches the bubble's content area, not the full row.
   return (
     <div
-      className={cn(
-        "flex flex-col",
-        isAgent ? "items-end" : "items-start",
-      )}
-    >
+className={cn(
+  "flex flex-col",
+  isAgent ? "items-end" : "items-start",
+  selectionMode && "cursor-pointer",
+)}
+  onClick={() => {
+    if (selectionMode) {
+      onToggleSelection();
+    }
+  }}
+  onContextMenu={(e) => {
+  e.preventDefault();
+
+  console.log("RIGHT CLICK");
+  console.log(onStartSelection);
+
+  console.log("ANTES");
+  onStartSelection();
+  console.log("DESPUÉS");
+}}
+>
       <div
-        className={cn(
-          "relative rounded-2xl px-3 py-2",
-          isAgent
-            ? "rounded-br-md bg-primary text-primary-foreground"
-            : "rounded-bl-md bg-muted text-foreground",
-        )}
-      >
+  className={cn(
+    "relative rounded-3xl px-4 py-3 shadow-lg",
+    isAgent
+      ? "rounded-br-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/20"
+      : "rounded-bl-lg border border-slate-700 bg-slate-900/70 text-white",
+      selected && "ring-2 ring-primary"
+  )}
+>
+  {selected && (
+    <div className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
+      ✓
+    </div>
+  )}
         {reply && (
           <ReplyQuote
             authorLabel={reply.authorLabel}
@@ -294,7 +351,14 @@ export function MessageBubble({
             onPrimary={isAgent}
           />
         )}
-        <MessageContent message={message} t={t} />
+        <MessageContent
+  message={message}
+  t={t}
+  onOpenImage={(url) => {
+    setViewerUrl(url);
+    setViewerOpen(true);
+  }}
+/>
         <div
           className={cn(
             "mt-1 flex items-center gap-1",
@@ -336,6 +400,11 @@ export function MessageBubble({
           onToggle={onToggleReaction}
         />
       )}
+<MediaViewer
+  open={viewerOpen}
+  imageUrl={viewerUrl}
+  onOpenChange={setViewerOpen}
+/>
     </div>
   );
 }

@@ -225,20 +225,20 @@ export function ConversationList({
     // row with the thread + contact sidebar.
     <div className="flex h-full w-full flex-col border-r border-border bg-card lg:w-80">
       {/* Search + Filter */}
-      <div className="space-y-2 border-b border-border p-3">
+      <div className="space-y-3 border-b border-border p-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={handleSearchChange}
             placeholder={t("searchPlaceholder")}
-            className="border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
+            className="h-11 rounded-xl border-slate-700 bg-slate-900/70 pl-9 text-sm text-white placeholder:text-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-1">
           <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted">
+            <DropdownMenuTrigger className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-slate-300 transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white">
                 {activeFilter?.label ?? t("filterAll")}
                 <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
@@ -267,7 +267,7 @@ export function ConversationList({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  "inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800",
                   selectedTagIds.length > 0
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground"
@@ -309,7 +309,7 @@ export function ConversationList({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  "inline-flex max-w-40 items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  "inline-flex max-w-40 h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800",
                   selectedCompany
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground"
@@ -396,7 +396,7 @@ export function ConversationList({
           every conversation instead of shrinking to the remaining
           space — the list then overflows and gets clipped by the
           parent's overflow-hidden with no scrollbar (issue #229). */}
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1 bg-slate-950/20">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -406,7 +406,7 @@ export function ConversationList({
             <p className="text-sm text-muted-foreground">{t("noConversations")}</p>
           </div>
         ) : (
-          <div className="flex flex-col">
+          <div className="flex flex-col gap-3 px-3 py-3">
             {filtered.map((conv) => (
               <ConversationItem
                 key={conv.id}
@@ -453,18 +453,30 @@ function ConversationItem({
   return (
     <button
       onClick={handleClick}
-      className={cn(
-        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
-        isActive && "border-l-2 border-primary bg-muted/70"
-      )}
-    >
-      {/* Avatar */}
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+        className={cn(
+  "group mx-2 my-1.5 flex w-[calc(100%-16px)] items-start gap-3 rounded-2xl px-4 py-3 text-left transition-all duration-200 hover:bg-slate-800/70 hover:shadow-xl hover:shadow-sky-500/10 hover:scale-[1.01]",
+  isActive &&
+    "border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent shadow-[0_12px_32px_rgba(14,165,233,.22)]"
+)}
+>
+      <div
+  className={cn(
+    "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white transition-all duration-200",
+    isActive
+      ? "bg-sky-500 ring-2 ring-sky-300 shadow-lg shadow-sky-500/40"
+      : "bg-slate-800 ring-2 ring-slate-700"
+  )}
+>
         {contact?.avatar_url ? (
           <img
             src={contact.avatar_url}
             alt={displayName}
-            className="h-10 w-10 rounded-full object-cover"
+            className={cn(
+  "h-11 w-11 rounded-full object-cover transition-all duration-200",
+  isActive
+    ? "ring-2 ring-sky-300"
+    : "ring-2 ring-slate-700"
+)}
           />
         ) : (
           initials
@@ -474,24 +486,45 @@ function ConversationItem({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-foreground">
+          <span
+  className={cn(
+    "truncate text-sm transition-all duration-200",
+    isActive
+      ? "font-semibold text-white"
+      : "font-medium text-slate-200 group-hover:text-white"
+  )}
+>
             {displayName}
           </span>
-          <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
+          <span
+  className={cn(
+    "shrink-0 text-[11px] transition-colors duration-200",
+    isActive
+      ? "text-sky-300"
+      : "text-slate-400"
+  )}
+>{timeAgo}</span>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className="truncate text-xs text-muted-foreground">
+          <p
+  className={cn(
+    "truncate text-xs transition-colors duration-200",
+    isActive
+      ? "text-slate-200"
+      : "text-slate-400 group-hover:text-slate-300"
+  )}
+>
             {conversation.last_message_text || t("noMessagesYet")}
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
             {conversation.unread_count > 0 && (
-              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sky-500 px-1.5 text-[10px] font-bold text-white shadow-lg shadow-sky-500/40">
                 {conversation.unread_count}
               </span>
             )}
             <span
               className={cn(
-                "h-2 w-2 rounded-full",
+                "h-2.5 w-2.5 rounded-full ring-2 ring-slate-900",
                 STATUS_COLORS[conversation.status]
               )}
               title={conversation.status}

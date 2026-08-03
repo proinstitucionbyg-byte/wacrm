@@ -65,7 +65,15 @@ export async function GET(
     const accessToken = decrypt(config.access_token)
 
     // Get the download URL from Meta
-    const mediaInfo = await getMediaUrl({ mediaId, accessToken })
+    console.log("MEDIA ID:", mediaId);
+
+const mediaInfo = await getMediaUrl({
+  mediaId,
+  accessToken,
+});
+
+console.log("MEDIA INFO:");
+console.log(mediaInfo);
 
     // Download the binary data
     const { buffer, contentType } = await downloadMedia({
@@ -81,7 +89,9 @@ export async function GET(
       },
     })
   } catch (error) {
-    console.error('Error in WhatsApp media GET:', error)
+    console.error("========== MEDIA ERROR ==========");
+console.error(error);
+console.error("================================");
     return NextResponse.json(
       { error: 'Failed to fetch media' },
       { status: 500 }

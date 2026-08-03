@@ -349,17 +349,7 @@ export default function InboxPage() {
    */
   const wasConnectedRef = useRef(false);
   const initialConnectDoneRef = useRef(false);
-  useEffect(() => {
-    if (isConnected && !wasConnectedRef.current) {
-      // false → true transition
-      if (initialConnectDoneRef.current) {
-        setResyncToken((n) => n + 1);
-      } else {
-        initialConnectDoneRef.current = true;
-      }
-    }
-    wasConnectedRef.current = isConnected;
-  }, [isConnected]);
+  
 
   /**
    * Refetch when the tab regains focus. Background tabs may have their
@@ -367,18 +357,7 @@ export default function InboxPage() {
    * visibilitychange → visible is a reliable signal that we may have
    * missed events. Cheap to fire; the children dedupe on their own.
    */
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        setResyncToken((n) => n + 1);
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
-
+  
   /**
    * Manual refresh trigger for the thread-header refresh button.
    * Bumps the same resyncToken the reconnect / visibility paths use,

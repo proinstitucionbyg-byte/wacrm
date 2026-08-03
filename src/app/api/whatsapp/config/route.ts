@@ -115,6 +115,7 @@ export async function GET() {
     let accessToken: string
     try {
       accessToken = decrypt(config.access_token)
+      console.log("TOKEN:", accessToken)
     } catch (err) {
       console.error('[whatsapp/config GET] Token decryption failed:', err)
       return NextResponse.json(
