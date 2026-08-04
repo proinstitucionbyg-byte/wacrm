@@ -426,27 +426,31 @@ console.log(step.step_config)
       return `template sent via Meta (${whatsapp_message_id})`
     }
 case 'send_media': {
-  const cfg = step.step_config as {
-    media_type: 'image' | 'video' | 'audio' | 'document'
-    media_url: string
+  const rawCfg = step.step_config as {
+    media_type?: 'image' | 'video' | 'audio' | 'document'
+    media_url?: string
+    url?: string
     caption?: string
     filename?: string
   }
+
+  // Compatibilidad: pasos viejos guardaron el campo como "url" en vez
+  // de "media_url". Aceptamos ambos para no romper lo ya creado.
+  const mediaUrl = rawCfg.media_url ?? rawCfg.url
+  const mediaType = rawCfg.media_type ?? 'image'
+
 console.log('>>> ENTRE AL CASE SEND_MEDIA <<<')
   if (!args.contactId) {
     throw new Error('send_media needs a contact')
   }
 
-  if (!cfg.media_type) {
-    throw new Error('send_media needs media_type')
+  if (!mediaUrl) {
+    throw new Error('send_media needs media_url (or url)')
   }
 
-  if (!cfg.media_url) {
-    throw new Error('send_media needs media_url')
-  }
 console.log('======================')
 console.log('SEND MEDIA STEP')
-console.log(JSON.stringify(cfg, null, 2))
+console.log(JSON.stringify({ mediaType, mediaUrl, caption: rawCfg.caption }, null, 2))
 console.log('======================')
   const conversationId = await resolveConversationId(args)
 
@@ -455,10 +459,10 @@ console.log('======================')
     userId: args.automation.user_id,
     conversationId,
     contactId: args.contactId,
-    mediaType: cfg.media_type,
-    mediaUrl: cfg.media_url,
-    caption: cfg.caption,
-    filename: cfg.filename,
+    mediaType,
+    mediaUrl,
+    caption: rawCfg.caption,
+    filename: rawCfg.filename,
   })
 
   return `media sent via Meta (${whatsapp_message_id})`
