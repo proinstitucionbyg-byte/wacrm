@@ -18,7 +18,12 @@ import type {
   AssignConversationStepConfig,
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
-import { engineSendText, engineSendTemplate, engineSendInteractive } from './meta-send'
+import {
+  engineSendText,
+  engineSendTemplate,
+  engineSendInteractive,
+  engineSendMedia,
+} from './meta-send'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
@@ -346,6 +351,8 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
 
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string> {
   const db = supabaseAdmin()
+  console.log("STEP TYPE:", step.step_type)
+console.log(step.step_config)
 
   switch (step.step_type) {
     case 'send_message': {
@@ -418,7 +425,44 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       })
       return `template sent via Meta (${whatsapp_message_id})`
     }
+case 'send_media': {
+  const cfg = step.step_config as {
+    media_type: 'image' | 'video' | 'audio' | 'document'
+    media_url: string
+    caption?: string
+    filename?: string
+  }
+console.log('>>> ENTRE AL CASE SEND_MEDIA <<<')
+  if (!args.contactId) {
+    throw new Error('send_media needs a contact')
+  }
 
+  if (!cfg.media_type) {
+    throw new Error('send_media needs media_type')
+  }
+
+  if (!cfg.media_url) {
+    throw new Error('send_media needs media_url')
+  }
+console.log('======================')
+console.log('SEND MEDIA STEP')
+console.log(JSON.stringify(cfg, null, 2))
+console.log('======================')
+  const conversationId = await resolveConversationId(args)
+
+  const { whatsapp_message_id } = await engineSendMedia({
+    accountId: args.automation.account_id,
+    userId: args.automation.user_id,
+    conversationId,
+    contactId: args.contactId,
+    mediaType: cfg.media_type,
+    mediaUrl: cfg.media_url,
+    caption: cfg.caption,
+    filename: cfg.filename,
+  })
+
+  return `media sent via Meta (${whatsapp_message_id})`
+}
     case 'add_tag': {
       // contact_tags has no account_id column; cross-tenant protection for
       // the attacker-supplied contactId comes from the ownership guard in

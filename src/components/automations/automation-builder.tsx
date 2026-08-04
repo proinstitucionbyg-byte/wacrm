@@ -33,6 +33,7 @@ import {
   ArrowUp,
   MousePointerClick,
   List,
+Bot,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -99,6 +100,11 @@ interface StepMeta {
 
 const STEP_META: Record<AutomationStepType, StepMeta> = {
   send_message: { label: "send_message", icon: MessageSquare, border: "border-l-primary" },
+  send_media: {
+  label: "send_media",
+  icon: FileText,
+  border: "border-l-primary",
+},
   send_buttons: { label: "send_buttons", icon: MousePointerClick, border: "border-l-primary" },
   send_list: { label: "send_list", icon: List, border: "border-l-primary" },
   send_template: { label: "send_template", icon: FileText, border: "border-l-primary" },
@@ -109,12 +115,18 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   create_deal: { label: "create_deal", icon: Briefcase, border: "border-l-primary" },
   wait: { label: "wait", icon: Hourglass, border: "border-l-border" },
   condition: { label: "condition", icon: GitBranch, border: "border-l-amber-500" },
+  ai_agent: {
+  label: "ai_agent",
+  icon: Bot,
+  border: "border-l-emerald-500",
+},
   send_webhook: { label: "send_webhook", icon: Webhook, border: "border-l-primary" },
   close_conversation: { label: "close_conversation", icon: CircleSlash, border: "border-l-primary" },
 }
 
 const ADDABLE_STEPS: AutomationStepType[] = [
   "send_message",
+  "send_media",
   "send_buttons",
   "send_list",
   "send_template",
@@ -125,6 +137,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "create_deal",
   "wait",
   "condition",
+  "ai_agent",
   "send_webhook",
   "close_conversation",
 ]
@@ -164,11 +177,21 @@ function asInteractive(cfg: Record<string, unknown>): InteractiveMessagePayload 
 function blankConfig(type: AutomationStepType): Record<string, unknown> {
   switch (type) {
     case "send_message":
-      return { text: "" }
-    case "send_buttons":
-      return toStepConfig(blankButtonsPayload())
-    case "send_list":
-      return toStepConfig(blankListPayload())
+  return { text: "" }
+
+case "send_media":
+  return {
+    media_type: "image",
+    url: "",
+    caption: "",
+    filename: "",
+  }
+
+case "send_buttons":
+  return toStepConfig(blankButtonsPayload())
+
+case "send_list":
+  return toStepConfig(blankListPayload())
     case "send_template":
       return { template_name: "", language: "en_US" }
     case "add_tag":
@@ -183,8 +206,17 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
     case "wait":
       return { amount: 1, unit: "hours" }
     case "condition":
-      return { subject: "tag_presence", operand: "", value: "" }
-    case "send_webhook":
+  return { subject: "tag_presence", operand: "", value: "" }
+
+case "ai_agent":
+  return {
+    agent_id: "",
+    prompt: "",
+    save_memory: true,
+    handoff_on_failure: true,
+  }
+
+case "send_webhook":
       return { url: "", headers: {}, body_template: "" }
     case "close_conversation":
       return {}
@@ -1292,6 +1324,59 @@ function StepEditor({
           />
         </FieldBlock>
       )
+      case "send_media":
+  return (
+    <>
+      <FieldBlock label="Media Type">
+        <select
+          value={(cfg.media_type as string) ?? "image"}
+          onChange={(e) => set({ media_type: e.target.value })}
+          className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm"
+        >
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+          <option value="audio">Audio</option>
+          <option value="document">Document</option>
+        </select>
+      </FieldBlock>
+
+      <FieldBlock
+  label={
+    cfg.media_type === "image"
+      ? "Image URL"
+      : cfg.media_type === "video"
+      ? "Video URL"
+      : cfg.media_type === "audio"
+      ? "Audio URL"
+      : "Document URL"
+  }
+>
+  <Input
+    value={(cfg.url as string) ?? ""}
+    onChange={(e) => set({ url: e.target.value })}
+    placeholder="https://..."
+  />
+</FieldBlock>
+
+      {cfg.media_type !== "audio" && (
+  <FieldBlock label="Caption">
+    <Textarea
+      value={(cfg.caption as string) ?? ""}
+      onChange={(e) => set({ caption: e.target.value })}
+    />
+  </FieldBlock>
+)}
+
+{cfg.media_type === "document" && (
+  <FieldBlock label="Filename">
+    <Input
+      value={(cfg.filename as string) ?? ""}
+      onChange={(e) => set({ filename: e.target.value })}
+    />
+  </FieldBlock>
+)}
+    </>
+  )
     case "send_buttons":
     case "send_list":
       // The whole step_config IS the interactive payload; the shared
@@ -1461,6 +1546,41 @@ function StepEditor({
           )}
         </>
       )
+      case "ai_agent":
+  return (
+    <>
+      <FieldBlock label="Agente IA">
+        <Input
+          value={(cfg.agent_id as string) ?? ""}
+          onChange={(e) => set({ agent_id: e.target.value })}
+          placeholder="ID del agente"
+          className="bg-muted text-foreground"
+        />
+      </FieldBlock>
+
+      <FieldBlock label="Prompt">
+        <Textarea
+          value={(cfg.prompt as string) ?? ""}
+          onChange={(e) => set({ prompt: e.target.value })}
+          placeholder="Instrucciones para el agente..."
+        />
+      </FieldBlock>
+
+      <FieldBlock label="Guardar memoria">
+        <Switch
+          checked={Boolean(cfg.save_memory)}
+          onCheckedChange={(v) => set({ save_memory: v })}
+        />
+      </FieldBlock>
+
+      <FieldBlock label="Derivar si falla">
+        <Switch
+          checked={Boolean(cfg.handoff_on_failure)}
+          onCheckedChange={(v) => set({ handoff_on_failure: v })}
+        />
+      </FieldBlock>
+    </>
+  )
     case "send_webhook":
       return (
         <>
@@ -1519,6 +1639,8 @@ function previewFor(step: BuilderStep): string {
       return `${step.step_config.amount ?? "?"} ${step.step_config.unit ?? ""}`
     case "condition":
       return `when ${step.step_config.subject ?? "?"}`
+      case "ai_agent":
+  return (step.step_config.agent_id as string) || "AI Agent"
     case "send_webhook":
       return (step.step_config.url as string) || "no url"
     default:

@@ -443,6 +443,7 @@ export type AutomationTriggerType =
 
 export type AutomationStepType =
   | 'send_message'
+  | 'send_media'
   | 'send_buttons'
   | 'send_list'
   | 'send_template'
@@ -453,6 +454,7 @@ export type AutomationStepType =
   | 'create_deal'
   | 'wait'
   | 'condition'
+  | 'ai_agent'
   | 'send_webhook'
   | 'close_conversation';
 
@@ -489,6 +491,13 @@ export type AutomationTriggerConfig =
 
 export interface SendMessageStepConfig {
   text: string;
+}
+
+export interface SendMediaStepConfig {
+  media_type: "image" | "video" | "audio" | "document";
+  url: string;
+  caption?: string;
+  filename?: string;
 }
 
 /**
@@ -561,6 +570,7 @@ export interface SendWebhookStepConfig {
 
 export type AutomationStepConfig =
   | SendMessageStepConfig
+  | SendMediaStepConfig
   | SendButtonsStepConfig
   | SendListStepConfig
   | SendTemplateStepConfig

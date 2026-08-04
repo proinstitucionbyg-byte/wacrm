@@ -823,20 +823,22 @@
     },
     "builder": {
       "steps": {
-        "send_message": "Send Message",
-        "send_buttons": "Send Buttons",
-        "send_list": "Send List",
-        "send_template": "Send Template",
-        "add_tag": "Add Tag",
-        "remove_tag": "Remove Tag",
-        "assign_conversation": "Assign Conversation",
-        "update_contact_field": "Update Contact Field",
-        "create_deal": "Create Deal",
-        "wait": "Wait",
-        "condition": "Condition (If/Else)",
-        "send_webhook": "Send Webhook",
-        "close_conversation": "Close Conversation"
-      },
+  "send_message": "Send Message",
+  "send_media": "Send Media",
+  "send_buttons": "Send Buttons",
+  "send_list": "Send List",
+  "send_template": "Send Template",
+  "add_tag": "Add Tag",
+  "remove_tag": "Remove Tag",
+  "assign_conversation": "Assign Conversation",
+  "update_contact_field": "Update Contact Field",
+  "create_deal": "Create Deal",
+  "wait": "Wait",
+  "condition": "Condition (If/Else)",
+  "send_webhook": "Send Webhook",
+  "close_conversation": "Close Conversation",
+  "ai_agent": "AI Agent"
+},
       "triggers": {
         "new_message_received": {
           "label": "New Message Received",
@@ -932,6 +934,7 @@
         "no": "No"
       },
       "addStep": "Add step",
+      "delete": "Delete",
       "config": {
         "messageText": "Message text",
         "placeholderMessageText": "Hi! Thanks for reaching out…",

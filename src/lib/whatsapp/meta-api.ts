@@ -56,6 +56,7 @@ export async function verifyPhoneNumber(
 ): Promise<MetaPhoneInfo> {
   const { phoneNumberId, accessToken } = args
   const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating`
+  console.log("ENTRÓ A sendMediaMessage")
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -321,11 +322,22 @@ export async function sendMediaMessage(
     },
     body: JSON.stringify(body),
   })
-  if (!response.ok) {
-    await throwMetaError(response, `Meta API error: ${response.status}`)
-  }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  const responseText = await response.text()
+
+console.log("================================")
+console.log("STATUS:", response.status)
+console.log(responseText)
+console.log("================================")
+
+if (!response.ok) {
+  throw new Error(responseText)
+}
+
+const data = JSON.parse(responseText)
+
+return {
+  messageId: data.messages[0].id,
+}
 }
 
 import type { MessageTemplate } from '@/types'
