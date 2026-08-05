@@ -24,7 +24,7 @@ export function InteractivePreview({
   return (
     <div
       className={cn(
-        "w-full max-w-[260px] overflow-hidden rounded-lg bg-card text-foreground shadow-sm ring-1 ring-border",
+        "w-full max-w-[340px] overflow-hidden rounded-lg bg-card text-foreground shadow-sm ring-1 ring-border",
         className,
       )}
     >
@@ -56,7 +56,9 @@ export function InteractivePreview({
               className="flex items-center justify-center gap-1.5 border-t border-border py-2 text-sm font-medium text-primary first:border-t-0"
             >
               <Reply className="h-3.5 w-3.5" />
-              <span className="truncate">{b.title || "Button"}</span>
+              <span className="text-center break-words px-2">
+  {b.title || "Button"}
+</span>
             </button>
           ))}
         </div>
