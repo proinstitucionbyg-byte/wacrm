@@ -79,14 +79,15 @@ export async function PATCH(
 
   const update: Record<string, unknown> = {}
   for (const k of [
-    'name',
-    'description',
-    'trigger_type',
-    'trigger_config',
-    'is_active',
-  ] as const) {
-    if (k in body) update[k] = body[k]
-  }
+  'name',
+  'description',
+  'trigger_type',
+  'trigger_config',
+  'is_active',
+  'folder_id',
+] as const) {
+  if (k in body) update[k] = body[k]
+}
 
   // If this PATCH leaves the automation active (either explicitly
   // activating it OR editing an already-active one), validate the

@@ -68,6 +68,10 @@ export interface DispatchInput {
  */
 export async function runAutomationsForTrigger(input: DispatchInput): Promise<void> {
   try {
+    console.log("========== AUTOMATION START ==========");
+console.log("Trigger:", input.triggerType);
+console.log("Contact:", input.contactId);
+console.log("Account:", input.accountId);
     const db = supabaseAdmin()
 
     // Tenant isolation. `contactId` can be caller-supplied (the manual

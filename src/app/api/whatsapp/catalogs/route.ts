@@ -56,7 +56,7 @@ export async function GET() {
     const accessToken = decrypt(config.access_token);
 
     const catalogs = await getCatalogs({
-      businessId: config.waba_id,
+      businessId: process.env.META_BUSINESS_ID!,
       accessToken,
     });
 

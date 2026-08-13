@@ -13,6 +13,7 @@ import type { AutomationStepType, AutomationTriggerType } from "@/types"
 
 export default function NewAutomationPage() {
   const params = useSearchParams()
+  const folderId = params.get("folder")
   const template = params.get("template") as TemplateSlug | null
 
   const initial: BuilderInitial = useMemo(() => {

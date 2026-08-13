@@ -29,6 +29,7 @@ import {
   Mail,
   MailX,
   Plus,
+  Settings,
   Trash2,
   UsersRound,
 } from 'lucide-react';
@@ -136,6 +137,43 @@ export function MembersTab() {
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
+  const [permissionsMember, setPermissionsMember] = useState<Member | null>(null);
+  const [memberPermissions, setMemberPermissions] = useState<
+  {
+    permission_id: string;
+    module: string;
+    action: string;
+    label: string;
+    description: string | null;
+    allowed: boolean;
+    source: string;
+  }[]
+>([]);
+const [permissionsLoading, setPermissionsLoading] = useState(false);
+async function loadMemberPermissions(userId: string) {
+  setPermissionsLoading(true);
+
+  try {
+    const res = await fetch(`/api/account/members/${userId}/permissions`, {
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      toast.error(payload.error || 'No se pudieron cargar los permisos');
+      return;
+    }
+
+    const data = await res.json();
+
+    setMemberPermissions(data.permissions ?? []);
+  } catch (err) {
+    console.error('[MembersTab] permissions load error:', err);
+    toast.error('No se pudieron cargar los permisos');
+  } finally {
+    setPermissionsLoading(false);
+  }
+}
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
@@ -446,7 +484,20 @@ export function MembersTab() {
                         {tRoles(member.role)}
                       </span>
                     )}
-
+{canManageMembers && !isOwnerRow && !isSelf && (
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={async () => {
+      setPermissionsMember(member);
+      await loadMemberPermissions(member.user_id);
+    }}
+    disabled={isBusy}
+    title="Permisos"
+  >
+    <Settings className="size-4" />
+  </Button>
+)}
                     {/* Remove. Admin+ only; never on the owner row;
                         never on yourself. Pre-polish styling was
                         neutral-default + red-on-hover — the
@@ -610,6 +661,107 @@ export function MembersTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog
+  open={permissionsMember !== null}
+  onOpenChange={(open) => {
+    if (!open) setPermissionsMember(null);
+  }}
+>
+  <DialogContent className="bg-popover border-border sm:max-w-lg">
+    <DialogHeader>
+      <DialogTitle className="text-popover-foreground">
+        Permisos
+      </DialogTitle>
+
+      <DialogDescription className="text-muted-foreground">
+        Configura los permisos de{' '}
+        <strong>
+          {permissionsMember?.full_name || permissionsMember?.email}
+        </strong>
+      </DialogDescription>
+    </DialogHeader>
+
+    <div className="py-4 space-y-3">
+  {permissionsLoading ? (
+    <div className="flex items-center justify-center py-6">
+      <Loader2 className="size-5 animate-spin" />
+    </div>
+  ) : (
+    memberPermissions.map((permission) => (
+      <div
+        key={permission.permission_id}
+        className="flex items-center justify-between gap-4 rounded-md border border-border p-3"
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">
+            {permission.label}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {permission.description}
+          </p>
+        </div>
+
+        <input
+          type="checkbox"
+          checked={permission.allowed}
+          onChange={async (e) => {
+            if (!permissionsMember) return;
+
+            const allowed = e.target.checked;
+
+            try {
+              const res = await fetch(
+                `/api/account/members/${permissionsMember.user_id}/permissions`,
+                {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    module: permission.module,
+                    action: permission.action,
+                    allowed,
+                  }),
+                },
+              );
+
+              if (!res.ok) {
+                const payload = await res.json().catch(() => ({}));
+                toast.error(
+                  payload.error || 'No se pudo actualizar el permiso',
+                );
+                return;
+              }
+
+              setMemberPermissions((prev) =>
+                prev.map((p) =>
+                  p.permission_id === permission.permission_id
+                    ? { ...p, allowed, source: 'override' }
+                    : p,
+                ),
+              );
+
+              toast.success('Permiso actualizado');
+            } catch (err) {
+              console.error('[MembersTab] permission update error:', err);
+              toast.error('No se pudo actualizar el permiso');
+            }
+          }}
+          className="size-4 shrink-0"
+        />
+      </div>
+    ))
+  )}
+</div>
+
+    <DialogFooter>
+      <Button
+        variant="outline"
+        onClick={() => setPermissionsMember(null)}
+      >
+        Cerrar
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
     </section>
   );
 }

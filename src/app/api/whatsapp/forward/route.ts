@@ -69,7 +69,7 @@ if (
     conversationId,
     messageType: message.content_type,
     contentText: message.content_text,
-    mediaUrl,
+    mediaUrl: message.media_url,
     templateName: message.template_name,
     interactivePayload: message.interactive_payload,
     replyToMessageId: message.reply_to_message_id,

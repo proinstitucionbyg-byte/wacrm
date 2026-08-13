@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -657,6 +657,8 @@ function SendTemplateFields({
 
 export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+const folderId = searchParams.get("folder")
   const t = useTranslations("Automations.builder")
   const isEditing = !!initial.id
   const [state, setState] = useState<BuilderInitial>(initial)
@@ -701,7 +703,8 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         trigger_type: state.trigger_type,
         trigger_config: state.trigger_config,
         is_active: state.is_active,
-        steps: toApiSteps(state.steps),
+folder_id: folderId || null,
+steps: toApiSteps(state.steps),
       }
 
       const res = isEditing
