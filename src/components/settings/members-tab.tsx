@@ -681,7 +681,7 @@ async function loadMemberPermissions(userId: string) {
       </DialogDescription>
     </DialogHeader>
 
-    <div className="py-4 space-y-3">
+    <div className="max-h-[60vh] overflow-y-auto py-4 pr-2 space-y-3">
   {permissionsLoading ? (
     <div className="flex items-center justify-center py-6">
       <Loader2 className="size-5 animate-spin" />

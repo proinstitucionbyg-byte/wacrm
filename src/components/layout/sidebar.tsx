@@ -158,7 +158,12 @@ const navItems: NavItem[] = [
 ];
 
 const bottomNavItems = [
-  { href: "/settings", labelKey: "settings", icon: Settings },
+  {
+    href: "/settings",
+    labelKey: "settings",
+    icon: Settings,
+    permission: ["settings", "view"] as [string, string],
+  },
 ];
 
 interface SidebarProps {
@@ -353,7 +358,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <div className="my-4 border-t border-border" />
 
           <ul className="flex flex-col gap-1">
-            {bottomNavItems.map((item) => {
+  {bottomNavItems
+    .filter(
+      (item) =>
+        !item.permission || can(item.permission[0], item.permission[1]),
+    )
+    .map((item) => {
               const isActive = pathname.startsWith(item.href);
               return (
                 <li key={item.href}>
