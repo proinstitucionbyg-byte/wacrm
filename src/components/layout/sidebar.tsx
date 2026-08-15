@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { useMemberPermissions } from "@/hooks/use-member-permissions";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import {
@@ -84,6 +85,7 @@ interface NavItem {
   href: string;
   labelKey: string;
   icon: typeof LayoutDashboard;
+    permission?: [string, string];
   /**
    * When true, the nav row renders a small "Beta" chip after the label.
    * Purely informational — doesn't affect routing or access.
@@ -92,16 +94,67 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
-  { href: "/inbox", labelKey: "inbox", icon: MessageSquare },
-  { href: "/notifications", labelKey: "notifications", icon: Bell },
-  { href: "/contacts", labelKey: "contacts", icon: Users },
-  { href: "/pipelines", labelKey: "pipelines", icon: GitBranch },
-  { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
-  { href: "/automations", labelKey: "automations", icon: Zap },
-  { href: "/catalogs", labelKey: "catalogs", icon: Package },
-  { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
-  { href: "/agents", labelKey: "aiAgents", icon: Bot },
+  {
+    href: "/dashboard",
+    labelKey: "dashboard",
+    icon: LayoutDashboard,
+    permission: ["dashboard", "view"],
+  },
+  {
+    href: "/inbox",
+    labelKey: "inbox",
+    icon: MessageSquare,
+    permission: ["inbox", "view"],
+  },
+  {
+    href: "/notifications",
+    labelKey: "notifications",
+    icon: Bell,
+    permission: ["notifications", "view"],
+  },
+  {
+    href: "/contacts",
+    labelKey: "contacts",
+    icon: Users,
+    permission: ["contacts", "view"],
+  },
+  {
+    href: "/pipelines",
+    labelKey: "pipelines",
+    icon: GitBranch,
+    permission: ["pipelines", "view"],
+  },
+  {
+    href: "/broadcasts",
+    labelKey: "broadcasts",
+    icon: Radio,
+    permission: ["broadcasts", "view"],
+  },
+  {
+    href: "/automations",
+    labelKey: "automations",
+    icon: Zap,
+    permission: ["automations", "view"],
+  },
+  {
+    href: "/catalogs",
+    labelKey: "catalogs",
+    icon: Package,
+    permission: ["catalogs", "view"],
+  },
+  {
+    href: "/flows",
+    labelKey: "flows",
+    icon: Workflow,
+    beta: true,
+    permission: ["flows", "view"],
+  },
+  {
+    href: "/agents",
+    labelKey: "aiAgents",
+    icon: Bot,
+    permission: ["ai_agents", "view"],
+  },
 ];
 
 const bottomNavItems = [
@@ -120,6 +173,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const { can, loading: permissionsLoading } = useMemberPermissions();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   // Only surface the account-name strip when it actually carries
@@ -216,7 +270,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
+            {navItems
+  .filter(
+    (item) =>
+      !item.permission || can(item.permission[0], item.permission[1]),
+  )
+  .map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));

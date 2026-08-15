@@ -67,8 +67,11 @@ interface ContactWithTags extends Contact {
 export default function ContactsPage() {
   const t = useTranslations('Contacts.page');
   const supabase = createClient();
-  const canEdit = useCan('send-messages');
-  const canEditSettings = useCan('edit-settings');
+  const canCreate = useCan('contacts.create');
+const canEdit = useCan('contacts.edit');
+const canDelete = useCan('contacts.delete');
+const canImport = useCan('contacts.import');
+const canEditSettings = useCan('contacts.configure');
 
   const [contacts, setContacts] = useState<ContactWithTags[]>([]);
   const [loading, setLoading] = useState(true);
@@ -362,7 +365,7 @@ export default function ContactsPage() {
           )}
           <GatedButton
             variant="outline"
-            canAct={canEdit}
+            canAct={canImport}
             gateReason="add or import contacts"
             onClick={() => setImportOpen(true)}
             className="border-border text-muted-foreground hover:bg-muted"
@@ -371,7 +374,7 @@ export default function ContactsPage() {
             {t('importBtn')}
           </GatedButton>
           <GatedButton
-            canAct={canEdit}
+            canAct={canCreate}
             gateReason="add or import contacts"
             onClick={openAddForm}
             className="bg-primary hover:bg-primary/90 text-primary-foreground"
@@ -516,7 +519,7 @@ export default function ContactsPage() {
             <GatedButton
               variant="destructive"
               size="sm"
-              canAct={canEdit}
+              canAct={canDelete}
               gateReason="delete contacts"
               onClick={() => setBulkDeleteOpen(true)}
             >
@@ -572,7 +575,7 @@ export default function ContactsPage() {
                     </p>
                     {!hasActiveFilters && (
                       <GatedButton
-                        canAct={canEdit}
+                        canAct={canCreate}
                         gateReason="add or import contacts"
                         variant="outline"
                         size="sm"
@@ -662,6 +665,7 @@ export default function ContactsPage() {
                         align="end"
                         className="bg-popover border-border"
                       >
+                      {canEdit && (
                         <DropdownMenuItem
                           onClick={(e) => {
                             e.stopPropagation();
@@ -672,7 +676,9 @@ export default function ContactsPage() {
                           <Pencil className="size-4" />
                           {t('editAction')}
                         </DropdownMenuItem>
+                        )}
                         <DropdownMenuSeparator className="bg-border" />
+                        {canDelete && (
                         <DropdownMenuItem
                           variant="destructive"
                           onClick={(e) => {
@@ -683,6 +689,7 @@ export default function ContactsPage() {
                           <Trash2 className="size-4" />
                           {t('deleteAction')}
                         </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

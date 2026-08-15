@@ -70,7 +70,74 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected pages - redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings']
+  const protectedPaths = [
+  '/dashboard',
+  '/inbox',
+  '/contacts',
+  '/pipelines',
+  '/broadcasts',
+  '/automations',
+  '/catalogs',
+  '/agents',
+  '/notifications',
+  '/settings',
+]
+    // ============================================================
+  // MEMBER PERMISSIONS — BLOQUEO REAL DE RUTAS
+  // ============================================================
+
+  const permissionRoutes: Record<string, [string, string]> = {
+    '/inbox': ['inbox', 'view'],
+    '/contacts': ['contacts', 'view'],
+    '/pipelines': ['pipelines', 'view'],
+    '/broadcasts': ['broadcasts', 'view'],
+    '/automations': ['automations', 'view'],
+    '/catalogs': ['catalogs', 'view'],
+    '/agents': ['ai_agents', 'view'],
+    '/notifications': ['notifications', 'view'],
+  }
+
+  const matchedPermissionRoute = Object.entries(permissionRoutes)
+    .find(([path]) =>
+      request.nextUrl.pathname === path ||
+      request.nextUrl.pathname.startsWith(`${path}/`)
+    )
+
+  if (user && matchedPermissionRoute) {
+    const [, [module, action]] = matchedPermissionRoute
+
+    const { data: hasPermission, error: permissionError } =
+      await supabase.rpc('has_member_permission', {
+        p_user_id: user.id,
+        p_module: module,
+        p_action: action,
+      })
+
+    if (permissionError || !hasPermission) {
+      const url = request.nextUrl.clone()
+
+      // Si no tiene acceso a la ruta solicitada,
+      // intentamos enviarlo a Contactos si tiene acceso.
+      const { data: canViewContacts } = await supabase.rpc(
+        'has_member_permission',
+        {
+          p_user_id: user.id,
+          p_module: 'contacts',
+          p_action: 'view',
+        }
+      )
+
+      if (canViewContacts) {
+        url.pathname = '/contacts'
+      } else {
+        url.pathname = '/login'
+      }
+
+      url.search = ''
+
+      return withRefreshedCookies(NextResponse.redirect(url))
+    }
+  }
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

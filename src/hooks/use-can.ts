@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/hooks/use-auth";
+import { useMemberPermissions } from "@/hooks/use-member-permissions";
 import {
   canDeleteAccount,
   canEditSettings,
@@ -22,7 +23,8 @@ export type CanAction =
   | "send-messages"
   | "view-only"
   | "delete-account"
-  | "transfer-ownership";
+  | "transfer-ownership"
+    | `${string}.${string}`;
 
 /**
  * Inline alternative to `<RequireRole>` for places that need a
@@ -39,7 +41,18 @@ export type CanAction =
  */
 export function useCan(action: CanAction): boolean {
   const { profileLoading, accountRole } = useAuth();
+    const {
+    can: canMemberPermission,
+    loading: permissionsLoading,
+  } = useMemberPermissions();
   if (profileLoading || !accountRole) return false;
+    if (action.includes(".")) {
+    if (permissionsLoading) return false;
+
+    const [module, permissionAction] = action.split(".", 2);
+
+    return canMemberPermission(module, permissionAction);
+  }
 
   switch (action) {
     case "manage-members":
