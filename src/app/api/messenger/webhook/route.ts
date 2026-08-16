@@ -165,7 +165,7 @@ export async function POST(request: Request) {
         .from("messages")
         .insert({
           conversation_id: conversation.id,
-          sender_type: "contact",
+          sender_type: "customer",
           content_type: "text",
           content_text: text,
           message_id: messageId,
