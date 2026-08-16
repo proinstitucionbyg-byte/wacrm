@@ -169,7 +169,7 @@ export async function POST(request: Request) {
           content_type: "text",
           content_text: text,
           message_id: messageId,
-          status: "received",
+          status: "delivered",
         });
 
       if (messageError) {
