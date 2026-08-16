@@ -11,15 +11,10 @@ import {
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
 
-// The dashboard's outbound-send endpoint. It owns auth, per-user rate
-// limiting, and the two ways the UI targets a thread — an existing
-// `conversation_id` (inbox) or a `contact_id` (Contact detail →
-// find-or-create the conversation). The actual Meta plumbing (validate
-// → send → persist → pause flows) lives in the shared
-// `sendMessageToConversation` core, which the public `/api/v1/messages`
-// endpoint reuses. This route is a thin adapter: resolve the
-// conversation, delegate, then map `SendMessageError` back onto the
-// dashboard's internal `{ error }` shape.
+const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION || 'v23.0'
+
+type Channel = 'whatsapp' | 'messenger' | 'instagram'
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -36,35 +31,30 @@ export async function POST(request: Request) {
       )
     }
 
-    // Per-user rate limit. Bucket key is scoped to this route so
-    // `/broadcast` has an independent budget.
     const limit = checkRateLimit(`send:${user.id}`, RATE_LIMITS.send)
+
     if (!limit.success) {
       return rateLimitResponse(limit)
     }
 
-    // Resolve the caller's account_id. Every downstream lookup
-    // (conversation, whatsapp_config, message_templates) is account-
-    // scoped post-multi-user, so the previous `user_id` filters
-    // returned nothing for teammates who didn't author the row.
     const { data: profile } = await supabase
       .from('profiles')
       .select('account_id')
       .eq('user_id', user.id)
       .maybeSingle()
+
     const accountId = profile?.account_id as string | undefined
+
     if (!accountId) {
       return NextResponse.json(
         { error: 'Your profile is not linked to an account.' },
-        { status: 403 },
+        { status: 403 }
       )
     }
 
     const body = await request.json()
+
     const {
-      // `conversation_id` targets an existing thread (inbox). `contact_id`
-      // lets a caller initiate from a contact that may have no conversation
-      // yet (Contact detail → Send template) — we find-or-create one below.
       conversation_id: conversationIdInput,
       contact_id,
       message_type,
@@ -89,9 +79,6 @@ export async function POST(request: Request) {
       )
     }
 
-    // Validate the message shape up front — before the contact_id path
-    // finds-or-creates a conversation — so an invalid payload 400s
-    // without leaving an orphan empty conversation behind.
     try {
       validateSendMessageParams({
         messageType: message_type,
@@ -102,35 +89,38 @@ export async function POST(request: Request) {
       })
     } catch (err) {
       if (err instanceof SendMessageError) {
-        return NextResponse.json({ error: err.message }, { status: err.status })
+        return NextResponse.json(
+          { error: err.message },
+          { status: err.status }
+        )
       }
+
       throw err
     }
 
-    // Resolve the target conversation. With `conversation_id` we load the
-    // existing thread; with `contact_id` we find-or-create one for the
-    // contact so a business-initiated template send (Contact detail view)
-    // reuses the shared send core below.
+    // ------------------------------------------------------------
+    // 1. Resolve conversation
+    // ------------------------------------------------------------
+
     let conversationId: string | null = null
 
     if (conversationIdInput) {
-      const { data, error: convError } = await supabase
+      const { data, error } = await supabase
         .from('conversations')
         .select('id')
         .eq('id', conversationIdInput)
         .eq('account_id', accountId)
         .single()
 
-      if (convError || !data) {
+      if (error || !data) {
         return NextResponse.json(
           { error: 'Conversation not found' },
           { status: 404 }
         )
       }
+
       conversationId = data.id
     } else {
-      // contact_id path: verify the contact is in this account first so a
-      // caller can't open a conversation against someone else's contact.
       const { data: contactRow, error: contactErr } = await supabase
         .from('contacts')
         .select('id')
@@ -145,19 +135,36 @@ export async function POST(request: Request) {
         )
       }
 
-      const resolved = await findOrCreateConversation(
-        supabase,
-        accountId,
-        user.id,
-        contact_id
-      )
-      if (!resolved) {
-        return NextResponse.json(
-          { error: 'Failed to open a conversation for this contact' },
-          { status: 500 }
-        )
+      const { data: existing } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('contact_id', contact_id)
+        .maybeSingle()
+
+      if (existing) {
+        conversationId = existing.id
+      } else {
+        const { data: created, error: createError } =
+          await supabase
+            .from('conversations')
+            .insert({
+              account_id: accountId,
+              user_id: user.id,
+              contact_id,
+            })
+            .select('id')
+            .single()
+
+        if (createError || !created) {
+          return NextResponse.json(
+            { error: 'Failed to create conversation' },
+            { status: 500 }
+          )
+        }
+
+        conversationId = created.id
       }
-      conversationId = resolved
     }
 
     if (!conversationId) {
@@ -167,41 +174,193 @@ export async function POST(request: Request) {
       )
     }
 
-    // Delegate to the shared send core (validates, sends to Meta with
-    // phone-variant retry, persists, pauses active flow runs). Its
-    // `SendMessageError` carries a machine code + HTTP status; the
-    // dashboard maps it to the internal `{ error }` shape.
-    try {
-      const result = await sendMessageToConversation(supabase, accountId, {
-        conversationId,
+    // ------------------------------------------------------------
+    // 2. Resolve contact + channel
+    // ------------------------------------------------------------
+
+    const { data: conversation, error: conversationError } =
+      await supabase
+        .from('conversations')
+        .select(`
+          id,
+          contact_id,
+          contacts (
+            id,
+            channel,
+            external_id,
+            name
+          )
+        `)
+        .eq('id', conversationId)
+        .eq('account_id', accountId)
+        .single()
+
+    if (conversationError || !conversation) {
+      return NextResponse.json(
+        { error: 'Conversation not found' },
+        { status: 404 }
+      )
+    }
+
+    const contact = Array.isArray(conversation.contacts)
+      ? conversation.contacts[0]
+      : conversation.contacts
+
+    const channel = contact?.channel as Channel | undefined
+    const externalId = contact?.external_id as string | undefined
+
+    if (!channel) {
+      return NextResponse.json(
+        { error: 'Conversation has no channel' },
+        { status: 400 }
+      )
+    }
+
+    // ------------------------------------------------------------
+    // 3. WHATSAPP
+    // ------------------------------------------------------------
+
+    if (channel === 'whatsapp') {
+      try {
+        const result = await sendMessageToConversation(
+          supabase,
+          accountId,
+          {
+            conversationId,
+            messageType: message_type,
+            contentText: content_text,
+            mediaUrl: media_url,
+            filename,
+            templateName: template_name,
+            templateLanguage: template_language,
+            templateParams: template_params,
+            templateMessageParams: template_message_params,
+            interactivePayload: interactive_payload,
+            replyToMessageId: reply_to_message_id,
+          }
+        )
+
+        return NextResponse.json({
+          success: true,
+          channel: 'whatsapp',
+          message_id: result.messageId,
+          whatsapp_message_id: result.whatsappMessageId,
+        })
+      } catch (err) {
+        if (err instanceof SendMessageError) {
+          return NextResponse.json(
+            { error: err.message },
+            { status: err.status }
+          )
+        }
+
+        throw err
+      }
+    }
+
+    // ------------------------------------------------------------
+    // 4. MESSENGER
+    // ------------------------------------------------------------
+
+    if (channel === 'messenger') {
+      if (!externalId) {
+        return NextResponse.json(
+          { error: 'Messenger contact has no external_id' },
+          { status: 400 }
+        )
+      }
+
+      const token = process.env.MESSENGER_PAGE_ACCESS_TOKEN
+
+      if (!token) {
+        return NextResponse.json(
+          { error: 'MESSENGER_PAGE_ACCESS_TOKEN is not configured' },
+          { status: 500 }
+        )
+      }
+
+      const result = await sendMessengerMessage({
+        recipientId: externalId,
+        accessToken: token,
         messageType: message_type,
+        text: content_text,
+        mediaUrl: media_url,
+      })
+
+      await saveOutboundMessage({
+        supabase,
+        conversationId,
+        contentType: message_type,
         contentText: content_text,
         mediaUrl: media_url,
-        filename,
-        templateName: template_name,
-        templateLanguage: template_language,
-        templateParams: template_params,
-        templateMessageParams: template_message_params,
-        interactivePayload: interactive_payload,
-        replyToMessageId: reply_to_message_id,
+        messageId: result.messageId,
       })
 
       return NextResponse.json({
         success: true,
+        channel: 'messenger',
         message_id: result.messageId,
-        whatsapp_message_id: result.whatsappMessageId,
       })
-    } catch (err) {
-      if (err instanceof SendMessageError) {
+    }
+
+    // ------------------------------------------------------------
+    // 5. INSTAGRAM
+    // ------------------------------------------------------------
+
+    if (channel === 'instagram') {
+      if (!externalId) {
         return NextResponse.json(
-          { error: err.message },
-          { status: err.status }
+          { error: 'Instagram contact has no external_id' },
+          { status: 400 }
         )
       }
-      throw err
+
+      const token = process.env.INSTAGRAM_ACCESS_TOKEN
+      const instagramAccountId =
+        process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID
+
+      if (!token || !instagramAccountId) {
+        return NextResponse.json(
+          {
+            error:
+              'Instagram credentials are not configured',
+          },
+          { status: 500 }
+        )
+      }
+
+      const result = await sendInstagramMessage({
+        instagramAccountId,
+        recipientId: externalId,
+        accessToken: token,
+        messageType: message_type,
+        text: content_text,
+        mediaUrl: media_url,
+      })
+
+      await saveOutboundMessage({
+        supabase,
+        conversationId,
+        contentType: message_type,
+        contentText: content_text,
+        mediaUrl: media_url,
+        messageId: result.messageId,
+      })
+
+      return NextResponse.json({
+        success: true,
+        channel: 'instagram',
+        message_id: result.messageId,
+      })
     }
+
+    return NextResponse.json(
+      { error: `Unsupported channel: ${channel}` },
+      { status: 400 }
+    )
   } catch (error) {
-    console.error('Error in WhatsApp send POST:', error)
+    console.error('Error in unified Meta send:', error)
+
     return NextResponse.json(
       { error: 'Failed to send message' },
       { status: 500 }
@@ -209,44 +368,204 @@ export async function POST(request: Request) {
   }
 }
 
-type SendSupabase = Awaited<ReturnType<typeof createClient>>
+// ============================================================
+// Messenger
+// ============================================================
 
-/**
- * Return the contact's conversation id in this account, creating one if
- * it doesn't exist yet. Mirrors the webhook's find-or-create so an
- * inbound-then-outbound (or outbound-first) sequence converges on a single
- * thread per contact. Runs under the caller's RLS — the conversations_insert
- * policy requires account agent membership, which the caller already is.
- */
-async function findOrCreateConversation(
-  supabase: SendSupabase,
-  accountId: string,
-  userId: string,
-  contactId: string,
-): Promise<string | null> {
-  const { data: existing } = await supabase
-    .from('conversations')
-    .select('id')
-    .eq('account_id', accountId)
-    .eq('contact_id', contactId)
-    .maybeSingle()
+async function sendMessengerMessage({
+  recipientId,
+  accessToken,
+  messageType,
+  text,
+  mediaUrl,
+}: {
+  recipientId: string
+  accessToken: string
+  messageType: string
+  text?: string
+  mediaUrl?: string
+}) {
+  const url =
+    `https://graph.facebook.com/${GRAPH_VERSION}/me/messages` +
+    `?access_token=${encodeURIComponent(accessToken)}`
 
-  if (existing) return existing.id
+  let message: Record<string, unknown>
 
-  const { data: created, error } = await supabase
-    .from('conversations')
-    .insert({
-      account_id: accountId,
-      user_id: userId,
-      contact_id: contactId,
-    })
-    .select('id')
-    .single()
+  if (messageType === 'text') {
+    message = {
+      text: text || '',
+    }
+  } else if (
+    mediaUrl &&
+    ['image', 'video', 'audio', 'file'].includes(messageType)
+  ) {
+    const attachmentType =
+      messageType === 'file' ? 'file' : messageType
 
-  if (error) {
-    console.error('Error creating conversation for contact send:', error.message)
-    return null
+    message = {
+      attachment: {
+        type: attachmentType,
+        payload: {
+          url: mediaUrl,
+          is_reusable: false,
+        },
+      },
+    }
+  } else {
+    throw new Error(
+      `Messenger does not support message type "${messageType}" yet`
+    )
   }
 
-  return created.id
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: {
+        id: recipientId,
+      },
+      message,
+    }),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok || data.error) {
+    console.error('[Messenger Send Error]', data)
+
+    throw new Error(
+      data?.error?.message ||
+        'Messenger rejected the message'
+    )
+  }
+
+  return {
+    messageId: data.message_id as string,
+  }
+}
+
+// ============================================================
+// Instagram
+// ============================================================
+
+async function sendInstagramMessage({
+  instagramAccountId,
+  recipientId,
+  accessToken,
+  messageType,
+  text,
+  mediaUrl,
+}: {
+  instagramAccountId: string
+  recipientId: string
+  accessToken: string
+  messageType: string
+  text?: string
+  mediaUrl?: string
+}) {
+  const url =
+    `https://graph.facebook.com/${GRAPH_VERSION}/${instagramAccountId}/messages` +
+    `?access_token=${encodeURIComponent(accessToken)}`
+
+  let message: Record<string, unknown>
+
+  if (messageType === 'text') {
+    message = {
+      text: text || '',
+    }
+  } else if (
+    mediaUrl &&
+    ['image', 'video', 'audio'].includes(messageType)
+  ) {
+    message = {
+      attachment: {
+        type: messageType,
+        payload: {
+          url: mediaUrl,
+        },
+      },
+    }
+  } else {
+    throw new Error(
+      `Instagram does not support message type "${messageType}" yet`
+    )
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: {
+        id: recipientId,
+      },
+      message,
+    }),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok || data.error) {
+    console.error('[Instagram Send Error]', data)
+
+    throw new Error(
+      data?.error?.message ||
+        'Instagram rejected the message'
+    )
+  }
+
+  return {
+    messageId: data.message_id as string,
+  }
+}
+
+// ============================================================
+// Save outbound Meta message
+// ============================================================
+
+async function saveOutboundMessage({
+  supabase,
+  conversationId,
+  contentType,
+  contentText,
+  mediaUrl,
+  messageId,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  conversationId: string
+  contentType: string
+  contentText?: string
+  mediaUrl?: string
+  messageId: string
+}) {
+  const { error } = await supabase
+    .from('messages')
+    .insert({
+      conversation_id: conversationId,
+      sender_type: 'agent',
+      content_type: contentType,
+      content_text: contentText || null,
+      media_url: mediaUrl || null,
+      message_id: messageId,
+      status: 'sent',
+    })
+
+  if (error) {
+    console.error(
+      '[Meta Send] Error saving outbound message:',
+      error
+    )
+  }
+
+  await supabase
+    .from('conversations')
+    .update({
+      last_message_text: contentText || '',
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversationId)
 }
