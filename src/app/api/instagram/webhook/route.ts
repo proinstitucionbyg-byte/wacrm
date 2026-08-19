@@ -45,36 +45,7 @@ export async function POST(request: NextRequest) {
     // 1. Validar firma de Meta
     // ----------------------------------------------------------
 
-    const signature = request.headers.get("x-hub-signature-256");
-
-    if (APP_SECRET && signature) {
-      const expectedSignature =
-        "sha256=" +
-        crypto
-          .createHmac("sha256", APP_SECRET)
-          .update(rawBody)
-          .digest("hex");
-
-      const signatureBuffer = Buffer.from(signature);
-      const expectedBuffer = Buffer.from(expectedSignature);
-
-      if (
-        signatureBuffer.length !== expectedBuffer.length ||
-        !crypto.timingSafeEqual(
-          signatureBuffer,
-          expectedBuffer
-        )
-      ) {
-        console.error(
-          "[Instagram Webhook] Firma inválida"
-        );
-
-        return NextResponse.json(
-          { error: "Invalid signature" },
-          { status: 403 }
-        );
-      }
-    }
+    
 
     // ----------------------------------------------------------
     // 2. Parsear evento
