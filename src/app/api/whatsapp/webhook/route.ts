@@ -1021,6 +1021,7 @@ async function findOrCreateContact(
       user_id: configOwnerUserId,
       phone,
       name: name || phone,
+      channel: 'whatsapp',
     })
     .select()
     .single()
