@@ -140,26 +140,31 @@ export default function InboxPage() {
       }
       if (!data) return;
       const fetched = normalizeConversation(data);
-      setConversations((prev) => {
-        const existing = prev.find((c) => c.id === fetched.id);
-        if (existing) {
-          // Already in state — keep its fields (a realtime UPDATE may
-          // have landed while the fetch was in flight and patched
-          // last_message_text / unread_count to fresher values than
-          // the row we just read). Only backfill `contact`, which the
-          // realtime payloads never carry.
-          return prev.map((c) =>
-            c.id === fetched.id
-              ? { ...c, contact: c.contact ?? fetched.contact }
-              : c,
-          );
-        }
-        return [fetched, ...prev];
-      });
+
+setConversations((prev) => {
+  const existing = prev.find((c) => c.id === fetched.id);
+
+  if (existing) {
+    return prev.map((c) =>
+      c.id === fetched.id
+        ? { ...c, contact: fetched.contact }
+        : c,
+    );
+  }
+
+  return [fetched, ...prev];
+});
+
+if (activeConversation?.id === fetched.id) {
+  setActiveConversation((prev) =>
+    prev ? { ...prev, contact: fetched.contact } : prev,
+  );
+  setActiveContact(fetched.contact ?? null);
+}
     } finally {
       hydratingConvIdsRef.current.delete(convId);
     }
-  }, []);
+    }, [activeConversation]);
 
   // Check WhatsApp connection status on mount
   useEffect(() => {
