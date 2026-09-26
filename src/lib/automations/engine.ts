@@ -110,6 +110,24 @@ console.log("Account:", input.accountId);
       return
     }
     if (!automations || automations.length === 0) return
+    
+    // Antes de ejecutar automatizaciones nuevas para este contacto,
+    // cancelamos cualquier wait pendiente previo: "la posterior anula
+    // a la anterior" — evita que sigan llegando mensajes de una
+    // secuencia vieja después de que el contacto ya respondió.
+    if (input.contactId) {
+      const matched = (automations as Automation[]).some((a) => triggerMatches(a, input.context))
+      if (matched) {
+        const { error: cancelErr } = await db
+          .from('automation_pending_executions')
+          .update({ status: 'cancelled' })
+          .eq('contact_id', input.contactId)
+          .eq('status', 'pending')
+        if (cancelErr) {
+          console.error('[automations] cancel pending failed:', cancelErr)
+        }
+      }
+    }
 
     for (const automation of automations as Automation[]) {
       if (!triggerMatches(automation, input.context)) continue
