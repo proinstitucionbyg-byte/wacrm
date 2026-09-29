@@ -208,6 +208,19 @@ export async function POST(request: Request) {
 
     const channel = contact?.channel as Channel | undefined
     const externalId = contact?.external_id as string | undefined
+    
+    // Anota la hora de la última intervención humana. Sirve para que
+    // la automatización y la IA se pausen mientras la asesora atiende.
+    const { error: humanErr } = await supabase
+      .from('conversations')
+      .update({
+  last_human_message_at: new Date().toISOString(),
+})
+      .eq('id', conversationId)
+      .eq('account_id', accountId)
+    if (humanErr) {
+      console.error('[send] last_human_message_at failed:', humanErr)
+    }
 
     if (!channel) {
       return NextResponse.json(

@@ -1286,6 +1286,8 @@ onStartSelection={() => toggleMessageSelection(msg.id)}
       <AiThreadBanner
         conversationId={conversation.id}
         disabled={conversation.ai_autoreply_disabled ?? false}
+          aiEnabled={conversation.ai_enabled ?? true}
+        automationEnabled={conversation.automation_enabled ?? true}
         handoffSummary={conversation.ai_handoff_summary}
         assignedAgentId={assignedAgentId}
         currentUserId={user?.id}

@@ -293,7 +293,7 @@ async function isDuplicateInbound(
   // through — small.
   const { data: runs } = await db
     .from("flow_runs")
-    .select("id")
+    .select("id, automation_enabled, last_human_message_at")
     .eq("account_id", accountId)
     .eq("contact_id", contactId);
   if (!runs?.length) return false;
@@ -830,12 +830,26 @@ export async function dispatchInboundToFlows(
   input: DispatchInboundInput & { isFirstInboundMessage: boolean },
 ): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
+  const { data: conversationState } = await db
+  .from("conversations")
+  .select("automation_enabled")
+  .eq("id", input.conversationId)
+  .eq("account_id", input.accountId)
+  .maybeSingle();
+
+if (conversationState?.automation_enabled === false) {
+  return {
+    consumed: false,
+    outcome: "no_match",
+  };
+}
   try {
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
       input.contactId,
     );
+  
 
     // Idempotency — only matters if there's already a run for this
     // contact. For new runs, the partial unique index catches duplicate

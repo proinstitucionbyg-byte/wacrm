@@ -726,6 +726,25 @@ async function processMessage(
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
   // ============================================================
+    
+
+  // Semáforo: ¿la asesora escribió hace menos de 5 minutos?
+  // Si sí, la automatización y la IA se quedan quietas.
+  
+  // Semáforo: pausa IA y automatización durante 5 minutos después
+// de que una asesora haya enviado un mensaje.
+const HUMAN_PAUSE_MS = 5 * 60 * 1000
+const lastHuman = conversation.last_human_message_at
+  ? new Date(conversation.last_human_message_at).getTime()
+  : 0
+const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
+
+const automationPaused =
+  conversation.automation_enabled === false || humanRecentlyActive
+  let automationMatched = false
+  let flowConsumed = false
+
+if (!automationPaused) {
   const flowResult = await dispatchInboundToFlows({
     accountId,
     userId: configOwnerUserId,
@@ -746,13 +765,12 @@ async function processMessage(
           },
     isFirstInboundMessage,
   })
-  const flowConsumed = flowResult.consumed
 
-  // Fire any automations that react to this webhook event. All dispatches
-  // run here (not earlier) so the contact, conversation, and inbound
-  // message all exist before any step — including send_message — runs.
-  // Fire-and-forget: a slow or failing automation must not block the
-  // webhook's 200 OK response to Meta.
+  flowConsumed = flowResult.consumed
+}
+
+
+    // Fire automations only when they are not paused by a human agent.
   const inboundText = contentText ?? message.text?.body ?? ''
   const automationTriggers: (
     | 'new_contact_created'
@@ -761,54 +779,61 @@ async function processMessage(
     | 'keyword_match'
     | 'interactive_reply'
   )[] = []
-  // Content-level triggers are suppressed when a flow consumed the
-  // message — see the comment block above.
-  if (!flowConsumed) {
-    automationTriggers.push('new_message_received', 'keyword_match')
-    // Interactive tap → fire the interactive_reply trigger too (only
-    // meaningful when a button/list reply actually arrived). Enables
-    // automation-only chained menus; when a Flow owns the menu it will
-    // have consumed the reply and this is skipped.
-    if (interactiveReplyId) {
-      automationTriggers.push('interactive_reply')
-    }
-  }
-  // new_contact_created fires only when the webhook just auto-created the
-  // contact row. first_inbound_message fires whenever this is the contact's
-  // first-ever customer-sent message — a superset that also catches
-  // manually-imported contacts sending for the first time. We dispatch both
-  // so users can pick whichever semantic they want; an automation that
-  // listens to only one trigger runs only when that trigger matches.
-  if (contactOutcome.wasCreated) automationTriggers.unshift('new_contact_created')
-  if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
-  for (const triggerType of automationTriggers) {
-    runAutomationsForTrigger({
-      accountId,
-      triggerType,
-      contactId: contactRecord.id,
-      context: {
-        message_text: inboundText,
-        conversation_id: conversation.id,
-        // Only set on interactive taps; drives the interactive_reply
-        // trigger's exact-id match.
-        interactive_reply_id: interactiveReplyId ?? undefined,
-      },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
-  }
 
-  // AI auto-reply. Runs only for plain-text inbound the deterministic
+  if (!automationPaused) {
+    if (!flowConsumed) {
+      automationTriggers.push('new_message_received', 'keyword_match')
+
+      if (interactiveReplyId) {
+        automationTriggers.push('interactive_reply')
+      }
+    }
+
+    if (contactOutcome.wasCreated) {
+      automationTriggers.unshift('new_contact_created')
+    }
+
+    if (isFirstInboundMessage) {
+      automationTriggers.unshift('first_inbound_message')
+    }
+
+
+for (const triggerType of automationTriggers) {
+  const matched = await runAutomationsForTrigger({
+    accountId,
+    triggerType,
+    contactId: contactRecord.id,
+    context: {
+      message_text: inboundText,
+      conversation_id: conversation.id,
+      interactive_reply_id: interactiveReplyId ?? undefined,
+    },
+  })
+
+  if (matched) {
+    automationMatched = true
+  }
+}
+  // Runs only for plain-text inbound the deterministic
   // flow runner did NOT consume (flows win over the LLM), and only when
   // the account has enabled it. Awaited inside `after()` (same reason as
   // the webhook dispatch below); `dispatchInboundToAiReply` owns its
   // eligibility gates + try/catch and never throws.
-  if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
-    await dispatchInboundToAiReply({
-      accountId,
-      conversationId: conversation.id,
-      contactId: contactRecord.id,
-      configOwnerUserId,
-    })
-  }
+  if (
+  conversation.ai_enabled !== false &&
+  !humanRecentlyActive &&
+  !flowConsumed &&
+    !automationMatched &&
+  !interactiveReplyId &&
+  inboundText.trim()
+) {
+  await dispatchInboundToAiReply({
+    accountId,
+    conversationId: conversation.id,
+    contactId: contactRecord.id,
+    configOwnerUserId,
+  })
+}
 
   // message.received webhook (public API). Awaited — not fire-and-forget
   // — because we're inside the route's `after()` block, which only keeps
@@ -1121,4 +1146,5 @@ async function findOrCreateConversation(
   }
 
   return { conversation: newConv, created: true }
+}
 }

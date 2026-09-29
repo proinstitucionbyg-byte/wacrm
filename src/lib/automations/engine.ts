@@ -66,79 +66,97 @@ export interface DispatchInput {
  * All errors are caught and logged; per-automation failures are
  * recorded into automation_logs with status='failed'.
  */
-export async function runAutomationsForTrigger(input: DispatchInput): Promise<void> {
+export async function runAutomationsForTrigger(
+  input: DispatchInput,
+): Promise<boolean> {
   try {
     console.log("========== AUTOMATION START ==========");
-console.log("Trigger:", input.triggerType);
-console.log("Contact:", input.contactId);
-console.log("Account:", input.accountId);
-    const db = supabaseAdmin()
+    console.log("Trigger:", input.triggerType);
+    console.log("Contact:", input.contactId);
+    console.log("Account:", input.accountId);
 
-    // Tenant isolation. `contactId` can be caller-supplied (the manual
-    // POST /api/automations/engine entrypoint reads it straight from the
-    // request body), and every step below runs through the service-role
-    // client, which bypasses RLS. So before any step can touch the
-    // contact, verify it actually belongs to this account. A foreign or
-    // forged id is refused silently — callers are fire-and-forget, and a
-    // distinct error would leak whether a given contact UUID exists.
+    const db = supabaseAdmin();
+
     if (input.contactId) {
       const { data: owned, error: ownErr } = await db
-        .from('contacts')
-        .select('id')
-        .eq('id', input.contactId)
-        .eq('account_id', input.accountId)
-        .maybeSingle()
+        .from("contacts")
+        .select("id")
+        .eq("id", input.contactId)
+        .eq("account_id", input.accountId)
+        .maybeSingle();
+
       if (ownErr) {
-        console.error('[automations] contact ownership check failed:', ownErr)
-        return
+        console.error(
+          "[automations] contact ownership check failed:",
+          ownErr,
+        );
+        return false;
       }
+
       if (!owned) {
-        console.warn('[automations] contact not in account, refusing dispatch', input.contactId)
-        return
+        console.warn(
+          "[automations] contact not in account, refusing dispatch",
+          input.contactId,
+        );
+        return false;
       }
     }
 
     const { data: automations, error } = await db
-      .from('automations')
-      .select('*')
-      .eq('account_id', input.accountId)
-      .eq('trigger_type', input.triggerType)
-      .eq('is_active', true)
+      .from("automations")
+      .select("*")
+      .eq("account_id", input.accountId)
+      .eq("trigger_type", input.triggerType)
+      .eq("is_active", true);
 
     if (error) {
-      console.error('[automations] fetch failed:', error)
-      return
+      console.error("[automations] fetch failed:", error);
+      return false;
     }
-    if (!automations || automations.length === 0) return
-    
-    // Antes de ejecutar automatizaciones nuevas para este contacto,
-    // cancelamos cualquier wait pendiente previo: "la posterior anula
-    // a la anterior" — evita que sigan llegando mensajes de una
-    // secuencia vieja después de que el contacto ya respondió.
-    if (input.contactId) {
-      const matched = (automations as Automation[]).some((a) => triggerMatches(a, input.context))
-      if (matched) {
-        const { error: cancelErr } = await db
-          .from('automation_pending_executions')
-          .update({ status: 'cancelled' })
-          .eq('contact_id', input.contactId)
-          .eq('status', 'pending')
-        if (cancelErr) {
-          console.error('[automations] cancel pending failed:', cancelErr)
-        }
+
+    if (!automations || automations.length === 0) {
+      return false;
+    }
+
+    let matched = false;
+
+    for (const automation of automations as Automation[]) {
+      if (!triggerMatches(automation, input.context)) {
+        continue;
+      }
+
+      matched = true;
+
+      try {
+        await executeAutomation(automation, input);
+      } catch (err) {
+        console.error(
+          "[automations] execute failed:",
+          automation.id,
+          err,
+        );
       }
     }
 
-    for (const automation of automations as Automation[]) {
-      if (!triggerMatches(automation, input.context)) continue
-      try {
-        await executeAutomation(automation, input)
-      } catch (err) {
-        console.error('[automations] execute failed:', automation.id, err)
+    if (input.contactId && matched) {
+      const { error: cancelErr } = await db
+        .from("automation_pending_executions")
+        .update({ status: "cancelled" })
+        .eq("contact_id", input.contactId)
+        .eq("status", "pending");
+
+      if (cancelErr) {
+        console.error(
+          "[automations] cancel pending failed:",
+          cancelErr,
+        );
       }
     }
+
+    return matched;
   } catch (err) {
-    console.error('[automations] dispatch failed:', err)
+    console.error("[automations] dispatch failed:", err);
+    return false;
   }
 }
 
