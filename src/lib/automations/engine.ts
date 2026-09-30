@@ -119,6 +119,7 @@ export async function runAutomationsForTrigger(
     }
 
     let matched = false;
+    let cancelledOld = false;
 
     for (const automation of automations as Automation[]) {
       if (!triggerMatches(automation, input.context)) {
@@ -126,7 +127,15 @@ export async function runAutomationsForTrigger(
       }
 
       matched = true;
-
+      // Cancela pendientes VIEJOS antes de ejecutar, una sola vez.
+      if (input.contactId && !cancelledOld) {
+        cancelledOld = true;
+        await db
+          .from("automation_pending_executions")
+          .update({ status: "cancelled" })
+          .eq("contact_id", input.contactId)
+          .eq("status", "pending");
+      }
       try {
         await executeAutomation(automation, input);
       } catch (err) {
@@ -138,20 +147,7 @@ export async function runAutomationsForTrigger(
       }
     }
 
-    if (input.contactId && matched) {
-      const { error: cancelErr } = await db
-        .from("automation_pending_executions")
-        .update({ status: "cancelled" })
-        .eq("contact_id", input.contactId)
-        .eq("status", "pending");
-
-      if (cancelErr) {
-        console.error(
-          "[automations] cancel pending failed:",
-          cancelErr,
-        );
-      }
-    }
+    
 
     return matched;
   } catch (err) {
