@@ -68,7 +68,7 @@ export async function dispatchInboundToAiReply(
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
-    if (conv.assigned_agent_id) return // a human owns this thread
+     // a human owns this thread
     if (conv.ai_autoreply_disabled) return
     if (conv.ai_enabled === false) return // handed off / turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
