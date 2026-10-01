@@ -60,6 +60,10 @@ export interface GenerateResult {
   text: string
   /** True when the model asked to hand off to a human (auto-reply mode). */
   handoff: boolean
+    /** Id of the automation the model chose to launch (auto-reply mode),
+   *  or null/undefined when it didn't pick one. Must be validated by the
+   *  caller against the candidates it offered. */
+  automationId?: string | null
   /** Provider token usage for this call, or null when unavailable. */
   usage: AiUsage | null
 }

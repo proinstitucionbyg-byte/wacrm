@@ -827,6 +827,12 @@ for (const triggerType of automationTriggers) {
   !interactiveReplyId &&
   inboundText.trim()
 ) {
+    // La IA toma la conversación: se cancelan los pasos de espera pendientes
+  await supabaseAdmin()
+    .from('automation_pending_executions')
+    .update({ status: 'cancelled' })
+    .eq('contact_id', contactRecord.id)
+    .eq('status', 'pending')
   await dispatchInboundToAiReply({
     accountId,
     conversationId: conversation.id,

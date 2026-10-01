@@ -4,10 +4,12 @@ import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
+import { findCandidateAutomations } from './automation-match'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
+import { runAutomationById } from '@/lib/automations/engine'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 interface DispatchArgs {
@@ -102,17 +104,23 @@ export async function dispatchInboundToAiReply(
       latestUserMessage(messages),
     )
 
+        // Automations the model may launch (best-effort, never throws).
+    const candidates = await findCandidateAutomations(db, accountId, messages)
+
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      automations: candidates,
     })
 
-    const { text, handoff, usage } = await generateReply({
+    const { text, handoff, usage, automationId } = await generateReply({
       config,
       systemPrompt,
       messages,
     })
+
+   
 
     // Record token spend on the account's BYO key. Fire-and-forget so it
     // never adds latency to the customer-facing send: `logAiUsage`
@@ -128,7 +136,13 @@ export async function dispatchInboundToAiReply(
       usage,
     })
 
-    if (handoff || !text) {
+        // Only accept an automation id the model was actually offered.
+    const chosenAutomationId =
+      !handoff && automationId && candidates.some((c) => c.id === automationId)
+        ? automationId
+        : null
+
+    if (handoff || (!text && !chosenAutomationId)) {
       // The model can't (or shouldn't) answer — stop auto-replying on
       // this thread and hand it to a human. We (a) pause the bot here
       // (sticky until re-enabled), (b) route the conversation to the
@@ -175,14 +189,26 @@ export async function dispatchInboundToAiReply(
     }
     if (claimed !== true) return // lost the per-conversation cap race
 
-    await engineSendText({
-      accountId,
-      userId: configOwnerUserId,
-      conversationId,
-      contactId,
-      text,
-      aiGenerated: true,
-    })
+        if (text) {
+      await engineSendText({
+        accountId,
+        userId: configOwnerUserId,
+        conversationId,
+        contactId,
+        text,
+        aiGenerated: true,
+      })
+    }
+
+    if (chosenAutomationId) {
+      await runAutomationById({
+        accountId,
+        automationId: chosenAutomationId,
+        contactId,
+        conversationId,
+        messageText: latestUserMessage(messages),
+      })
+    }
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
   }

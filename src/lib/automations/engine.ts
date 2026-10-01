@@ -155,6 +155,63 @@ export async function runAutomationsForTrigger(
     return false;
   }
 }
+/**
+ * Launch ONE specific automation by id. Used by the AI auto-reply when the
+ * model picks an automation. Verifies the contact and the automation both
+ * belong to the account and that the automation is active, then runs it
+ * exactly like a normal trigger (same steps, waits and buttons).
+ *
+ * Must never throw. Returns true if the automation was launched.
+ */
+export async function runAutomationById(input: {
+  accountId: string
+  automationId: string
+  contactId: string
+  conversationId: string
+  messageText?: string
+}): Promise<boolean> {
+  try {
+    const db = supabaseAdmin()
+
+    const { data: owned } = await db
+      .from('contacts')
+      .select('id')
+      .eq('id', input.contactId)
+      .eq('account_id', input.accountId)
+      .maybeSingle()
+    if (!owned) return false
+
+    const { data: automation, error } = await db
+      .from('automations')
+      .select('*')
+      .eq('id', input.automationId)
+      .eq('account_id', input.accountId)
+      .eq('is_active', true)
+      .maybeSingle()
+    if (error || !automation) return false
+
+    // Same as the normal dispatcher: cancel stale pending waits first.
+    await db
+      .from('automation_pending_executions')
+      .update({ status: 'cancelled' })
+      .eq('contact_id', input.contactId)
+      .eq('status', 'pending')
+
+    await executeAutomation(automation as Automation, {
+      accountId: input.accountId,
+      triggerType: 'keyword_match',
+      contactId: input.contactId,
+      context: {
+        message_text: input.messageText ?? '',
+        conversation_id: input.conversationId,
+      },
+    })
+    return true
+  } catch (err) {
+    console.error('[automations] runAutomationById failed:', err)
+    return false
+  }
+}
 
 /**
  * Resume a run that was parked at a wait step. Called from the cron
@@ -188,7 +245,23 @@ export async function resumePendingExecution(pending: {
     await markPending(pending.id, 'failed')
     return
   }
-
+  // Si la asesora escribió hace menos de 5 min, o la automatización
+  // está apagada en este chat, el paso no se envía.
+  if (pending.context?.conversation_id) {
+    const { data: conv } = await db
+      .from('conversations')
+      .select('automation_enabled, last_human_message_at')
+      .eq('id', pending.context.conversation_id)
+      .maybeSingle()
+    const lastHuman = conv?.last_human_message_at
+      ? new Date(conv.last_human_message_at).getTime()
+      : 0
+    const humanActive = Date.now() - lastHuman < 5 * 60 * 1000
+    if (conv && (conv.automation_enabled === false || humanActive)) {
+      await markPending(pending.id, 'cancelled')
+      return
+    }
+  }
   try {
     await executeStepsFrom({
       automation: automation as Automation,
@@ -833,7 +906,7 @@ async function finalizeLog(
     .eq('id', logId)
 }
 
-async function markPending(id: string, status: 'done' | 'failed') {
+async function markPending(id: string, status: 'done' | 'failed' | 'cancelled') {
   await supabaseAdmin()
     .from('automation_pending_executions')
     .update({ status })

@@ -22,6 +22,21 @@ export const AI_PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
  */
 export const HANDOFF_SENTINEL = '[[HANDOFF]]'
 
+/**
+ * Marker the model emits (auto-reply mode) on its own final line to launch
+ * an automation, e.g. `[[AUTOMATION:0281af2e-ffc6-4a45-8ef4-c1caca91645b]]`.
+ * Parsed and stripped by `generateReply`; the caller must verify the id
+ * belongs to the candidates it offered.
+ */
+export const AUTOMATION_MARKER_REGEX =
+  /\[\[AUTOMATION:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]\]/i
+
+/** An automation the model may choose to launch. */
+export interface AutomationOption {
+  id: string
+  name: string
+}
+
 /** Cap on generated reply length — keeps WhatsApp replies short and
  *  bounds token spend on the caller's own key. */
 export const MAX_OUTPUT_TOKENS = 1024
@@ -54,8 +69,10 @@ export function buildSystemPrompt(args: {
   mode: 'draft' | 'auto_reply'
   /** Knowledge-base excerpts retrieved for the current question. */
   knowledge?: string[]
+  /** Candidate automations the model may launch (auto-reply mode only). */
+  automations?: AutomationOption[]
 }): string {
-  const { userPrompt, mode, knowledge } = args
+  const { userPrompt, mode, knowledge, automations } = args
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
       'You are shown the recent WhatsApp conversation between the business (assistant) and a customer (user). ' +
@@ -69,6 +86,17 @@ export function buildSystemPrompt(args: {
   if (mode === 'auto_reply') {
     parts.push(
       `You are replying automatically with no human in the loop. If you cannot confidently and safely help — the customer explicitly asks for a human, is upset or complaining, or the request needs information you do not have — reply with exactly ${HANDOFF_SENTINEL} and nothing else. A human agent will then take over. Prefer handing off over guessing.`,
+    )
+  }
+
+  if (mode === 'auto_reply' && automations && automations.length > 0) {
+    parts.push(
+      'Automations — the business has ready-made automations (course information with buttons). ' +
+        'Launch one ONLY when the customer has clearly named or unmistakably described the specific course or program of that automation. ' +
+        'If the customer is vague, or several automations could fit, do NOT launch any: ask which course they mean instead. ' +
+        'To launch one, write at most one short friendly sentence and then, alone on the final line, the marker [[AUTOMATION:<id>]] using the exact id from the list below. ' +
+        'Never invent an id and never use an id that is not in the list. Never combine the marker with the handoff phrase.\n\n' +
+        `Available automations:\n${automations.map((a) => `- id: ${a.id} | name: ${a.name}`).join('\n')}`,
     )
   }
 
