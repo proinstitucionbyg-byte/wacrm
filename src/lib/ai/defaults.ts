@@ -36,6 +36,18 @@ export interface AutomationOption {
   id: string
   name: string
 }
+/**
+ * Areas the model may hand a conversation off to. Must match the values
+ * stored in `profiles.area` (lowercase, no accents).
+ */
+export const HANDOFF_AREAS = ['ventas', 'fidelizacion', 'egresados'] as const
+export type HandoffArea = (typeof HANDOFF_AREAS)[number]
+
+/**
+ * Handoff marker with an optional area, e.g. `[[HANDOFF:ventas]]`.
+ * The bare `[[HANDOFF]]` is still accepted.
+ */
+export const HANDOFF_MARKER_REGEX = /\[\[HANDOFF(?::([a-zA-Z]+))?\]\]/i
 
 /** Cap on generated reply length — keeps WhatsApp replies short and
  *  bounds token spend on the caller's own key. */
@@ -73,6 +85,7 @@ export function buildSystemPrompt(args: {
   automations?: AutomationOption[]
 }): string {
   const { userPrompt, mode, knowledge, automations } = args
+  const areaList = HANDOFF_AREAS.join(', ')
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
       'You are shown the recent WhatsApp conversation between the business (assistant) and a customer (user). ' +
@@ -85,7 +98,7 @@ export function buildSystemPrompt(args: {
 
   if (mode === 'auto_reply') {
     parts.push(
-      `You are replying automatically with no human in the loop. If you cannot confidently and safely help — the customer explicitly asks for a human, is upset or complaining, or the request needs information you do not have — reply with exactly ${HANDOFF_SENTINEL} and nothing else. A human agent will then take over. Prefer handing off over guessing.`,
+      `You are replying automatically with no human in the loop. Keep the conversation going: if the customer says something you cannot fully answer, is hesitant, objects mildly (for example "no me gusta", "está caro", "no sé"), or asks something outside the business context, do NOT hand off. Instead ask one short friendly question to understand what they need, or offer the closest option you have. Hand off to a person ONLY in these cases: the customer explicitly asks to speak with a human or an advisor, is clearly angry or threatening, reports a payment or account problem, or asks for something only a person can do. To hand off, reply with exactly [[HANDOFF:<area>]] and nothing else, replacing <area> with one of: ${areaList}. Use "ventas" for people who want to buy, enroll, or know prices and promotions of a new course; "fidelizacion" for current students (classes, platform access, certificates, follow-up, complaints); "egresados" for graduates (diplomas, job opportunities, alumni matters). If it is not clear, use "ventas". Never hand off just because you lack a detail: ask the customer or say you will confirm it. Never invent facts.`,
     )
   }
 
@@ -107,7 +120,7 @@ export function buildSystemPrompt(args: {
   if (knowledge && knowledge.length > 0) {
     const fallback =
       mode === 'auto_reply'
-        ? `if they don't cover the question, do not guess — reply with exactly ${HANDOFF_SENTINEL} so a human can help`
+        ? "if they don't cover the question, do not guess — ask the customer one short question or say you will confirm it; hand off only in the cases listed above"
         : "if they don't cover the question, don't guess — say you'll check and follow up"
     parts.push(
       'Knowledge base — excerpts from the business\'s own documentation, retrieved for this question. ' +

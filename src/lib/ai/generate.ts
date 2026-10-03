@@ -7,7 +7,7 @@ import {
 } from './types'
 import {
   AUTOMATION_MARKER_REGEX,
-  HANDOFF_SENTINEL,
+  HANDOFF_AREAS,
   aiRequestTimeoutMs,
 } from './defaults'
 import { generateOpenAi } from './providers/openai'
@@ -23,8 +23,9 @@ export interface GenerateArgs {
 
 /**
  * Generate the next reply from the account's configured provider.
- * Dispatches to the right adapter, then parses the handoff sentinel out
- * of the raw text. Throws `AiError` on any provider/network failure.
+ * Dispatches to the right adapter, then parses the handoff and
+ * automation markers out of the raw text. Throws `AiError` on any
+ * provider/network failure.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const { config, systemPrompt, messages } = args
@@ -57,25 +58,45 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
 
 const AUTOMATION_MARKER_GLOBAL = new RegExp(AUTOMATION_MARKER_REGEX.source, 'gi')
 
+// Tolerant on purpose: accepts `[[HANDOFF]]`, `[[HANDOFF:ventas]]` and
+// variants with accents or spaces, so a slightly off marker still counts
+// as a handoff instead of leaking to the customer.
+const HANDOFF_RE = /\[\[HANDOFF(?::\s*([^\]\s]+))?\s*\]\]/i
+const HANDOFF_RE_GLOBAL = new RegExp(HANDOFF_RE.source, 'gi')
+
+function normalizeArea(raw: string | undefined): string | null {
+  if (!raw) return null
+  const clean = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+  return (HANDOFF_AREAS as readonly string[]).includes(clean) ? clean : null
+}
+
 /**
- * Split the raw model output into `{ text, handoff, automationId, usage }`.
- * The handoff sentinel can appear alone or trailing a partial reply; either
- * way we treat the turn as a handoff and strip the marker. The automation
- * marker is stripped from the text and its id returned (lowercased); a
- * handoff always wins over an automation. `usage` is passed straight
- * through (null when the provider didn't report it).
+ * Split the raw model output into
+ * `{ text, handoff, handoffArea, automationId, usage }`.
+ * A handoff marker (alone or trailing a partial reply) makes the turn a
+ * handoff; its area is validated against HANDOFF_AREAS (null if missing
+ * or unknown). The automation marker is stripped from the text and its
+ * id returned (lowercased); a handoff always wins over an automation.
+ * `usage` is passed straight through (null when the provider didn't
+ * report it).
  */
 export function parseGeneration(
   raw: string,
   usage: AiUsage | null = null,
 ): GenerateResult {
-  const handoff = raw.includes(HANDOFF_SENTINEL)
-  const match = raw.match(AUTOMATION_MARKER_REGEX)
-  const automationId = !handoff && match ? match[1].toLowerCase() : null
+  const handoffMatch = raw.match(HANDOFF_RE)
+  const handoff = handoffMatch !== null
+  const handoffArea = handoff ? normalizeArea(handoffMatch?.[1]) : null
+  const automationMatch = raw.match(AUTOMATION_MARKER_REGEX)
+  const automationId =
+    !handoff && automationMatch ? automationMatch[1].toLowerCase() : null
   const text = raw
-    .split(HANDOFF_SENTINEL)
-    .join('')
+    .replace(HANDOFF_RE_GLOBAL, '')
     .replace(AUTOMATION_MARKER_GLOBAL, '')
     .trim()
-  return { text, handoff, automationId, usage }
+  return { text, handoff, handoffArea, automationId, usage }
 }

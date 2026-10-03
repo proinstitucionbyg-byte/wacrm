@@ -64,6 +64,9 @@ export interface GenerateResult {
    *  or null/undefined when it didn't pick one. Must be validated by the
    *  caller against the candidates it offered. */
   automationId?: string | null
+    /** Area the model chose for a handoff (auto-reply mode), e.g. 'ventas'.
+   *  Null/undefined when it didn't say. Must be validated by the caller. */
+  handoffArea?: string | null
   /** Provider token usage for this call, or null when unavailable. */
   usage: AiUsage | null
 }
