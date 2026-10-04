@@ -6,6 +6,13 @@ import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { findCandidateAutomations } from './automation-match'
 import { findConnectedAgentForArea } from './handoff-routing'
+import {
+  SCHEDULE_TEXT,
+  buildHandoffNotice,
+  isOpenNow,
+  nextOpeningText,
+  scheduleContext,
+} from './business-hours'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
@@ -23,22 +30,15 @@ interface DispatchArgs {
   configOwnerUserId: string
 }
 
-// ------------------------------------------------------------
-// Mensaje que recibe el cliente cuando la IA lo deriva a una persona.
-// Puedes cambiar los textos aquí.
-// ------------------------------------------------------------
-const AREA_LABELS: Record<string, string> = {
-  ventas: 'ventas',
-  fidelizacion: 'fidelización',
-  egresados: 'egresados',
-}
+/** For this long after a handoff the AI knows the customer was already told. */
+const HANDOFF_MEMORY_MS = 24 * 60 * 60 * 1000
 
-function handoffNotice(area: string, agentConnected: boolean): string {
-  const label = AREA_LABELS[area] ?? area
-  if (agentConnected) {
-    return `Gracias por escribirnos 😊 Ya derivé tu consulta con nuestro equipo de ${label}. En unos minutos te atenderán por este mismo chat.`
+/** Short reassurance when a customer asks again after being handed off. */
+function waitingReminder(now: number = Date.now()): string {
+  if (isOpenNow(now)) {
+    return `Tu caso ya está derivado con nuestro equipo y te escribirán apenas se libere un asesor. Nuestro horario es ${SCHEDULE_TEXT}.`
   }
-  return `Gracias por escribirnos 😊 Tu caso ya quedó registrado y derivado a nuestro equipo de ${label}. Te atenderán lo antes posible, apenas haya un asesor disponible dentro de nuestro horario de atención. No necesitas volver a escribir.`
+  return `Tu caso ya está derivado con nuestro equipo. Ahora estamos fuera de horario: te atenderán ${nextOpeningText(now)}. Nuestro horario es ${SCHEDULE_TEXT}.`
 }
 
 /**
@@ -51,9 +51,14 @@ function handoffNotice(area: string, agentConnected: boolean): string {
  *
  * Eligibility gates (any → silent no-op):
  *   - AI off / auto-reply disabled for the account
- *   - auto-reply was disabled for this conversation (prior handoff)
+ *   - auto-reply was switched off for this conversation
  *   - the per-conversation reply cap is reached
  *   - there's nothing to reply to
+ *
+ * A handoff to a person does NOT switch the AI off: the conversation is
+ * assigned (visibility for the advisor) and the customer is told once;
+ * the AI keeps helping until a human writes (the webhook pauses the AI
+ * for a few minutes whenever an advisor sends a message).
  *
  * The 24h WhatsApp session window is inherently open here — we're
  * reacting to a customer message that just landed — so no separate
@@ -73,16 +78,22 @@ export async function dispatchInboundToAiReply(
     const { data: conv, error: convErr } = await db
       .from('conversations')
       .select(
-        'assigned_agent_id, ai_autoreply_disabled, ai_reply_count, ai_enabled',
+        'assigned_agent_id, ai_autoreply_disabled, ai_reply_count, ai_enabled, ai_handed_off_at',
       )
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
     if (conv.ai_autoreply_disabled) return
-    if (conv.ai_enabled === false) return // handed off / turned off here
+    if (conv.ai_enabled === false) return // turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound).
     if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+
+    const handedOffAt = conv.ai_handed_off_at
+      ? new Date(conv.ai_handed_off_at).getTime()
+      : 0
+    const handedOff =
+      handedOffAt > 0 && Date.now() - handedOffAt < HANDOFF_MEMORY_MS
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
@@ -116,6 +127,8 @@ export async function dispatchInboundToAiReply(
       mode: 'auto_reply',
       knowledge,
       automations: candidates,
+      handedOff,
+      scheduleNote: scheduleContext(),
     })
 
     const { text, handoff, handoffArea, usage, automationId } =
@@ -143,18 +156,31 @@ export async function dispatchInboundToAiReply(
         : null
 
     if (handoff || (!text && !chosenAutomationId)) {
-      // Hand the conversation to a person of the chosen area.
-      // 1) Pause the bot on this thread (sticky until re-enabled).
-      // 2) Assign a connected agent of that area, if there is one.
-      // 3) Tell the customer what is happening.
+      // Already handed off recently: do not notify again, just reassure.
+      // The AI stays on.
+      if (handedOff) {
+        await engineSendText({
+          accountId,
+          userId: configOwnerUserId,
+          conversationId,
+          contactId,
+          text: text || waitingReminder(),
+          aiGenerated: true,
+        })
+        return
+      }
+
+      // First handoff: (1) remember it, (2) assign a connected agent of the
+      // chosen area if there is one, (3) tell the customer once.
+      // The AI is NOT switched off.
       const area = handoffArea ?? 'ventas'
       const summary = buildHandoffSummary({
         messages,
         replyCount: conv.ai_reply_count ?? 0,
       })
       const update: Record<string, unknown> = {
-        ai_autoreply_disabled: true,
         ai_handoff_summary: summary,
+        ai_handed_off_at: new Date().toISOString(),
       }
 
       let agentConnected = false
@@ -174,12 +200,24 @@ export async function dispatchInboundToAiReply(
       }
       await db.from('conversations').update(update).eq('id', conversationId)
 
+      // Optional short apology the model wrote before the marker.
+      if (text) {
+        await engineSendText({
+          accountId,
+          userId: configOwnerUserId,
+          conversationId,
+          contactId,
+          text,
+          aiGenerated: true,
+        })
+      }
+
       await engineSendText({
         accountId,
         userId: configOwnerUserId,
         conversationId,
         contactId,
-        text: handoffNotice(area, agentConnected),
+        text: buildHandoffNotice({ area, agentConnected }),
         aiGenerated: true,
       })
       return

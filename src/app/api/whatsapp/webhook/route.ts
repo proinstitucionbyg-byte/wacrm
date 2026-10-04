@@ -8,6 +8,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { transcribeInboundAudio } from '@/lib/ai/transcribe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -612,8 +613,19 @@ async function processMessage(
   }
 
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId } =
+  let { contentText, mediaUrl, mediaType, interactiveReplyId } =
     await parseMessageContent(message, accessToken)
+      // Audio: transcribe so the AI, keyword automations and advisors can
+  // read what the customer said. Best-effort, never throws.
+  if (message.type === 'audio' && message.audio?.id) {
+    const transcript = await transcribeInboundAudio({
+      db: supabaseAdmin(),
+      accountId,
+      mediaId: message.audio.id,
+      accessToken,
+    })
+    if (transcript) contentText = `🎤 ${transcript}`
+  }
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.

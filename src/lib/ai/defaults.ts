@@ -83,8 +83,12 @@ export function buildSystemPrompt(args: {
   knowledge?: string[]
   /** Candidate automations the model may launch (auto-reply mode only). */
   automations?: AutomationOption[]
+  /** True when this conversation was already handed off to the team (auto-reply only). */
+  handedOff?: boolean
+  /** Team availability note, e.g. from scheduleContext() (auto-reply only). */
+  scheduleNote?: string
 }): string {
-  const { userPrompt, mode, knowledge, automations } = args
+  const { userPrompt, mode, knowledge, automations, handedOff, scheduleNote } = args
   const areaList = HANDOFF_AREAS.join(', ')
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
@@ -98,7 +102,19 @@ export function buildSystemPrompt(args: {
 
   if (mode === 'auto_reply') {
     parts.push(
-      `You are replying automatically with no human in the loop. Keep the conversation going: if the customer says something you cannot fully answer, is hesitant, objects mildly (for example "no me gusta", "está caro", "no sé"), or asks something outside the business context, do NOT hand off. Instead ask one short friendly question to understand what they need, or offer the closest option you have. Hand off to a person ONLY in these cases: the customer explicitly asks to speak with a human or an advisor, is clearly angry or threatening, reports a payment or account problem, or asks for something only a person can do. To hand off, reply with exactly [[HANDOFF:<area>]] and nothing else, replacing <area> with one of: ${areaList}. Use "ventas" for people who want to buy, enroll, or know prices and promotions of a new course; "fidelizacion" for current students (classes, platform access, certificates, follow-up, complaints); "egresados" for graduates (diplomas, job opportunities, alumni matters). If it is not clear, use "ventas". Never hand off just because you lack a detail: ask the customer or say you will confirm it. Never invent facts.`,
+      `You are replying automatically with no human in the loop. Keep the conversation going: if the customer says something you cannot fully answer, is hesitant, objects mildly (for example "no me gusta", "está caro", "no sé"), or asks something outside the business context, do NOT hand off. Instead ask one short friendly question to understand what they need, or offer the closest option you have. Hand off to a person ONLY in these cases: the customer explicitly asks to speak with a human or an advisor, says you are not helping (for example "no me sirves", "no entiendes"), is clearly angry or threatening, reports a payment or account problem, or asks for something only a person can do. To hand off, reply with [[HANDOFF:<area>]], replacing <area> with one of: ${areaList}. If the customer said you are not helping, you may write ONE short apologetic sentence before the marker (for example: "Lamentamos no haber podido ayudarte como esperabas."). In every other handoff, reply with the marker and nothing else. Use "ventas" for people who want to buy, enroll, or know prices and promotions of a new course; "fidelizacion" for current students (classes, platform access, certificates, follow-up, complaints); "egresados" for graduates (diplomas, job opportunities, alumni matters). If it is not clear, use "ventas". Never hand off just because you lack a detail: ask the customer or say you will confirm it. Never invent facts.`,
+    )
+  }
+
+  if (mode === 'auto_reply' && scheduleNote) {
+    parts.push(
+      `${scheduleNote} Mention the schedule only when it is relevant (the customer asks about hours or about how long the wait will be). Never promise a specific response time.`,
+    )
+  }
+
+  if (mode === 'auto_reply' && handedOff) {
+    parts.push(
+      'IMPORTANT: this conversation was ALREADY handed off to the team and the customer has already been told. Do NOT use the handoff marker again. Keep helping the customer as much as you can with what you know. If the customer asks again for an advisor, or asks how long it will take, reassure them that their case is already derived and mention the team schedule or the next opening. If the customer says you are not helping or that you are useless, reply with a brief polite apology (for example: "Lamentamos no haber podido ayudarte como esperabas. Tu caso ya está derivado con nuestro equipo y te atenderán dentro de nuestro horario de atención.") and do not insist.',
     )
   }
 
