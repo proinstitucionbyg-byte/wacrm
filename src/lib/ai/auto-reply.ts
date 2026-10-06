@@ -238,7 +238,7 @@ export async function dispatchInboundToAiReply(
     }
     if (claimed !== true) return // lost the per-conversation cap race
 
-    if (text) {
+    if (text && !chosenAutomationId) {
       await engineSendText({
         accountId,
         userId: configOwnerUserId,

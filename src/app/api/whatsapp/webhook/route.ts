@@ -4,6 +4,8 @@ import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
+import { findContactByBsuid } from '@/lib/contacts/dedupe'
+import { isBsuid } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
@@ -35,6 +37,8 @@ function supabaseAdmin() {
 }
 
 interface WhatsAppMessage {
+    user_id?: string
+  from_user_id?: string
   id: string
   from: string
   timestamp: string
@@ -560,7 +564,7 @@ async function handleReaction(
 
 async function processMessage(
   message: WhatsAppMessage,
-  contact: { profile: { name: string }; wa_id: string },
+  contact: { profile?: { name?: string }; wa_id: string; user_id?: string },
   // Tenancy. Resolved from the matched whatsapp_config row; every
   // contact / conversation / message row created downstream is
   // stamped with this so any member of the account can see it.
@@ -571,11 +575,22 @@ async function processMessage(
   configOwnerUserId: string,
   accessToken: string
 ) {
-  const senderPhone = normalizePhone(message.from)
-  const contactName = contact.profile.name
+  const rawFrom = message.from || contact?.wa_id || ''
+  const bsuid =
+    message.user_id ||
+    message.from_user_id ||
+    contact?.user_id ||
+    (isBsuid(rawFrom) ? rawFrom : '')
+  const senderPhone = isBsuid(rawFrom) ? '' : normalizePhone(rawFrom)
+  const contactName = contact?.profile?.name ?? ''
 
   // Find or create contact
-  const contactOutcome = await findOrCreateContact(
+  const bsuidContact = bsuid
+    ? await findContactByBsuid(supabaseAdmin(), accountId, bsuid)
+    : null
+  const contactOutcome: ContactOutcome | null = bsuidContact
+    ? { contact: bsuidContact, wasCreated: false }
+    : await findOrCreateContact(
     accountId,
     configOwnerUserId,
     senderPhone,
@@ -583,6 +598,22 @@ async function processMessage(
   )
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
+    // Guarda el código de usuario de WhatsApp (BSUID) y, si ahora llegó,
+  // el teléfono de un contacto que no lo tenía.
+  if (bsuid && contactRecord.whatsapp_user_id !== bsuid) {
+    await supabaseAdmin()
+      .from('contacts')
+      .update({ whatsapp_user_id: bsuid })
+      .eq('id', contactRecord.id)
+    contactRecord.whatsapp_user_id = bsuid
+  }
+  if (senderPhone && !contactRecord.phone) {
+    await supabaseAdmin()
+      .from('contacts')
+      .update({ phone: senderPhone })
+      .eq('id', contactRecord.id)
+    contactRecord.phone = senderPhone
+  }
 
   // Find or create conversation
   const convResult = await findOrCreateConversation(

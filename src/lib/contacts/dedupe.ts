@@ -56,6 +56,31 @@ export async function findExistingContact(
 }
 
 /**
+ * Busca un contacto por el código de usuario de WhatsApp (BSUID).
+ * Se usa cuando el cliente tiene nombre de usuario y WhatsApp no
+ * entrega su número de teléfono. Devuelve el contacto más antiguo
+ * con ese código, o null si no existe.
+ */
+export async function findContactByBsuid(
+  db: SupabaseClient,
+  accountId: string,
+  bsuid: string,
+): Promise<ExistingContact | null> {
+  if (!bsuid) return null;
+
+  const { data, error } = await db
+    .from("contacts")
+    .select("*")
+    .eq("account_id", accountId)
+    .eq("whatsapp_user_id", bsuid)
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (error || !data || data.length === 0) return null;
+  return data[0] as ExistingContact;
+}
+
+/**
  * True when an existing contact is an *exact* normalized match for
  * `phone` (vs only a fuzzy trunk-variant match). The form hard-blocks
  * exact matches but only warns on fuzzy ones.

@@ -102,3 +102,13 @@ export function phoneVariants(sanitized: string): string[] {
 export function isRecipientNotAllowedError(message: string): boolean {
   return /131030|not in allowed list|not in the allowed list/i.test(message)
 }
+
+/**
+ * Detecta si un valor es un BSUID de WhatsApp (usuario con nombre
+ * de usuario, sin número visible). Formato: 2 letras de país, un
+ * punto y letras o números. Ejemplo: PE.1A2B3C4D5E6F
+ */
+export function isBsuid(value: string | null | undefined): boolean {
+  if (!value) return false
+  return /^[A-Za-z]{2}\.[A-Za-z0-9.]+$/.test(value.trim())
+}

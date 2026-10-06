@@ -99,10 +99,10 @@ export async function findCandidateAutomations(
         ? cfg.keywords.filter((k): k is string => typeof k === 'string')
         : []
       const name = (r.name ?? '').trim()
-      const firstPhrase = (keywords[0] ?? '').trim().slice(0, 80)
+      
       return {
         id: r.id,
-        label: firstPhrase ? `${name} — frase: "${firstPhrase}"` : name,
+                label: name,
         nameTokens: tokenize(name),
         extraTokens: tokenize(`${r.description ?? ''} ${keywords.join(' ')}`),
       }
