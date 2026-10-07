@@ -54,6 +54,12 @@ function formatTime(totalMinutes: number): string {
   return `${h12}:${String(m).padStart(2, '0')} ${suffix}`
 }
 
+/** Adds a final period only when the text does not already end with one
+ *  (avoids "a. m.." when the text ends in "a. m."). */
+function ensurePeriod(s: string): string {
+  return s.endsWith('.') ? s : `${s}.`
+}
+
 /** True when the team is inside working hours (Peru time). */
 export function isOpenNow(now: number = Date.now()): boolean {
   const { day, minutes } = limaClock(now)
@@ -99,15 +105,26 @@ const KEEP_HELPING =
 
 /**
  * Message the customer receives the first time the AI hands the
- * conversation to a person. Sent once per handoff.
+ * conversation to a person. Sent once per handoff. `delicate` gives a
+ * softer version (no smiley, no rush) for bereavement, illness, etc.
  */
 export function buildHandoffNotice(args: {
   area: string
   agentConnected: boolean
+  delicate?: boolean
   now?: number
 }): string {
   const now = args.now ?? Date.now()
   const label = AREA_LABELS[args.area] ?? args.area
+
+  if (args.delicate) {
+    const when = args.agentConnected
+      ? 'Una asesora te escribirá en unos minutos.'
+      : isOpenNow(now)
+        ? 'Una asesora te escribirá apenas se libere.'
+        : `Una asesora te atenderá ${ensurePeriod(nextOpeningText(now))}`
+    return `Tu caso ya quedó derivado con prioridad a nuestro equipo de ${label} 🤍 ${when} Cuando te sientas con ánimo, puedes contarnos por aquí los detalles, sin ninguna prisa.`
+  }
 
   if (args.agentConnected) {
     return `Gracias por escribirnos 😊 Ya derivé tu consulta con nuestro equipo de ${label}. En unos minutos te atenderán por este mismo chat.${KEEP_HELPING}`
@@ -117,5 +134,13 @@ export function buildHandoffNotice(args: {
     return `Gracias por escribirnos 😊 Ya derivé tu consulta con nuestro equipo de ${label}. En este momento nuestros asesores están atendiendo otras consultas; te escribirán apenas se libere uno. Nuestro horario es ${SCHEDULE_TEXT}.${KEEP_HELPING}`
   }
 
-  return `Gracias por escribirnos 😊 Tu caso ya quedó registrado y derivado a nuestro equipo de ${label}. Ahora estamos fuera de horario: te atenderán ${nextOpeningText(now)}. Nuestro horario es ${SCHEDULE_TEXT}.${KEEP_HELPING}`
+  return `Gracias por escribirnos 😊 Tu caso ya quedó registrado y derivado a nuestro equipo de ${label}. Ahora estamos fuera de horario: te atenderán ${ensurePeriod(nextOpeningText(now))} Nuestro horario es ${SCHEDULE_TEXT}.${KEEP_HELPING}`
+}
+
+/** Short reassurance when a customer asks again after being handed off. */
+export function buildWaitingReminder(now: number = Date.now()): string {
+  if (isOpenNow(now)) {
+    return `Tu caso ya está derivado con nuestro equipo y te escribirán apenas se libere un asesor. Nuestro horario es ${SCHEDULE_TEXT}.`
+  }
+  return `Tu caso ya está derivado con nuestro equipo. Ahora estamos fuera de horario: te atenderán ${ensurePeriod(nextOpeningText(now))} Nuestro horario es ${SCHEDULE_TEXT}.`
 }

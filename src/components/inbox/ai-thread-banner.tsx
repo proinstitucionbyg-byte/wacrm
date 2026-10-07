@@ -101,8 +101,9 @@ export function AiThreadBanner({
       const { error } = await supabase
         .from("conversations")
         .update({
-  ai_enabled: !nextDisabled,
-})
+          ai_enabled: !nextDisabled,
+          ai_disabled_at: nextDisabled ? new Date().toISOString() : null,
+        })
         .eq("id", conversationId);
 
       if (error) throw error;
@@ -137,6 +138,7 @@ export function AiThreadBanner({
         .from("conversations")
         .update({
           automation_enabled: nextEnabled,
+          automation_disabled_at: nextEnabled ? null : new Date().toISOString(),
         })
         .eq("id", conversationId);
 

@@ -58,31 +58,41 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
 
 const AUTOMATION_MARKER_GLOBAL = new RegExp(AUTOMATION_MARKER_REGEX.source, 'gi')
 
-// Tolerant on purpose: accepts `[[HANDOFF]]`, `[[HANDOFF:ventas]]` and
-// variants with accents or spaces, so a slightly off marker still counts
-// as a handoff instead of leaking to the customer.
-const HANDOFF_RE = /\[\[HANDOFF(?::\s*([^\]\s]+))?\s*\]\]/i
+// Tolerant on purpose. Accepts `[[HANDOFF]]`, `[[HANDOFF:ventas]]`,
+// `[[HANDOFF:fidelizacion:delicado]]` and `[[HANDOFF:delicado]]`, so a
+// slightly off marker still counts as a handoff instead of leaking to
+// the customer.
+const HANDOFF_RE =
+  /\[\[HANDOFF(?::\s*([^\]\s:]+))?(?::\s*([^\]\s:]+))?\s*\]\]/i
 const HANDOFF_RE_GLOBAL = new RegExp(HANDOFF_RE.source, 'gi')
 
-function normalizeArea(raw: string | undefined): string | null {
-  if (!raw) return null
-  const clean = raw
+function clean(raw: string): string {
+  return raw
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
-  return (HANDOFF_AREAS as readonly string[]).includes(clean) ? clean : null
+}
+
+function normalizeArea(raw: string | undefined): string | null {
+  if (!raw) return null
+  const c = clean(raw)
+  return (HANDOFF_AREAS as readonly string[]).includes(c) ? c : null
+}
+
+function isDelicate(raw: string | undefined): boolean {
+  return raw ? clean(raw).startsWith('delic') : false
 }
 
 /**
  * Split the raw model output into
- * `{ text, handoff, handoffArea, automationId, usage }`.
+ * `{ text, handoff, handoffArea, handoffDelicate, automationId, usage }`.
  * A handoff marker (alone or trailing a partial reply) makes the turn a
  * handoff; its area is validated against HANDOFF_AREAS (null if missing
- * or unknown). The automation marker is stripped from the text and its
- * id returned (lowercased); a handoff always wins over an automation.
- * `usage` is passed straight through (null when the provider didn't
- * report it).
+ * or unknown) and the optional `delicado` flag marks painful situations.
+ * The automation marker is stripped from the text and its id returned
+ * (lowercased); a handoff always wins over an automation. `usage` is
+ * passed straight through (null when the provider didn't report it).
  */
 export function parseGeneration(
   raw: string,
@@ -91,6 +101,9 @@ export function parseGeneration(
   const handoffMatch = raw.match(HANDOFF_RE)
   const handoff = handoffMatch !== null
   const handoffArea = handoff ? normalizeArea(handoffMatch?.[1]) : null
+  const handoffDelicate = handoff
+    ? isDelicate(handoffMatch?.[1]) || isDelicate(handoffMatch?.[2])
+    : false
   const automationMatch = raw.match(AUTOMATION_MARKER_REGEX)
   const automationId =
     !handoff && automationMatch ? automationMatch[1].toLowerCase() : null
@@ -98,5 +111,5 @@ export function parseGeneration(
     .replace(HANDOFF_RE_GLOBAL, '')
     .replace(AUTOMATION_MARKER_GLOBAL, '')
     .trim()
-  return { text, handoff, handoffArea, automationId, usage }
+  return { text, handoff, handoffArea, handoffDelicate, automationId, usage }
 }

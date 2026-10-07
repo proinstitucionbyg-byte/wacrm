@@ -11,6 +11,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
+import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -655,7 +656,9 @@ async function processMessage(
       mediaId: message.audio.id,
       accessToken,
     })
-    if (transcript) contentText = `🎤 ${transcript}`
+    contentText = transcript?.trim()
+      ? `🎤 ${transcript.trim()}`
+      : '🎤 [Audio que no se pudo entender]'
   }
 
   // Resolve swipe-reply context if present. A missing parent is fine —
@@ -782,10 +785,20 @@ const lastHuman = conversation.last_human_message_at
   : 0
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
 
+const followupReplyHandled = interactiveReplyId
+  ? await handleIdleFollowupReply({
+      accountId,
+      userId: configOwnerUserId,
+      contactId: contactRecord.id,
+      conversationId: conversation.id,
+      replyId: interactiveReplyId,
+    })
+  : false
+
 const automationPaused =
-  conversation.automation_enabled === false || humanRecentlyActive
+  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled
   let automationMatched = false
-  let flowConsumed = false
+  let flowConsumed = followupReplyHandled
 
 if (!automationPaused) {
   const flowResult = await dispatchInboundToFlows({
@@ -851,7 +864,7 @@ for (const triggerType of automationTriggers) {
       conversation_id: conversation.id,
       interactive_reply_id: interactiveReplyId ?? undefined,
     },
-  })
+})
 
   if (matched) {
     automationMatched = true

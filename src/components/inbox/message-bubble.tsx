@@ -61,6 +61,33 @@ function MediaUnavailable({ label, t }: { label: string, t: ReturnType<typeof us
   );
 }
 
+function AudioTranscript({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const cleanedText = text.replace(/^🎤\s*/, "").trim();
+  const words = cleanedText.split(/\s+/).filter(Boolean);
+  const canExpand = words.length > 3 && !/^\[.*\]$/.test(cleanedText);
+  const preview = words.slice(0, 3).join(" ");
+
+  return (
+    <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+      🎤 {expanded || !canExpand ? cleanedText : `${preview}…`}
+      {canExpand && (
+        <button
+          type="button"
+          className="ml-1 underline underline-offset-2"
+          aria-expanded={expanded}
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((value) => !value);
+          }}
+        >
+          {expanded ? "Leer menos" : "Leer más"}
+        </button>
+      )}
+    </p>
+  );
+}
+
 function MediaImage({
   url,
   alt,
@@ -200,11 +227,7 @@ function MessageContent({
           ) : (
             <MediaUnavailable label={t("audio")} t={t} />
           )}
-                    {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
-            </p>
-          )}
+          {message.content_text && <AudioTranscript text={message.content_text} />}
         </div>
       );
 

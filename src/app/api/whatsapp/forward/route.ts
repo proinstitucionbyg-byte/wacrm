@@ -50,8 +50,6 @@ export async function POST(req: NextRequest) {
         { status: 404 },
       );
     }
-    console.log("FORWARD MESSAGE");
-console.log(message);
 let mediaUrl = message.media_url;
 
 if (

@@ -772,7 +772,14 @@ const toggleMessageSelection = (messageId: string) => {
     try {
       setForwarding(true);
 
-      for (const messageId of selectedMessages) {
+      const messageTimes = new Map(
+        messages.map((message) => [message.id, Date.parse(message.created_at)]),
+      );
+      const orderedMessageIds = [...selectedMessages].sort(
+        (a, b) => (messageTimes.get(a) ?? 0) - (messageTimes.get(b) ?? 0),
+      );
+
+      for (const messageId of orderedMessageIds) {
         const response = await fetch("/api/whatsapp/forward", {
           method: "POST",
           headers: {
@@ -796,12 +803,14 @@ const toggleMessageSelection = (messageId: string) => {
       setSelectedMessages([]);
     } catch (error) {
       console.error("Forward failed:", error);
-      toast.error("No se pudo reenviar el mensaje");
+      toast.error(
+        error instanceof Error ? error.message : "No se pudo reenviar el mensaje",
+      );
     } finally {
       setForwarding(false);
     }
   },
-  [selectedMessages],
+  [messages, selectedMessages],
 );
 
   // Build a quick id → Message map so reply quotes can be rendered without

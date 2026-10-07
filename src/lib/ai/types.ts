@@ -67,6 +67,10 @@ export interface GenerateResult {
     /** Area the model chose for a handoff (auto-reply mode), e.g. 'ventas'.
    *  Null/undefined when it didn't say. Must be validated by the caller. */
   handoffArea?: string | null
+    /** True when the handoff is for a painful situation (bereavement, illness,
+   *  accident...). The customer notice is then softer. Only meaningful when
+   *  `handoff` is true. */
+  handoffDelicate?: boolean
   /** Provider token usage for this call, or null when unavailable. */
   usage: AiUsage | null
 }
