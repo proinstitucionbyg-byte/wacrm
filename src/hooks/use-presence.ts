@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
@@ -44,6 +44,7 @@ interface UsePresenceResult {
  */
 export function usePresence(enabled = true): UsePresenceResult {
   const { accountId } = useAuth();
+  const subscriptionId = useId();
 
   // Presence rows keyed by user_id, held in immutable state — each
   // update replaces the Map so React renders and the derived getters
@@ -81,7 +82,9 @@ export function usePresence(enabled = true): UsePresenceResult {
     // rather than replacing the map — so an event that lands while the
     // fetch is in flight isn't clobbered by a staler snapshot row.
     const channel: RealtimeChannel = supabase
-      .channel(`presence:${accountId}`)
+      // Each consumer owns its channel; Supabase reuses identical names and
+      // rejects adding callbacks to a channel another consumer subscribed.
+      .channel(`presence:${accountId}:${subscriptionId}`)
       .on(
         "postgres_changes",
         {
@@ -152,7 +155,7 @@ export function usePresence(enabled = true): UsePresenceResult {
       clearInterval(tick);
       supabase.removeChannel(channel);
     };
-  }, [active, accountId]);
+  }, [active, accountId, subscriptionId]);
 
   const getRow = useCallback(
     (userId: string): PresenceRow | undefined => rows.get(userId),

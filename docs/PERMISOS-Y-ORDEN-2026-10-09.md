@@ -43,6 +43,7 @@
 - Simulación SQL en transacción: antes de cuatro turnos no deriva; siguiente mensaje deriva al único agente al 100%, crea etiqueta de área y pausa automatizaciones. ROLLBACK elimina los datos simulados y restaura la configuración.
 - 12 pruebas dirigidas y 842 pruebas completas aprobadas. TypeScript, lint y compilación aprobados.
 - La configuración real se deja desactivada/sin porcentajes hasta que el CEO guarde sus valores.
+- En la verificación publicada se detectó un bloqueo del panel: dos consumidores de usePresence reutilizaban un canal Realtime ya suscrito. Cada consumidor ahora tiene un identificador de canal propio. También se completó la etiqueta de navegación de respuestas rápidas.
 
 ## INCIDENCIA DE CONECTIVIDAD RESUELTA
 
