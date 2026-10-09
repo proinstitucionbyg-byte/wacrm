@@ -190,7 +190,7 @@ automation_enabled?: boolean;
 // Notifications (migration 027)
 // ============================================================
 
-export type NotificationType = 'conversation_assigned';
+export type NotificationType = 'conversation_assigned' | 'team_message';
 
 export interface Notification {
   id: string;
@@ -199,6 +199,7 @@ export interface Notification {
   user_id: string;
   type: NotificationType;
   conversation_id?: string;
+  team_thread_id?: string;
   contact_id?: string;
   /** Who triggered it. Null when an automation/system assigned it. */
   actor_user_id?: string;

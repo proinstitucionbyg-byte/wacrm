@@ -6,9 +6,10 @@ Fecha: 08/10/2026, America/Lima. Esta lista describe requisitos y evidencia, no 
 
 - Publicado y visto en CRM: cola de pagos con etiquetas, origen, decisiones del CEO y auditoria; cumpleaños de asesoras visible. El voucher real sigue pendiente, no fue aprobado por el agente.
 - Base aplicada: cada validacion humana crea una sola ficha de matricula. Prueba con datos temporales y rollback, sin aprobar el voucher real.
-- Preparado: editor de ficha, sugerencias del lector de DNI, pendientes, oferta de seis cuotas confirmada y cola autenticada para Google. No equivale a documentos enviados.
+- Publicado (25373c1, EasyPanel Success 09/10 07:12 UTC) y menu comprobado: editor de ficha, sugerencias del lector de DNI, pendientes, oferta de seis cuotas confirmada y cola autenticada para Google. No equivale a documentos enviados.
 - PUENTE_CRM_MATRICULAS.gs guardado como archivo separado en el proyecto existente. Falta clave limitada, activar el trigger y probar el recorrido completo; no se declara instalado ni operativo aun.
-- La bateria local paso 796 pruebas y build. El chat interno, entrega de documentos al WhatsApp y otras filas pendientes abajo siguen sin completarse.
+- Chat interno individual/grupal preparado, base aplicada: participantes, mensajes, historial paginado, avisos y no leidos. Prueba real de permisos en transaccion con rollback: miembro puede leer; tercero no puede leer/enviar; no se puede falsificar remitente ni invitar usuarios ajenos. Pendiente publicacion y comprobacion visual.
+- La bateria local paso 809/809 pruebas y build (66 paginas). La entrega de documentos al WhatsApp y las demas filas pendientes abajo siguen sin completarse. El contenido de la revision 08/10 es historico, no el estado vigente de lo resuelto arriba.
 
 ## Estado de la revision anterior (08/10; ver actualizacion arriba)
 
