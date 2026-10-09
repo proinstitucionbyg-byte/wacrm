@@ -56,6 +56,9 @@ vi.mock('./admin-client', () => ({
     },
   }),
 }))
+vi.mock('./handoff-routing', () => ({
+  findConnectedAgentForArea: vi.fn().mockResolvedValue({ agentId: null }),
+}))
 
 import { dispatchInboundToAiReply } from './auto-reply'
 
@@ -148,6 +151,20 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
 
+  it('continues replying when an adviser is assigned but has not paused AI', async () => {
+    h.state.conv = {
+      assigned_agent_id: 'agent-9',
+      ai_enabled: true,
+      ai_autoreply_disabled: false,
+      ai_reply_count: 0,
+      ai_handed_off_at: null,
+    }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply).toHaveBeenCalledTimes(1)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: 'Hello!' }))
+    expect(h.state.updatePayload).toBeNull()
+  })
+
   it('skips when the assigned human has paused AI on the conversation', async () => {
     h.state.conv = {
       assigned_agent_id: 'agent-9',
@@ -192,7 +209,7 @@ describe('dispatchInboundToAiReply — handoff', () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).toHaveBeenCalledTimes(1)
-    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('derivado') }))
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('equipo de ventas') }))
     expect(h.state.rpcCalls).toHaveLength(0)
     expect(h.state.updatePayload?.ai_handed_off_at).toEqual(expect.any(String))
     expect(h.state.updatePayload).not.toHaveProperty('ai_autoreply_disabled')

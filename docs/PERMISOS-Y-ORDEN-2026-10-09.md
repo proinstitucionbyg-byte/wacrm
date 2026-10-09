@@ -38,12 +38,22 @@
 - Reparto se activa solo con total 100%, destinatarios de ventas y permisos de consulta/envío del chat. Cero excluye a una cuenta.
 - Se cuentan cuatro grupos de respuestas del bot desde que se activa el reparto. Imagen/texto/audio consecutivos forman un mismo turno. Al siguiente mensaje del alumno se deriva.
 - Rotación ponderada, serializada por cuenta; solo candidatos conectados con heartbeat reciente. Si queda uno conectado, recibe los nuevos chats pendientes que escriban aunque los demás estén desconectados.
-- Al derivar: etiqueta AREA VENTAS y ASESOR [APODO/NOMBRE]; pausa IA/automatizaciones y finaliza esperas automáticas previas.
+- Al asignar: etiqueta AREA VENTAS y ASESOR [APODO/NOMBRE]. La asignación conserva IA, automatizaciones, esperas y flujos activos. Solo habilita seguimiento por la asesora; no equivale a que haya respondido.
 - Si no hay candidatos: PENDIENTE DE ASIGNACION VENTAS. Se reintenta al recibir otro mensaje. **Todavía no hay barrido periódico que reasigne pendientes sin que llegue un nuevo mensaje.**
-- Simulación SQL en transacción: antes de cuatro turnos no deriva; siguiente mensaje deriva al único agente al 100%, crea etiqueta de área y pausa automatizaciones. ROLLBACK elimina los datos simulados y restaura la configuración.
+- Simulación SQL original: antes de cuatro turnos no asigna; siguiente mensaje asigna al único agente al 100%. La pausa añadida originalmente fue un error corregido tras aclaración del usuario.
 - 12 pruebas dirigidas y 842 pruebas completas aprobadas. TypeScript, lint y compilación aprobados.
 - La configuración real se deja desactivada/sin porcentajes hasta que el CEO guarde sus valores.
 - En la verificación publicada se detectó un bloqueo del panel: dos consumidores de usePresence reutilizaban un canal Realtime ya suscrito. Cada consumidor ahora tiene un identificador de canal propio. También se completó la etiqueta de navegación de respuestas rápidas.
+
+### CORRECCION: ASIGNAR NO PAUSA LA AUTOMATIZACION
+
+- El usuario aclaró que desde el quinto contacto la asesora obtiene acceso/etiquetado para seguimiento, mientras la IA y automatización continúan.
+- Migración keep_sales_assignment_automation_running aplicada: asignación ya no cambia banderas de IA/automatización, no marca handoff ni cancela esperas/flujos.
+- Webhook corregido: el resultado de asignar no forma parte de automationPaused; el mensaje sigue pasando por los flujos y la IA existentes.
+- Asignación interna no envía al alumno el anuncio automático de que una persona continuará la atención.
+- La pausa existente por una respuesta humana se mantiene separada de la asignación; no se activa por recibir una etiqueta.
+- Prueba SQL real con ROLLBACK: asignado=true, IA activa=true, automatización activa=true, espera pendiente conservada, flujo activo conservado y etiqueta de ventas presente. Sin mensajes de prueba persistentes ni cambios de porcentajes reales.
+- 843 pruebas completas aprobadas, TypeScript/lint/compilación aprobados. Prueba WhatsApp real sigue pendiente.
 
 ## INCIDENCIA DE CONECTIVIDAD RESUELTA
 
@@ -54,6 +64,16 @@
 - Aún falta inicio oficial y confirmar oferta/identidad para enviar esa ficha a registro. No afirmar matrícula ni entrega de documentos completadas.
 
 ## TRABAJO QUE SIGUE PENDIENTE
+
+### REGLAS DE ETIQUETADO ACLARADAS POR EL USUARIO
+
+- Crear y administrar el catálogo: CEO, administradores y coordinadores autorizados. Las asesoras aplican etiquetas existentes disponibles para su área; no crean el catálogo.
+- Destinatarios combinables: persona concreta identificada por APODO, coordinadores, administración o área. ASHLEY permite a Ashley; ASHLEY + COORDINADORES permite a ambos. El CEO conserva supervisión global.
+- Separar destinatarios/acceso al chat de estados de trabajo. SEGUIMIENTO o VENTA SEGURA son estados de ventas; RESOLUCION DE PROBLEMAS, EGRESADO o POSIBLE COBRANZA son estados de fidelización. Aplicar un estado común no concede acceso al chat a todos los miembros del área.
+- Traspaso: reemplazar la etiqueta de responsable saliente por la receptora, actualizar área/responsable y conservar trazabilidad de la venta original.
+- En un mismo traspaso se selecciona historial completo o acotado. Misma área: completo por defecto. Nueva asesora recibe presentación preparada con su APODO y pulsa ENVIAR.
+- Cargo escrito en el perfil no concede autoridad por sí solo: capacidad de administrar etiquetas debe concederse por permisos del CEO/administrador.
+- Verificación de código: TagManager administra etiquetas sin destinatarios; message-thread cambia assigned_agent_id directamente. El control de destinatarios/historial aún no está implementado; no darlo por terminado.
 
 - Prueba WhatsApp real del reparto, después de que el CEO configure a Luis y los porcentajes desde el panel.
 - Reasignar automáticamente la cola sin conexión cuando una persona vuelva a conectarse, sin esperar un nuevo mensaje.

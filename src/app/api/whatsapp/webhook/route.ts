@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { findContactByBsuid } from '@/lib/contacts/dedupe'
@@ -649,8 +649,9 @@ async function processMessage(
   }
 
   // Parse message content based on type
-  let { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(message, accessToken)
+  const parsedContent = await parseMessageContent(message, accessToken)
+  const { mediaUrl, mediaType, interactiveReplyId } = parsedContent
+  let { contentText } = parsedContent
       // Audio: transcribe so the AI, keyword automations and advisors can
   // read what the customer said. Best-effort, never throws.
   if (message.type === 'audio' && message.audio?.id) {
@@ -830,10 +831,13 @@ const followupReplyHandled = interactiveReplyId
     })
   : false
 
-const salesRoutingHandled = !humanRecentlyActive && !followupReplyHandled &&
-  await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id,contactId:contactRecord.id,userId:configOwnerUserId})
+// Assignment makes the lead available to an adviser. It does not consume the
+// inbound or pause the existing flow/AI; human replies use their own pause.
+if (!humanRecentlyActive && !followupReplyHandled) {
+  await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
+}
 const automationPaused =
-  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled || salesRoutingHandled
+  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled
   let automationMatched = false
   let flowConsumed = followupReplyHandled
 
