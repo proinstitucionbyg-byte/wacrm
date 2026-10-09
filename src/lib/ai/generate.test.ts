@@ -42,6 +42,7 @@ describe('parseGeneration', () => {
   it('returns text with no handoff', () => {
     expect(parseGeneration('Hello there')).toEqual({
       text: 'Hello there',
+      automationId: null, handoffArea: null, handoffDelicate: false,
       handoff: false,
       usage: null,
     })
@@ -50,11 +51,13 @@ describe('parseGeneration', () => {
   it('detects + strips the handoff sentinel', () => {
     expect(parseGeneration('[[HANDOFF]]')).toEqual({
       text: '',
+      automationId: null, handoffArea: null, handoffDelicate: false,
       handoff: true,
       usage: null,
     })
     expect(parseGeneration('Let me get a human [[HANDOFF]]')).toEqual({
       text: 'Let me get a human',
+      automationId: null, handoffArea: null, handoffDelicate: false,
       handoff: true,
       usage: null,
     })
@@ -64,6 +67,7 @@ describe('parseGeneration', () => {
     const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
     expect(parseGeneration('Hi', usage)).toEqual({
       text: 'Hi',
+      automationId: null, handoffArea: null, handoffDelicate: false,
       handoff: false,
       usage,
     })
@@ -88,6 +92,7 @@ describe('generateReply — OpenAI', () => {
 
     expect(res).toEqual({
       text: 'Sure — happy to help!',
+      automationId: null, handoffArea: null, handoffDelicate: false,
       handoff: false,
       usage: { promptTokens: 42, completionTokens: 8, totalTokens: 50 },
     })
@@ -147,6 +152,7 @@ describe('generateReply — Anthropic', () => {
     // Anthropic reports input/output only — total is summed by normalizeUsage.
     expect(res).toEqual({
       text: 'Hi there!',
+      automationId: null, handoffArea: null, handoffDelicate: false,
       handoff: false,
       usage: { promptTokens: 30, completionTokens: 6, totalTokens: 36 },
     })

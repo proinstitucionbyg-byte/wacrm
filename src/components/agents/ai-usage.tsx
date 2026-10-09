@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { BarChart3, Bot, PencilLine } from 'lucide-react';
+import { BarChart3, Bot, Image, PencilLine } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 import {
@@ -36,6 +36,7 @@ interface UsageResponse {
   by_mode: {
     auto_reply: { calls: number; tokens: number };
     draft: { calls: number; tokens: number };
+    image_analysis: { calls: number; tokens: number };
   };
   by_model: {
     model: string;
@@ -108,8 +109,8 @@ export function AiUsageCard() {
               <BarChart3 className="h-4 w-4 text-primary" /> Token usage
             </CardTitle>
             <CardDescription>
-              Tokens spent on your provider key by drafts and the auto-reply
-              bot. Counts only — no message content is stored here.
+              Tokens spent on your provider key by drafts, auto-replies, and
+              image reading. Counts only — no message content is stored here.
             </CardDescription>
           </div>
           <Select
@@ -142,7 +143,7 @@ export function AiUsageCard() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <Stat label="Total tokens" value={formatCompactNumber(data.totals.total_tokens)} />
               <Stat label="LLM calls" value={String(data.totals.calls)} />
               <Stat
@@ -154,6 +155,11 @@ export function AiUsageCard() {
                 label="Drafts"
                 value={formatCompactNumber(data.by_mode.draft.tokens)}
                 icon={PencilLine}
+              />
+              <Stat
+                label="Image reading"
+                value={formatCompactNumber(data.by_mode.image_analysis.tokens)}
+                icon={Image}
               />
             </div>
 

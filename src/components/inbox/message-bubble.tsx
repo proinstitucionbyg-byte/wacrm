@@ -88,6 +88,92 @@ function AudioTranscript({ text }: { text: string }) {
   );
 }
 
+const IMAGE_ANALYSIS_LABELS: Record<string, string> = {
+  document_type: "Tipo de documento",
+  full_name: "Nombre",
+  document_number: "Número de documento",
+  amount: "Monto",
+  currency: "Moneda",
+  date: "Fecha",
+  transaction_reference: "Código de operación",
+  payer: "Pagador",
+  recipient: "Destinatario",
+  institution: "Entidad",
+};
+
+function ImageAnalysisPanel({ message }: { message: Message }) {
+  const analysis = message.image_analysis;
+  if (!analysis) return null;
+
+  if (analysis.status === "failed") {
+    const reason = analysis.failure_reason;
+    const details =
+      reason === "unsupported_format"
+        ? "Este formato no se puede leer automáticamente."
+        : reason === "too_large"
+          ? "La imagen supera el tamaño que se puede revisar automáticamente."
+          : reason === "not_configured"
+            ? "La lectura automática no está disponible."
+            : "No se pudo leer con claridad.";
+    return (
+      <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+        <p className="font-medium">Revisión manual pendiente</p>
+        <p className="mt-1 text-muted-foreground">{details} Revisa la imagen directamente.</p>
+      </div>
+    );
+  }
+
+  const fields = Object.entries(analysis.fields ?? {}).filter(
+    ([, value]) => typeof value === "string" && value.trim(),
+  );
+  const category =
+    analysis.category === "identity_document"
+      ? "Posible documento de identidad"
+      : analysis.category === "payment_receipt"
+        ? "Posible comprobante de pago"
+        : analysis.category === "other"
+          ? "Otra imagen"
+          : "Tipo de imagen no claro";
+
+  return (
+    <div className="mt-2 max-w-72 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+      <p className="font-medium">Lectura de IA · pendiente de revisión</p>
+      <p className="mt-1 text-muted-foreground">{category}</p>
+      {analysis.summary && <p className="mt-2 whitespace-pre-wrap">{analysis.summary}</p>}
+      {analysis.recipient_check && (
+        <div className="mt-2">
+          <p>Destinatario esperado: {analysis.recipient_check.expected}</p>
+          <p className="font-medium">
+            {analysis.recipient_check.status === "exact_match"
+              ? "El nombre completo coincide. Pago pendiente de aprobación."
+              : analysis.recipient_check.status === "missing"
+                ? "No se pudo leer el destinatario. Revisión requerida."
+                : "Nombre abreviado o diferente. Revisión requerida."}
+          </p>
+        </div>
+      )}
+      {fields.length > 0 && (
+        <dl className="mt-2 space-y-1">
+          {fields.map(([key, value]) => (
+            <div key={key} className="flex gap-1">
+              <dt className="shrink-0 font-medium">{IMAGE_ANALYSIS_LABELS[key] ?? key}:</dt>
+              <dd className="break-all">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {(analysis.observations?.length ?? 0) > 0 && (
+        <ul className="mt-2 list-inside list-disc text-muted-foreground">
+          {analysis.observations?.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+        </ul>
+      )}
+      <p className="mt-2 text-muted-foreground">
+        La lectura no confirma que el documento o el pago sean válidos. Verifícalos antes de aprobar.
+      </p>
+    </div>
+  );
+}
+
 function MediaImage({
   url,
   alt,
@@ -196,6 +282,7 @@ function MessageContent({
               {message.content_text}
             </p>
           )}
+          <ImageAnalysisPanel message={message} />
         </div>
       );
 

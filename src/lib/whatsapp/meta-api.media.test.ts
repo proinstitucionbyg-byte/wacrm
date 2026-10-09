@@ -18,6 +18,7 @@ function okFetch() {
     return {
       ok: true,
       json: async () => ({ messages: [{ id: "wamid.TEST" }] }),
+      text: async () => JSON.stringify({ messages: [{ id: "wamid.TEST" }] }),
     } as Response;
   });
 }

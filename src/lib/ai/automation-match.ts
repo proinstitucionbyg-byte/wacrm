@@ -45,6 +45,8 @@ interface Doc {
   label: string
   nameTokens: string[]
   extraTokens: string[]
+  curriculum: boolean
+  promotion: boolean
 }
 
 /**
@@ -65,6 +67,13 @@ export async function findCandidateAutomations(
     const userMessages = messages
       .filter((m) => m.role === 'user')
       .slice(-RECENT_USER_MESSAGES)
+
+    const latest = normalize(userMessages.at(-1)?.content ?? '')
+    const wantsCurriculum = /\b(mallas?|mayas?|temario|modulos|plan de estudios)\b|que (?:voy a |se )?aprend/.test(latest)
+    // A welcome or a clarification is not evidence that the main offer was sent.
+    const primaryInformationShared = messages.some((m) =>
+      m.role === 'assistant' && /\d+[.,]\d{2}/.test(m.content) && /\b(horarios?|mensualidad|primera cuota|primer mes|promocion|super promo)\b/.test(normalize(m.content)),
+    )
 
     // token -> recency multiplier (newest message = 2, older = 1)
     const recency = new Map<string, number>()
@@ -105,6 +114,8 @@ export async function findCandidateAutomations(
                 label: name,
         nameTokens: tokenize(name),
         extraTokens: tokenize(`${r.description ?? ''} ${keywords.join(' ')}`),
+        curriculum: /\b(mallas?|mayas?|temario|plan de estudios)\b/.test(normalize(name)),
+        promotion: /\b(promo|promocion)\b|19[.,]90/.test(normalize(name)),
       }
     })
 
@@ -130,8 +141,12 @@ export async function findCandidateAutomations(
         }
         return { d, score }
       })
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score)
+      .filter((x) => x.score > 0 && (!x.d.curriculum || wantsCurriculum || primaryInformationShared))
+      .sort((a, b) => {
+        // An explicit curriculum request is different from a first request for course info.
+        if (wantsCurriculum && a.d.curriculum !== b.d.curriculum) return Number(b.d.curriculum) - Number(a.d.curriculum)
+        return b.score - a.score || Number(b.d.promotion) - Number(a.d.promotion)
+      })
       .slice(0, limit)
 
     return scored.map((x) => ({ id: x.d.id, name: x.d.label }))

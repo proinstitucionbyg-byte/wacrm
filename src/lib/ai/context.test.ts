@@ -9,6 +9,7 @@ function fakeDb(rows: unknown[]): SupabaseClient {
     from: () => chain,
     select: () => chain,
     eq: () => chain,
+    in: () => chain,
     order: () => chain,
     limit: () => Promise.resolve({ data: rows, error: null }),
   }
@@ -16,6 +17,18 @@ function fakeDb(rows: unknown[]): SupabaseClient {
 }
 
 describe('buildConversationContext', () => {
+  it('includes image evidence and recipient comparison as unverified data', async () => {
+    const result = await buildConversationContext(fakeDb([{ sender_type: 'customer', content_type: 'image', content_text: 'Mi pago', image_analysis: { status: 'pending_review', category: 'payment_receipt', fields: { amount: '19.90' }, recipient_check: { expected: 'LUIS BRAYAN PALACIOS CARHUAPOMA', status: 'exact_match' } } }]), 'conv-1')
+    expect(result[0].role).toBe('user')
+    expect(result[0].content).toContain('Mi pago')
+    expect(result[0].content).toContain('19.90')
+    expect(result[0].content).toContain('LUIS BRAYAN PALACIOS CARHUAPOMA')
+    expect(result[0].content).toContain('Esta comparación no aprueba el pago')
+  })
+  it('retains a manual-review instruction if image analysis fails', async () => {
+    const result = await buildConversationContext(fakeDb([{ sender_type: 'customer', content_type: 'image', image_analysis: { status: 'failed', failure_reason: 'provider_error' } }]), 'conv-1')
+    expect(result[0].content).toContain('Una asesora debe revisar')
+  })
   it('maps sender_type to role and returns chronological order', async () => {
     // DB returns newest-first (created_at DESC); the fn reverses it.
     const rows = [

@@ -23,6 +23,7 @@ const CONTACT = {
   id: 'contact-1',
   account_id: 'acct-1',
   phone: '+15551234567',
+  channel: 'whatsapp',
 }
 
 // Chainable Supabase mock. A fresh builder per `.from()` call tracks whether
@@ -41,7 +42,7 @@ function makeSupabaseMock() {
         case 'conversations':
           // Once created this request, a by-id reload returns it (with
           // its contact); otherwise fall back to the canned existing row.
-          return { data: createdConversation ?? existingConversation, error: null }
+          return { data: createdConversation ?? (existingConversation ? { ...existingConversation, contacts: CONTACT } : null), error: null }
         case 'whatsapp_config':
           return {
             data: {
@@ -68,6 +69,7 @@ function makeSupabaseMock() {
               account_id: 'acct-1',
               contact_id: 'contact-1',
               contact: CONTACT,
+              contacts: CONTACT,
             },
             error: null,
           }
@@ -95,6 +97,7 @@ function makeSupabaseMock() {
           account_id: 'acct-1',
           contact_id: 'contact-1',
           contact: CONTACT,
+          contacts: CONTACT,
         }
       }
       if (table === 'messages') messageInserts.push(payload)

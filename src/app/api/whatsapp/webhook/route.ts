@@ -11,6 +11,8 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
+import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
+import { logAiUsage } from '@/lib/ai/usage'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
@@ -661,6 +663,28 @@ async function processMessage(
       : '🎤 [Audio que no se pudo entender]'
   }
 
+  // Read inbound photos separately from the customer's caption. This keeps
+  // OCR text out of keyword/flow matching; the result is stored on the
+  // message for the inbox and later AI context as unverified evidence.
+  let imageAnalysis: ImageAnalysis | null = null
+  if (message.type === 'image' && message.image?.id) {
+    const result = await analyzeInboundImage({
+      db: supabaseAdmin(),
+      accountId,
+      mediaId: message.image.id,
+      accessToken,
+    })
+    imageAnalysis = result.analysis
+    await logAiUsage(supabaseAdmin(), {
+      accountId,
+      conversationId: conversation.id,
+      mode: 'image_analysis',
+      provider: result.provider ?? 'openai',
+      model: result.model ?? 'unknown',
+      usage: result.usage,
+    })
+  }
+
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
   let replyToInternalId: string | null = null
@@ -726,6 +750,7 @@ async function processMessage(
     // the column; null for every other content_type so existing inserts
     // behave identically.
     interactive_reply_id: interactiveReplyId,
+    image_analysis: imageAnalysis,
   })
 
   if (msgError) {
@@ -881,7 +906,7 @@ for (const triggerType of automationTriggers) {
   !flowConsumed &&
     !automationMatched &&
   !interactiveReplyId &&
-  inboundText.trim()
+  (inboundText.trim() || imageAnalysis !== null)
 ) {
     // La IA toma la conversación: se cancelan los pasos de espera pendientes
   await supabaseAdmin()

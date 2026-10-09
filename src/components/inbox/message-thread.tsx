@@ -51,6 +51,7 @@ import { TemplatePicker } from "./template-picker";
 import { AiThreadBanner } from "./ai-thread-banner";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
+import { getAdviserIntroduction, getAdviserNickname } from "@/lib/inbox/adviser-introduction";
 
 interface ReplyDraft {
   id: string;
@@ -177,7 +178,7 @@ export function MessageThread({
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profiles, setProfiles] = useState<(Profile & { area?: string | null })[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
@@ -1309,6 +1310,9 @@ onStartSelection={() => toggleMessageSelection(msg.id)}
 
       {/* Composer */}
       <MessageComposer
+        key={conversation.id}
+        adviserIntroduction={getAdviserIntroduction(user?.id, assignedAgentId, currentAssignee, getAdviserNickname(user?.user_metadata))}
+        needsAdviserNickname={Boolean(user?.id && user.id === assignedAgentId && !getAdviserNickname(user.user_metadata))}
         conversationId={conversation.id}
         sessionExpired={sessionInfo.expired}
         onSend={handleSend}

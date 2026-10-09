@@ -1,5 +1,6 @@
 import type { AccountRole } from "@/lib/auth/roles";
 import type { InteractiveMessagePayload } from "@/lib/whatsapp/interactive";
+import type { ImageAnalysis } from "@/lib/ai/analyze-image";
 
 export type {
   InteractiveMessagePayload,
@@ -254,6 +255,11 @@ export interface Message {
    * badge in the inbox. Migration 033.
    */
   ai_generated?: boolean;
+  /**
+   * Private extraction of visible details from an inbound image. Always
+   * marked pending human review; it is not a payment or identity approval.
+   */
+  image_analysis?: ImageAnalysis | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';

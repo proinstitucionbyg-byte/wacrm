@@ -17,6 +17,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { useTranslations } from 'next-intl';
 import { SettingsPanelHead } from './settings-panel-head';
+import { getAdviserNickname } from '@/lib/inbox/adviser-introduction';
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const ALLOWED_MIME = new Set([
@@ -38,6 +39,8 @@ export function ProfileForm() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [fullName, setFullName] = useState('');
+  const [nickname, setNickname] = useState('');
+  const savedNickname = getAdviserNickname(user?.user_metadata);
   const [email, setEmail] = useState('');
   const [pendingAvatar, setPendingAvatar] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -49,8 +52,9 @@ export function ProfileForm() {
   useEffect(() => {
     if (!profile) return;
     setFullName(profile.full_name ?? '');
+    setNickname(savedNickname);
     setEmail(profile.email ?? '');
-  }, [profile]);
+  }, [profile, savedNickname]);
 
   // Cleanup object URLs to avoid leaks.
   useEffect(() => {
@@ -102,6 +106,11 @@ export function ProfileForm() {
     if (!user || !profile) return;
 
     const trimmedName = fullName.trim();
+    const trimmedNickname = nickname.trim().replace(/\s+/g, ' ');
+    if (trimmedNickname.length > 80) {
+      toast.error('El apodo debe tener como máximo 80 caracteres.');
+      return;
+    }
     if (!trimmedName) {
       toast.error(t('nameRequired'));
       return;
@@ -157,19 +166,24 @@ export function ProfileForm() {
       // after the user clicks the link (handled by the handle_new_user
       // trigger pattern in production deployments).
       let emailSent = false;
-      if (trimmedEmail.toLowerCase() !== profile.email.toLowerCase()) {
+      const emailChanged = trimmedEmail.toLowerCase() !== profile.email.toLowerCase();
+      const nicknameChanged = trimmedNickname !== savedNickname;
+      if (emailChanged || nicknameChanged) {
         const { error: emailError } = await supabase.auth.updateUser({
-          email: trimmedEmail,
+          ...(emailChanged ? { email: trimmedEmail } : {}),
+          ...(nicknameChanged ? { data: { nickname: trimmedNickname } } : {}),
         });
         if (emailError) {
           // Partial success: name/avatar saved but email didn't.
           toast.success(t('profileSaved'));
-          toast.error(t('emailChangeFailed', { message: emailError.message }));
+          toast.error(emailChanged
+            ? t('emailChangeFailed', { message: emailError.message })
+            : `No se pudo guardar el apodo: ${emailError.message}`);
           setSaving(false);
           await refreshProfile();
           return;
         }
-        emailSent = true;
+        emailSent = emailChanged;
       }
 
       setEmailChangePending(emailSent);
@@ -194,6 +208,7 @@ export function ProfileForm() {
   const dirty =
     !!profile &&
     (fullName.trim() !== (profile.full_name ?? '') ||
+      nickname.trim().replace(/\s+/g, ' ') !== savedNickname ||
       email.trim().toLowerCase() !== (profile.email ?? '').toLowerCase() ||
       pendingAvatar !== null ||
       removeAvatar);
@@ -275,6 +290,22 @@ export function ProfileForm() {
               disabled={saving}
               required
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="profile-nickname" className="text-foreground">Apodo</Label>
+            <Input
+              id="profile-nickname"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              placeholder="Ashley"
+              maxLength={80}
+              disabled={saving}
+              aria-describedby="profile-nickname-hint"
+            />
+            <p id="profile-nickname-hint" className="text-xs text-muted-foreground">
+              Así te presentarás al estudiante: «Hola, soy Ashley». Guarda el apodo antes de preparar tu presentación.
+            </p>
           </div>
 
           {/* Email */}

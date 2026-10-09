@@ -55,6 +55,8 @@ import {
 import { validateInteractivePayload } from "@/lib/whatsapp/interactive";
 import type { InteractiveMessagePayload, QuickReply } from "@/types";
 import { QuickReplyPicker } from "./quick-reply-picker";
+import { AdviserIntroductionCard } from "./adviser-introduction-card";
+import type { AdviserIntroduction } from "@/lib/inbox/adviser-introduction";
 
 /** Media content types an agent can send from the composer. */
 export type ComposerMediaKind = "image" | "video" | "document" | "audio";
@@ -110,6 +112,8 @@ interface MediaDraft {
 }
 
 interface MessageComposerProps {
+  adviserIntroduction?: AdviserIntroduction | null;
+  needsAdviserNickname?: boolean;
   conversationId: string;
   sessionExpired: boolean;
   onSend: (text: string, replyToId?: string) => void;
@@ -132,6 +136,8 @@ function formatDuration(seconds: number): string {
 const OPUS_ENCODER_PATH = "/opus/encoderWorker.min.js";
 
 export function MessageComposer({
+  adviserIntroduction,
+  needsAdviserNickname,
   conversationId,
   sessionExpired,
   onSend,
@@ -537,6 +543,26 @@ export function MessageComposer({
 
   return (
     <div className="border-t border-border bg-card p-3">
+      {needsAdviserNickname && !readOnly && (
+        <p className="mb-2 text-sm text-muted-foreground">
+          Completa y guarda tu apodo en <a href="/settings" className="text-primary underline">Configuración → Tu perfil</a> para preparar tu presentación.
+        </p>
+      )}
+      {adviserIntroduction && !readOnly && (
+        <AdviserIntroductionCard
+          key={`${conversationId}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ""}`}
+          adviser={adviserIntroduction}
+          disabled={inputsDisabled || sending || busy || drafting || recording}
+          hasDraft={Boolean(text.trim() || draft || replyTo || interactiveOpen)}
+          onUse={(presentation) => {
+            setText(presentation);
+            requestAnimationFrame(() => {
+              adjustHeight();
+              textareaRef.current?.focus();
+            });
+          }}
+        />
+      )}
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -875,8 +901,9 @@ function MediaDraftPreview({
 
       <div className="mt-2 flex items-end gap-2">
         {draft.kind !== "audio" && (
-          <input
+          <textarea
             value={draft.caption}
+            rows={3}
             maxLength={MEDIA_CAPTION_MAX}
             onChange={(e) => onCaptionChange(e.target.value)}
             onKeyDown={(e) => {
@@ -886,7 +913,7 @@ function MediaDraftPreview({
               }
             }}
             placeholder={t("addCaption")}
-            className="flex-1 rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50"
+            className="max-h-48 min-h-20 flex-1 resize-y rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50"
           />
         )}
         <GatedButton
