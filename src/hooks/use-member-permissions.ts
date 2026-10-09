@@ -20,6 +20,14 @@ export function useMemberPermissions() {
 
   const [permissions, setPermissions] = useState<PermissionMap>({});
   const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => setRevision((value) => value + 1);
+    window.addEventListener('focus', refresh);
+    const timer = window.setInterval(refresh, 60000);
+    return () => { window.removeEventListener('focus', refresh); window.clearInterval(timer); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,7 +127,7 @@ export function useMemberPermissions() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, accountRole]);
+  }, [user?.id, accountRole, revision]);
 
   const can = useCallback(
     (module: string, action: string) => {

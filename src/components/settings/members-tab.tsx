@@ -150,8 +150,10 @@ export function MembersTab() {
   }[]
 >([]);
 const [permissionsLoading, setPermissionsLoading] = useState(false);
+const [savingPermission, setSavingPermission] = useState<string | null>(null);
 async function loadMemberPermissions(userId: string) {
   setPermissionsLoading(true);
+  setMemberPermissions([]);
 
   try {
     const res = await fetch(`/api/account/members/${userId}/permissions`, {
@@ -667,7 +669,7 @@ async function loadMemberPermissions(userId: string) {
     if (!open) setPermissionsMember(null);
   }}
 >
-  <DialogContent className="bg-popover border-border sm:max-w-lg">
+  <DialogContent className="bg-popover border-border sm:max-w-2xl">
     <DialogHeader>
       <DialogTitle className="text-popover-foreground">
         Permisos
@@ -679,6 +681,7 @@ async function loadMemberPermissions(userId: string) {
           {permissionsMember?.full_name || permissionsMember?.email}
         </strong>
       </DialogDescription>
+      <p className="text-xs text-muted-foreground">Los cambios se guardan al marcar cada permiso. Para editar o validar, activa también el acceso de consulta de esa sección. CEO y administradores mantienen acceso completo.</p>
     </DialogHeader>
 
     <div className="max-h-[60vh] overflow-y-auto py-4 pr-2 space-y-3">
@@ -687,7 +690,10 @@ async function loadMemberPermissions(userId: string) {
       <Loader2 className="size-5 animate-spin" />
     </div>
   ) : (
-    memberPermissions.map((permission) => (
+    Array.from(new Set(memberPermissions.map((permission) => permission.module))).map((module) => (
+      <section key={module} className="space-y-2">
+      <h3 className="sticky top-0 bg-popover py-2 text-sm font-semibold">{({payments:'FINANZAS · VALIDACION DE PAGOS',enrollments:'REGISTRO DE MATRICULAS',inbox:'ATENCION · CHATS Y ETIQUETAS',contacts:'CONTACTOS',pipelines:'PROCESO DE VENTAS',automations:'AUTOMATIZACIONES',broadcasts:'ENVIOS MASIVOS',catalogs:'CATALOGOS',notifications:'NOTIFICACIONES',ai_agents:'AGENTES DE IA'} as Record<string,string>)[module] ?? module.toUpperCase()}</h3>
+      {memberPermissions.filter((permission) => permission.module === module).map((permission) => (
       <div
         key={permission.permission_id}
         className="flex items-center justify-between gap-4 rounded-md border border-border p-3"
@@ -703,11 +709,14 @@ async function loadMemberPermissions(userId: string) {
 
         <input
           type="checkbox"
+          aria-label={permission.label}
           checked={permission.allowed}
+          disabled={savingPermission !== null || ['owner', 'admin'].includes(permission.source)}
           onChange={async (e) => {
             if (!permissionsMember) return;
 
             const allowed = e.target.checked;
+            setSavingPermission(permission.permission_id);
 
             try {
               const res = await fetch(
@@ -743,12 +752,15 @@ async function loadMemberPermissions(userId: string) {
             } catch (err) {
               console.error('[MembersTab] permission update error:', err);
               toast.error('No se pudo actualizar el permiso');
+            } finally {
+              setSavingPermission(null);
             }
           }}
           className="size-4 shrink-0"
         />
       </div>
-    ))
+    ))}
+    </section>))
   )}
 </div>
 

@@ -20,7 +20,7 @@ type Evidence = {
     fields?: Record<string, string | null>;
   } | null;
 };
-function EnrollmentEditor({ initial }: { initial: EnrollmentDraft }) {
+function EnrollmentEditor({ initial, canEdit }: { initial: EnrollmentDraft; canEdit: boolean }) {
   const [draft, setDraft] = useState(initial);
   const [data, setData] = useState<EnrollmentData>(initial.data);
   const [images, setImages] = useState<Evidence[]>([]);
@@ -31,9 +31,9 @@ function EnrollmentEditor({ initial }: { initial: EnrollmentDraft }) {
   useEffect(() => {
     let cancelled = false;
     setCollecting(true);
-    fetch(`/api/enrollments/${initial.id}/collect`, { method: 'POST' })
+    (canEdit ? fetch(`/api/enrollments/${initial.id}/collect`, { method: 'POST' }) : Promise.resolve(null))
       .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json()).error);
+        if (res && !res.ok) throw new Error((await res.json()).error);
         return fetch(`/api/enrollments/${initial.id}`, { cache: 'no-store' });
       })
       .then(async (res) => {
@@ -48,8 +48,8 @@ function EnrollmentEditor({ initial }: { initial: EnrollmentDraft }) {
       .catch((err) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setCollecting(false); });
     return () => { cancelled = true; };
-  }, [initial.id]);
-  const locked = ['ready', 'processing', 'registered'].includes(draft.status);
+  }, [initial.id, canEdit]);
+  const locked = !canEdit || ['ready', 'processing', 'registered'].includes(draft.status);
   const dirty = JSON.stringify(data) !== JSON.stringify(draft.data);
   async function enqueue() {
     setSaving(true);
@@ -92,6 +92,7 @@ function EnrollmentEditor({ initial }: { initial: EnrollmentDraft }) {
       <h2 className="font-semibold">
         {data.full_name || 'MATRICULA CON DATOS PENDIENTES'}
       </h2>
+      {!canEdit && <p className="text-sm text-muted-foreground">Acceso de consulta. No tienes permiso para modificar esta matrícula.</p>}
       <p className="text-muted-foreground text-sm">
         PAGO VALIDADO ·{' '}
         {draft.status === 'registered'
@@ -314,6 +315,7 @@ function EnrollmentsPageContent() {
   const params = useSearchParams();
   const review = params.get('review_id');
   const [drafts, setDrafts] = useState<EnrollmentDraft[]>([]);
+  const [canEdit, setCanEdit] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
@@ -326,6 +328,7 @@ function EnrollmentsPageContent() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setDrafts(json.drafts);
+      setCanEdit(json.canEdit === true);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar');
@@ -340,7 +343,7 @@ function EnrollmentsPageContent() {
     <section className="space-y-5">
       <h1 className="text-2xl font-bold">REGISTRO DE MATRICULAS</h1>
       <p className="text-muted-foreground text-sm">
-        Cada ficha corresponde a un pago validado por el CEO. Los faltantes no
+        Cada ficha corresponde a un pago validado por una persona autorizada. Los faltantes no
         eliminan la aprobación.
       </p>
       <Button variant="outline" onClick={load} disabled={loading}>
@@ -357,6 +360,7 @@ function EnrollmentsPageContent() {
           <EnrollmentEditor
             key={`${draft.id}:${draft.version}`}
             initial={draft}
+            canEdit={canEdit}
           />
         ))
       ) : (

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { toErrorResponse } from '@/lib/auth/account';
+import { requirePermission } from '@/lib/auth/permissions';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   enrollmentIssues,
@@ -11,7 +12,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireRole('agent');
+    const ctx = await requirePermission('enrollments', 'edit');
     const { id } = await params;
     const body = await request.json().catch(() => null);
     if (!Number.isSafeInteger(body?.version) || body.version < 1)
@@ -37,7 +38,7 @@ export async function POST(
         { error: 'Completa los pendientes antes de enviar.', issues },
         { status: 400 }
       );
-    const { data: review, error: reviewError } = await ctx.supabase
+    const { data: review, error: reviewError } = await supabaseAdmin()
       .from('payment_reviews')
       .select('status')
       .eq('id', draft.review_id)

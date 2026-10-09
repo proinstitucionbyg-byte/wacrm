@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 const mocks=vi.hoisted(()=>({key:vi.fn(),role:vi.fn(),from:vi.fn(),select:vi.fn(),eq:vi.fn(),or:vi.fn(),order:vi.fn(),limit:vi.fn(),update:vi.fn(),in:vi.fn(),single:vi.fn(),media:vi.fn(),download:vi.fn()}));
 vi.mock('@/lib/auth/api-context',()=>({requireApiKey:mocks.key}));
 vi.mock('@/lib/auth/account',()=>({requireRole:mocks.role,toErrorResponse:(e:{status?:number})=>NextResponse.json({error:'denied'},{status:e.status??500})}));
+vi.mock('@/lib/auth/permissions',()=>({requirePermission:mocks.role}));
 vi.mock('@/lib/flows/admin-client',()=>({supabaseAdmin:()=>({from:mocks.from})}));
 vi.mock('@/lib/whatsapp/meta-api',()=>({getMediaUrl:mocks.media,downloadMedia:mocks.download}));
 vi.mock('@/lib/whatsapp/encryption',()=>({decrypt:()=> 'private-token'}));

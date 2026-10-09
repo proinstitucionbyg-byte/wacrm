@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 
-const mocks = vi.hoisted(() => ({ role: vi.fn(), from: vi.fn(), update: vi.fn(), eq: vi.fn(), neq: vi.fn(), select: vi.fn(), single: vi.fn() }));
+const mocks = vi.hoisted(() => ({ role: vi.fn(), can: vi.fn(), from: vi.fn(), update: vi.fn(), eq: vi.fn(), neq: vi.fn(), select: vi.fn(), single: vi.fn() }));
+vi.mock('@/lib/auth/permissions', () => ({ requirePermission: mocks.role, canInAccount: mocks.can }));
+vi.mock('@/lib/flows/admin-client', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('@/lib/auth/account', () => ({ requireRole: mocks.role, toErrorResponse: (e: { status?: number }) => NextResponse.json({ error: 'denied' }, { status: e.status ?? 500 }) }));
 import { PATCH } from './route';
 const id = '11111111-1111-4111-8111-111111111111';
@@ -13,13 +15,19 @@ beforeEach(() => {
   const chain = { update: mocks.update, eq: mocks.eq, neq: mocks.neq, select: mocks.select, maybeSingle: mocks.single };
   for (const fn of [mocks.from,mocks.update,mocks.eq,mocks.neq,mocks.select]) fn.mockReturnValue(chain);
   mocks.role.mockResolvedValue({ accountId: 'account-owner', supabase: { from: mocks.from } });
+  mocks.can.mockResolvedValue(true);
   mocks.single.mockResolvedValue({ data: { id, status: 'validated', version: 2 }, error: null });
 });
 describe('human payment decisions', () => {
-  it('requires the owner before reading or writing', async () => {
+  it('requires payment review permission before reading or writing', async () => {
     mocks.role.mockRejectedValue({ status: 403 });
     expect((await PATCH(request({ status: 'validated', note: '', version: 1 }), context())).status).toBe(403);
-    expect(mocks.role).toHaveBeenCalledWith('owner'); expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.role).toHaveBeenCalledWith('payments', 'review'); expect(mocks.from).not.toHaveBeenCalled();
+  });
+  it('also requires payment visibility', async () => {
+    mocks.can.mockResolvedValue(false);
+    expect((await PATCH(request({ status: 'validated', note: '', version: 1 }), context())).status).toBe(403);
+    expect(mocks.from).not.toHaveBeenCalled();
   });
   it('rejects an observation without a reason', async () => {
     expect((await PATCH(request({ status: 'observation', note: ' ', version: 1 }), context())).status).toBe(400);

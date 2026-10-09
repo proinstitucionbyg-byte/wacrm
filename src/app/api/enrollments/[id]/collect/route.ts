@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { toErrorResponse } from '@/lib/auth/account';
+import { requirePermission } from '@/lib/auth/permissions';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { collectConversationEnrollments } from '@/lib/matriculas/collect';
 
 export async function POST(
@@ -7,7 +9,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireRole('agent');
+    const ctx = await requirePermission('enrollments', 'edit');
     const { id } = await params;
     const { data: draft, error } = await ctx.supabase
       .from('enrollment_drafts')
@@ -23,7 +25,7 @@ export async function POST(
       );
     if (draft.conversation_id)
       await collectConversationEnrollments(
-        ctx.supabase,
+        supabaseAdmin(),
         ctx.accountId,
         draft.conversation_id
       );

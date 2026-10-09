@@ -85,6 +85,7 @@ import {
 interface NavItem {
   href: string;
   labelKey: string;
+  label?: string;
   icon: typeof LayoutDashboard;
     permission?: [string, string];
   /**
@@ -107,6 +108,9 @@ const navItems: NavItem[] = [
     icon: MessageSquare,
     permission: ["inbox", "view"],
   },
+  { href: "/payments", labelKey: "", label: "Validación de pagos", icon: CheckCheck, permission: ["payments", "view"] },
+  { href: "/enrollments", labelKey: "", label: "Registro de matrículas", icon: Users, permission: ["enrollments", "view"] },
+  { href: "/team-chat", labelKey: "", label: "Chat interno", icon: UsersRound, permission: ["inbox", "view"] },
   {
     href: "/notifications",
     labelKey: "notifications",
@@ -179,7 +183,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
-  const { can, loading: permissionsLoading } = useMemberPermissions();
+  const { can } = useMemberPermissions();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   // Only surface the account-name strip when it actually carries
@@ -276,13 +280,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {can('inbox', 'view') && <li><Link href="/payments" className="flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium hover:bg-muted"><CheckCheck />Validación de pagos</Link></li>}
-            {can('inbox', 'view') && <li><Link href="/enrollments" className="flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium hover:bg-muted"><Users />Registro de matrículas</Link></li>}
-            {accountRole !== 'viewer' && can('inbox', 'view') && <li><Link href="/team-chat" className="flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium hover:bg-muted"><MessageSquare />Chat interno</Link></li>}
             {navItems
   .filter(
     (item) =>
-      !item.permission || can(item.permission[0], item.permission[1]),
+      (item.href !== '/team-chat' || accountRole !== 'viewer') && (!item.permission || can(item.permission[0], item.permission[1])),
   )
   .map((item) => {
               const isActive =
@@ -326,7 +327,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   : "text-slate-300 group-hover:text-white"
   )}
 >
-  {t(item.labelKey as string)}
+  {item.label ?? t(item.labelKey as string)}
 </span>
                     {item.beta && (
                       <span

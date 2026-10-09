@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
+import { toErrorResponse } from '@/lib/auth/account';
+import { canInAccount, requirePermission } from '@/lib/auth/permissions';
 import { isPaymentStatus } from '@/lib/payments/review';
 
 export async function GET(request: Request) {
   try {
-    const ctx = await getCurrentAccount();
+    const ctx = await requirePermission('payments', 'view');
     const params = new URL(request.url).searchParams;
     const messageId = params.get('message_id');
     const status = params.get('status') ?? 'pending';
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     else if (status !== 'all') query = query.eq('status', status);
     const { data, error, count } = await query.range(offset, offset + 49);
     if (error) throw error;
-    return NextResponse.json({ reviews: data ?? [], total: count ?? 0, canReview: ctx.role === 'owner' });
+    return NextResponse.json({ reviews: data ?? [], total: count ?? 0, canReview: await canInAccount(ctx, 'payments', 'review') });
   } catch (error) { return toErrorResponse(error); }
 }
 
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
 // The database RPC checks membership/account and can ONLY create pending cases.
 export async function POST(request: Request) {
   try {
-    const ctx = await getCurrentAccount();
+    const ctx = await requirePermission('payments', 'refer');
     let body;
     try { body = await request.json(); } catch { return NextResponse.json({ error: 'Solicitud inválida' }, { status: 400 }); }
     if (typeof body?.message_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.message_id)) return NextResponse.json({ error: 'Mensaje inválido' }, { status: 400 });

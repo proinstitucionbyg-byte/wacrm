@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { toErrorResponse } from '@/lib/auth/account';
+import { requirePermission } from '@/lib/auth/permissions';
 import {
   parseEnrollmentData,
   enrollmentIssues,
@@ -10,7 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireRole('agent');
+    const ctx = await requirePermission('enrollments', 'view');
     const { id } = await params;
     const { data: draft, error } = await ctx.supabase
       .from('enrollment_drafts')
@@ -47,7 +48,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireRole('agent');
+    const ctx = await requirePermission('enrollments', 'edit');
     const { id } = await params;
     const body = await request.json().catch(() => null);
     const data = parseEnrollmentData(body?.data);

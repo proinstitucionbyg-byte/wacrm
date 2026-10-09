@@ -17,6 +17,7 @@ vi.mock('@/lib/auth/account', () => ({
   toErrorResponse: (e: { status?: number }) =>
     NextResponse.json({ error: 'denied' }, { status: e.status ?? 500 }),
 }));
+vi.mock('@/lib/auth/permissions', () => ({ requirePermission: mocks.role }));
 import { GET, PATCH } from './route';
 const id = '11111111-1111-4111-8111-111111111111';
 const context = () => ({ params: Promise.resolve({ id }) });
@@ -58,12 +59,12 @@ beforeEach(() => {
   mocks.limit.mockResolvedValue({ data: [], error: null });
 });
 describe('post-validation enrollment draft', () => {
-  it('requires an agent before any data access', async () => {
+  it('requires enrollment edit permission before any data access', async () => {
     mocks.role.mockRejectedValue({ status: 403 });
     expect(
       (await PATCH(request({ data: {}, version: 1 }), context())).status
     ).toBe(403);
-    expect(mocks.role).toHaveBeenCalledWith('agent');
+    expect(mocks.role).toHaveBeenCalledWith('enrollments', 'edit');
     expect(mocks.from).not.toHaveBeenCalled();
   });
   it('loads only the current account draft and its inbound images', async () => {

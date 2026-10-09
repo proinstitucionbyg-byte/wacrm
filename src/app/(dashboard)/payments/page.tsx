@@ -26,7 +26,7 @@ export default function PaymentsPage() {
   useEffect(() => { void load(); }, [load]);
   return <section className="space-y-5">
     <h1 className="text-2xl font-bold">VALIDACION DE PAGOS</h1>
-    <p className="text-sm text-muted-foreground">Comprobantes recibidos y derivados. La lectura automática no aprueba un pago; el CEO revisa y decide.</p>
+    <p className="text-sm text-muted-foreground">Comprobantes recibidos y derivados. La lectura automática no aprueba un pago; una persona autorizada revisa y decide.</p>
     <div className="flex flex-wrap items-center gap-3">
       <label>Estado <select value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }} className="ml-2 rounded-md border border-border bg-background p-2">
         {PAYMENT_STATUSES.map((value) => <option key={value} value={value}>{PAYMENT_LABELS[value]}</option>)}<option value="all">TODOS</option>
