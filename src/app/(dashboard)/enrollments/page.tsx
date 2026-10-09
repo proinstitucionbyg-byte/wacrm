@@ -27,15 +27,27 @@ function EnrollmentEditor({ initial }: { initial: EnrollmentDraft }) {
   const [issues, setIssues] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [collecting, setCollecting] = useState(true);
   useEffect(() => {
-    fetch(`/api/enrollments/${initial.id}`, { cache: 'no-store' })
+    let cancelled = false;
+    setCollecting(true);
+    fetch(`/api/enrollments/${initial.id}/collect`, { method: 'POST' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json()).error);
+        return fetch(`/api/enrollments/${initial.id}`, { cache: 'no-store' });
+      })
       .then(async (res) => {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error);
+        if (cancelled) return;
+        setDraft(json.draft);
+        setData(json.draft.data);
         setImages(json.images);
         setIssues(json.issues);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setCollecting(false); });
+    return () => { cancelled = true; };
   }, [initial.id]);
   const locked = ['ready', 'processing', 'registered'].includes(draft.status);
   const dirty = JSON.stringify(data) !== JSON.stringify(draft.data);
@@ -74,6 +86,7 @@ function EnrollmentEditor({ initial }: { initial: EnrollmentDraft }) {
       setSaving(false);
     }
   }
+  if (collecting) return <p className="p-5 text-sm">RECOGIENDO LOS DATOS DEL CHAT...</p>;
   return (
     <article className="border-border bg-card space-y-4 rounded-lg border p-5">
       <h2 className="font-semibold">

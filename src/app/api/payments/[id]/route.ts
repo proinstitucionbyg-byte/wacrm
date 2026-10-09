@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { parsePaymentDecision } from '@/lib/payments/review';
+import { collectConversationEnrollments } from '@/lib/matriculas/collect';
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -14,9 +15,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { data, error } = await ctx.supabase.from('payment_reviews')
       .update({ status: decision.status, note: decision.note })
       .eq('id', id).eq('account_id', ctx.accountId).eq('version', decision.version)
-      .neq('status', 'validated').select('id,status,version,reviewed_at,reviewed_by').maybeSingle();
+      .neq('status', 'validated').select('id,status,version,reviewed_at,reviewed_by,conversation_id').maybeSingle();
     if (error) throw error;
     if (!data) return NextResponse.json({ error: 'El caso cambió o ya está validado. Actualiza antes de decidir.' }, { status: 409 });
+    if (data.status === 'validated' && data.conversation_id) {
+      try { await collectConversationEnrollments(ctx.supabase, ctx.accountId, data.conversation_id); }
+      catch (error) { console.error('[matriculas] payment intake collection failed:', error); }
+    }
     return NextResponse.json({ review: data });
   } catch (error) { return toErrorResponse(error); }
 }

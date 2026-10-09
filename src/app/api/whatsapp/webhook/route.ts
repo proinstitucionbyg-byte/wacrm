@@ -12,6 +12,7 @@ import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
 import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
+import { collectConversationEnrollments } from '@/lib/matriculas/collect'
 import { logAiUsage } from '@/lib/ai/usage'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
@@ -756,6 +757,14 @@ async function processMessage(
   if (msgError) {
     console.error('Error inserting message:', msgError)
     return
+  }
+
+  // Persist intake data even when an adviser has paused AI replies.
+  try {
+    await collectConversationEnrollments(supabaseAdmin(), accountId, conversation.id)
+  } catch (error) {
+    console.error('[matriculas] intake collection failed:', error)
+    // An enrollment error must not lose the inbound message or stop the inbox.
   }
 
   // Update conversation
