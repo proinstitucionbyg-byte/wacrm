@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
-import { useAuth } from "@/hooks/use-auth";
-import { usePresence } from "@/hooks/use-presence";
-import { PresenceDot } from "@/components/presence/presence-dot";
-import { presenceLabel } from "@/lib/presence";
-import { cn } from "@/lib/utils";
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/hooks/use-auth';
+import { usePresence } from '@/hooks/use-presence';
+import { PresenceDot } from '@/components/presence/presence-dot';
+import { presenceLabel } from '@/lib/presence';
+import { cn } from '@/lib/utils';
 import type {
   Conversation,
   Message,
@@ -16,7 +16,7 @@ import type {
   MessageTemplate,
   Profile,
   InteractiveMessagePayload,
-} from "@/types";
+} from '@/types';
 import {
   MessageSquare,
   ChevronDown,
@@ -27,31 +27,44 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
-} from "lucide-react";
-import { format, isToday, isYesterday, differenceInHours } from "date-fns";
-import { useTranslations } from "next-intl";
-import { Badge } from "@/components/ui/badge";
+} from 'lucide-react';
+import { format, isToday, isYesterday, differenceInHours } from 'date-fns';
+import { useTranslations } from 'next-intl';
+import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageBubble } from "./message-bubble";
-import { MessageActions } from "./message-actions";
+} from '@/components/ui/dropdown-menu';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { MessageBubble } from './message-bubble';
+import { MessageActions } from './message-actions';
 import {
   MessageComposer,
   CHAT_MEDIA_BUCKET,
   type SendMediaPayload,
-} from "./message-composer";
-import { deleteAccountMedia } from "@/lib/storage/upload-media";
-import { TemplatePicker } from "./template-picker";
-import { AiThreadBanner } from "./ai-thread-banner";
-import { buildReplyPreview } from "./reply-quote";
-import { toast } from "sonner";
-import { getAdviserIntroduction, getAdviserNickname } from "@/lib/inbox/adviser-introduction";
+} from './message-composer';
+import { deleteAccountMedia } from '@/lib/storage/upload-media';
+import { TemplatePicker } from './template-picker';
+import { AiThreadBanner } from './ai-thread-banner';
+import { buildReplyPreview } from './reply-quote';
+import { toast } from 'sonner';
+import {
+  getAdviserIntroduction,
+  getAdviserNickname,
+} from '@/lib/inbox/adviser-introduction';
+import { useCan } from '@/hooks/use-can';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 interface ReplyDraft {
   id: string;
@@ -76,7 +89,7 @@ interface MessageThreadProps {
   onStatusChange: (conversationId: string, status: ConversationStatus) => void;
   onAssignChange: (
     conversationId: string,
-    assignedAgentId: string | null,
+    assignedAgentId: string | null
   ) => void;
   /**
    * On mobile, the thread is shown full-screen with the conversation list
@@ -112,19 +125,22 @@ interface MessageThreadProps {
   onToggleContactPanel?: () => void;
 }
 
-function formatDateSeparator(dateStr: string, t: ReturnType<typeof useTranslations>): string {
+function formatDateSeparator(
+  dateStr: string,
+  t: ReturnType<typeof useTranslations>
+): string {
   const date = new Date(dateStr);
-  if (isToday(date)) return t("today");
-  if (isYesterday(date)) return t("yesterday");
-  return format(date, "MMMM d, yyyy");
+  if (isToday(date)) return t('today');
+  if (isYesterday(date)) return t('yesterday');
+  return format(date, 'MMMM d, yyyy');
 }
 
 function groupMessagesByDate(messages: Message[]) {
   const groups: { date: string; messages: Message[] }[] = [];
-  let currentDate = "";
+  let currentDate = '';
 
   for (const msg of messages) {
-    const day = format(new Date(msg.created_at), "yyyy-MM-dd");
+    const day = format(new Date(msg.created_at), 'yyyy-MM-dd');
     if (day !== currentDate) {
       currentDate = day;
       groups.push({ date: msg.created_at, messages: [msg] });
@@ -136,10 +152,14 @@ function groupMessagesByDate(messages: Message[]) {
   return groups;
 }
 
-const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string }[] = [
-  { label: "Open", value: "open", color: "text-primary" },
-  { label: "Pending", value: "pending", color: "text-amber-400" },
-  { label: "Closed", value: "closed", color: "text-muted-foreground" },
+const STATUS_OPTIONS: {
+  label: string;
+  value: ConversationStatus;
+  color: string;
+}[] = [
+  { label: 'Open', value: 'open', color: 'text-primary' },
+  { label: 'Pending', value: 'pending', color: 'text-amber-400' },
+  { label: 'Closed', value: 'closed', color: 'text-muted-foreground' },
 ];
 
 /**
@@ -169,16 +189,24 @@ export function MessageThread({
   contactPanelOpen,
   onToggleContactPanel,
 }: MessageThreadProps) {
-  const t = useTranslations("Inbox.messageThread");
-  const tTimer = useTranslations("Inbox.sessionTimer");
-  const tQuote = useTranslations("Inbox.replyQuote");
+  const t = useTranslations('Inbox.messageThread');
+  const tTimer = useTranslations('Inbox.sessionTimer');
+  const tQuote = useTranslations('Inbox.replyQuote');
 
   const { user } = useAuth();
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
-  const [profiles, setProfiles] = useState<(Profile & { area?: string | null })[]>([]);
+  const [profiles, setProfiles] = useState<
+    (Profile & { area?: string | null })[]
+  >([]);
+  const canAssign = useCan('inbox.assign');
+  const [transfer, setTransfer] = useState<{
+      agent: string | null;
+      full: boolean;
+    } | null>(null),
+    [transferring, setTransferring] = useState(false);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
@@ -206,32 +234,35 @@ export function MessageThread({
 
   const [selectionMode, setSelectionMode] = useState(false);
 
-const [selectedMessages, setSelectedMessages] = useState<string[]>([]);
+  const [selectedMessages, setSelectedMessages] = useState<string[]>([]);
 
-const [forwardModalOpen, setForwardModalOpen] = useState(false);
-const [forwardConversations, setForwardConversations] = useState<Conversation[]>([]);
-const [loadingForwardConversations, setLoadingForwardConversations] = useState(false);
-const [forwarding, setForwarding] = useState(false);
-const toggleMessageSelection = (messageId: string) => {
-  console.log("toggleMessageSelection", messageId);
-  setSelectedMessages((current) => {
-    if (current.includes(messageId)) {
-      const updated = current.filter((id) => id !== messageId);
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [forwardConversations, setForwardConversations] = useState<
+    Conversation[]
+  >([]);
+  const [loadingForwardConversations, setLoadingForwardConversations] =
+    useState(false);
+  const [forwarding, setForwarding] = useState(false);
+  const toggleMessageSelection = (messageId: string) => {
+    console.log('toggleMessageSelection', messageId);
+    setSelectedMessages((current) => {
+      if (current.includes(messageId)) {
+        const updated = current.filter((id) => id !== messageId);
 
-      if (updated.length === 0) {
-        setSelectionMode(false);
+        if (updated.length === 0) {
+          setSelectionMode(false);
+        }
+
+        return updated;
       }
 
-      return updated;
-    }
+      if (!selectionMode) {
+        setSelectionMode(true);
+      }
 
-    if (!selectionMode) {
-      setSelectionMode(true);
-    }
-
-    return [...current, messageId];
-  });
-};
+      return [...current, messageId];
+    });
+  };
 
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
@@ -240,13 +271,13 @@ const toggleMessageSelection = (messageId: string) => {
     let cancelled = false;
     const supabase = createClient();
     supabase
-      .from("profiles")
-      .select("*")
-      .order("full_name")
+      .from('profiles')
+      .select('*')
+      .order('full_name')
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
-          console.error("Failed to fetch profiles:", error);
+          console.error('Failed to fetch profiles:', error);
           return;
         }
         setProfiles((data as Profile[]) ?? []);
@@ -258,27 +289,31 @@ const toggleMessageSelection = (messageId: string) => {
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
-    if (!messages.length) return { expired: false, remaining: "" };
+    if (!messages.length) return { expired: false, remaining: '' };
 
     // Find last customer message
     const lastCustomerMsg = [...messages]
       .reverse()
-      .find((m) => m.sender_type === "customer");
+      .find((m) => m.sender_type === 'customer');
 
-    if (!lastCustomerMsg) return { expired: true, remaining: "No customer messages" };
+    if (!lastCustomerMsg)
+      return { expired: true, remaining: 'No customer messages' };
 
-    const hoursSince = differenceInHours(new Date(), new Date(lastCustomerMsg.created_at));
+    const hoursSince = differenceInHours(
+      new Date(),
+      new Date(lastCustomerMsg.created_at)
+    );
     const expired = hoursSince >= 24;
 
     if (expired) {
-      return { expired: true, remaining: tTimer("expired") };
+      return { expired: true, remaining: tTimer('expired') };
     }
 
     const hoursLeft = 24 - hoursSince;
     const remaining =
       hoursLeft >= 1
-        ? tTimer("xhRemaining", { hours: Math.floor(hoursLeft) })
-        : tTimer("xmRemaining", { minutes: Math.floor(hoursLeft * 60) });
+        ? tTimer('xhRemaining', { hours: Math.floor(hoursLeft) })
+        : tTimer('xmRemaining', { minutes: Math.floor(hoursLeft * 60) });
 
     return { expired, remaining };
   }, [messages, tTimer]);
@@ -312,15 +347,15 @@ const toggleMessageSelection = (messageId: string) => {
       setLoading(true);
 
       const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
 
       if (cancelled) return;
 
       if (error) {
-        console.error("Failed to fetch messages:", error);
+        console.error('Failed to fetch messages:', error);
       } else {
         onMessagesLoadedRef.current(data ?? []);
       }
@@ -351,12 +386,12 @@ const toggleMessageSelection = (messageId: string) => {
 
     (async () => {
       const { data, error } = await supabase
-        .from("message_reactions")
-        .select("*")
-        .eq("conversation_id", conversationId);
+        .from('message_reactions')
+        .select('*')
+        .eq('conversation_id', conversationId);
       if (cancelled) return;
       if (error) {
-        console.error("Failed to fetch reactions:", error);
+        console.error('Failed to fetch reactions:', error);
         return;
       }
       setReactions((data as MessageReaction[]) ?? []);
@@ -377,11 +412,11 @@ const toggleMessageSelection = (messageId: string) => {
     const channel = supabase
       .channel(`reactions:${conversationId}`)
       .on(
-        "postgres_changes",
+        'postgres_changes',
         {
-          event: "INSERT",
-          schema: "public",
-          table: "message_reactions",
+          event: 'INSERT',
+          schema: 'public',
+          table: 'message_reactions',
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
@@ -392,10 +427,10 @@ const toggleMessageSelection = (messageId: string) => {
             // the pill doesn't double up after a successful POST.
             const tempIdx = prev.findIndex(
               (r) =>
-                r.id.startsWith("temp-") &&
+                r.id.startsWith('temp-') &&
                 r.message_id === row.message_id &&
                 r.actor_type === row.actor_type &&
-                r.actor_id === row.actor_id,
+                r.actor_id === row.actor_id
             );
             if (tempIdx >= 0) {
               const copy = prev.slice();
@@ -404,34 +439,34 @@ const toggleMessageSelection = (messageId: string) => {
             }
             return [...prev, row];
           });
-        },
+        }
       )
       .on(
-        "postgres_changes",
+        'postgres_changes',
         {
-          event: "UPDATE",
-          schema: "public",
-          table: "message_reactions",
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'message_reactions',
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
           const row = payload.new as MessageReaction;
           setReactions((prev) => prev.map((r) => (r.id === row.id ? row : r)));
-        },
+        }
       )
       .on(
-        "postgres_changes",
+        'postgres_changes',
         {
-          event: "DELETE",
-          schema: "public",
-          table: "message_reactions",
+          event: 'DELETE',
+          schema: 'public',
+          table: 'message_reactions',
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
           const old = payload.old as Partial<MessageReaction>;
           if (!old?.id) return;
           setReactions((prev) => prev.filter((r) => r.id !== old.id));
-        },
+        }
       )
       .subscribe();
 
@@ -446,32 +481,34 @@ const toggleMessageSelection = (messageId: string) => {
     setReplyTo(null);
   }, [conversationId]);
   useEffect(() => {
-  if (!forwardModalOpen) return;
+    if (!forwardModalOpen) return;
 
-  const loadConversations = async () => {
-    setLoadingForwardConversations(true);
+    const loadConversations = async () => {
+      setLoadingForwardConversations(true);
 
-    const supabase = createClient();
+      const supabase = createClient();
 
-    const { data, error } = await supabase
-      .from("conversations")
-      .select(`
+      const { data, error } = await supabase
+        .from('conversations')
+        .select(
+          `
   *,
   contact:contacts(*)
-`)
-      .order("updated_at", { ascending: false });
+`
+        )
+        .order('updated_at', { ascending: false });
 
-    if (error) {
-      console.error("Failed to load conversations:", error);
-    } else {
-      setForwardConversations(data ?? []);
-    }
+      if (error) {
+        console.error('Failed to load conversations:', error);
+      } else {
+        setForwardConversations(data ?? []);
+      }
 
-    setLoadingForwardConversations(false);
-  };
+      setLoadingForwardConversations(false);
+    };
 
-  loadConversations();
-}, [forwardModalOpen]);
+    loadConversations();
+  }, [forwardModalOpen]);
 
   // Reset the server-side unread_count to 0 whenever an unread count
   // surfaces on the active conversation — covers both (a) opening a
@@ -486,11 +523,11 @@ const toggleMessageSelection = (messageId: string) => {
     if (!conversationId || !hasUnread) return;
     const supabase = createClient();
     supabase
-      .from("conversations")
+      .from('conversations')
       .update({ unread_count: 0 })
-      .eq("id", conversationId)
+      .eq('id', conversationId)
       .then(({ error }) => {
-        if (error) console.error("Failed to reset unread_count:", error);
+        if (error) console.error('Failed to reset unread_count:', error);
       });
   }, [conversationId, hasUnread]);
 
@@ -506,16 +543,40 @@ const toggleMessageSelection = (messageId: string) => {
     async (text: string, replyToId?: string) => {
       if (!conversation) return;
 
+      if (/^MANDAR\b/i.test(text.trim())) {
+        try {
+          const response = await fetch('/api/inbox/commands', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              conversation: conversation.id,
+              text,
+              request_id: crypto.randomUUID(),
+            }),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error);
+          toast.success(result.message);
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'No se pudo iniciar el bloque.'
+          );
+        }
+        return;
+      }
+
       const tempId = `temp-${Date.now()}`;
 
       // Optimistic update — shows the message immediately with "sending" status
       const optimisticMsg: Message = {
         id: tempId,
         conversation_id: conversation.id,
-        sender_type: "agent",
-        content_type: "text",
+        sender_type: 'agent',
+        content_type: 'text',
         content_text: text,
-        status: "sending",
+        status: 'sending',
         created_at: new Date().toISOString(),
         reply_to_message_id: replyToId,
       };
@@ -523,12 +584,12 @@ const toggleMessageSelection = (messageId: string) => {
       setReplyTo(null);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const res = await fetch('/api/whatsapp/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             conversation_id: conversation.id,
-            message_type: "text",
+            message_type: 'text',
             content_text: text,
             reply_to_message_id: replyToId,
           }),
@@ -538,22 +599,22 @@ const toggleMessageSelection = (messageId: string) => {
 
         if (!res.ok) {
           const reason = payload?.error || `HTTP ${res.status}`;
-          console.error("Failed to send message:", reason);
+          console.error('Failed to send message:', reason);
           toast.error(`Failed to send: ${reason}`);
           // Mark the optimistic bubble as failed so the user sees what happened
-          onUpdateMessage(tempId, { status: "failed" });
+          onUpdateMessage(tempId, { status: 'failed' });
           return;
         }
 
         // Success — the realtime INSERT event will replace the temp bubble
         // with the real DB row. If realtime hasn't arrived yet, at least
         // flip status to 'sent' so the UI stops showing "sending".
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, { status: 'sent' });
       } catch (err) {
-        console.error("Failed to send message:", err);
-        const reason = err instanceof Error ? err.message : "network error";
+        console.error('Failed to send message:', err);
+        const reason = err instanceof Error ? err.message : 'network error';
         toast.error(`Failed to send: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
+        onUpdateMessage(tempId, { status: 'failed' });
       }
     },
     [conversation, onNewMessage, onUpdateMessage]
@@ -567,19 +628,19 @@ const toggleMessageSelection = (messageId: string) => {
       // recipient as the Meta caption when no caption was typed); other
       // kinds use the caption as-is. Audio carries no caption.
       const contentText =
-        payload.kind === "document"
-          ? payload.caption || payload.filename || "Document"
+        payload.kind === 'document'
+          ? payload.caption || payload.filename || 'Document'
           : payload.caption;
 
       const tempId = `temp-${Date.now()}`;
       const optimisticMsg: Message = {
         id: tempId,
         conversation_id: conversation.id,
-        sender_type: "agent",
+        sender_type: 'agent',
         content_type: payload.kind,
         content_text: contentText,
         media_url: payload.mediaUrl,
-        status: "sending",
+        status: 'sending',
         created_at: new Date().toISOString(),
         reply_to_message_id: payload.replyToId,
       };
@@ -587,9 +648,9 @@ const toggleMessageSelection = (messageId: string) => {
       setReplyTo(null);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const res = await fetch('/api/whatsapp/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             conversation_id: conversation.id,
             message_type: payload.kind,
@@ -604,25 +665,29 @@ const toggleMessageSelection = (messageId: string) => {
 
         if (!res.ok) {
           const reason = data?.error || `HTTP ${res.status}`;
-          console.error("Failed to send media:", reason);
+          console.error('Failed to send media:', reason);
           toast.error(`Failed to send: ${reason}`);
-          onUpdateMessage(tempId, { status: "failed" });
+          onUpdateMessage(tempId, { status: 'failed' });
           // The upload never reached the recipient — GC the orphaned
           // object rather than leaving it in the public bucket forever.
-          void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
+          void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(
+            () => {}
+          );
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, { status: 'sent' });
       } catch (err) {
-        console.error("Failed to send media:", err);
-        const reason = err instanceof Error ? err.message : "network error";
+        console.error('Failed to send media:', err);
+        const reason = err instanceof Error ? err.message : 'network error';
         toast.error(`Failed to send: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
-        void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
+        onUpdateMessage(tempId, { status: 'failed' });
+        void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(
+          () => {}
+        );
       }
     },
-    [conversation, onNewMessage, onUpdateMessage],
+    [conversation, onNewMessage, onUpdateMessage]
   );
 
   const handleSendInteractive = useCallback(
@@ -635,23 +700,23 @@ const toggleMessageSelection = (messageId: string) => {
       const optimisticMsg: Message = {
         id: tempId,
         conversation_id: conversation.id,
-        sender_type: "agent",
-        content_type: "interactive",
+        sender_type: 'agent',
+        content_type: 'interactive',
         content_text: payload.body,
         interactive_payload: payload,
-        status: "sending",
+        status: 'sending',
         created_at: new Date().toISOString(),
         reply_to_message_id: replyToId,
       };
       onNewMessage(optimisticMsg);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const res = await fetch('/api/whatsapp/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             conversation_id: conversation.id,
-            message_type: "interactive",
+            message_type: 'interactive',
             interactive_payload: payload,
             reply_to_message_id: replyToId,
           }),
@@ -661,21 +726,21 @@ const toggleMessageSelection = (messageId: string) => {
 
         if (!res.ok) {
           const reason = data?.error || `HTTP ${res.status}`;
-          console.error("Failed to send interactive message:", reason);
+          console.error('Failed to send interactive message:', reason);
           toast.error(`Failed to send: ${reason}`);
-          onUpdateMessage(tempId, { status: "failed" });
+          onUpdateMessage(tempId, { status: 'failed' });
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, { status: 'sent' });
       } catch (err) {
-        console.error("Failed to send interactive message:", err);
-        const reason = err instanceof Error ? err.message : "network error";
+        console.error('Failed to send interactive message:', err);
+        const reason = err instanceof Error ? err.message : 'network error';
         toast.error(`Failed to send: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
+        onUpdateMessage(tempId, { status: 'failed' });
       }
     },
-    [conversation, onNewMessage, onUpdateMessage],
+    [conversation, onNewMessage, onUpdateMessage]
   );
 
   const handleStatusChange = useCallback(
@@ -684,9 +749,9 @@ const toggleMessageSelection = (messageId: string) => {
 
       const supabase = createClient();
       await supabase
-        .from("conversations")
+        .from('conversations')
         .update({ status })
-        .eq("id", conversation.id);
+        .eq('id', conversation.id);
 
       onStatusChange(conversation.id, status);
     },
@@ -704,7 +769,7 @@ const toggleMessageSelection = (messageId: string) => {
         body: string[];
         headerText?: string;
         buttonParams?: Record<number, string>;
-      },
+      }
     ) => {
       if (!conversation) return;
 
@@ -714,22 +779,22 @@ const toggleMessageSelection = (messageId: string) => {
       const optimisticMsg: Message = {
         id: tempId,
         conversation_id: conversation.id,
-        sender_type: "agent",
-        content_type: "template",
+        sender_type: 'agent',
+        content_type: 'template',
         content_text: renderedBody,
         template_name: template.name,
-        status: "sending",
+        status: 'sending',
         created_at: new Date().toISOString(),
       };
       onNewMessage(optimisticMsg);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const res = await fetch('/api/whatsapp/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             conversation_id: conversation.id,
-            message_type: "template",
+            message_type: 'template',
             template_name: template.name,
             template_language: template.language,
             // Structured params drive the new send-builder path
@@ -750,69 +815,74 @@ const toggleMessageSelection = (messageId: string) => {
 
         if (!res.ok) {
           const reason = payload?.error || `HTTP ${res.status}`;
-          console.error("Failed to send template:", reason);
+          console.error('Failed to send template:', reason);
           toast.error(`Failed to send template: ${reason}`);
-          onUpdateMessage(tempId, { status: "failed" });
+          onUpdateMessage(tempId, { status: 'failed' });
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, { status: 'sent' });
       } catch (err) {
-        console.error("Failed to send template:", err);
-        const reason = err instanceof Error ? err.message : "network error";
+        console.error('Failed to send template:', err);
+        const reason = err instanceof Error ? err.message : 'network error';
         toast.error(`Failed to send template: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
+        onUpdateMessage(tempId, { status: 'failed' });
       }
     },
-    [conversation, onNewMessage, onUpdateMessage],
+    [conversation, onNewMessage, onUpdateMessage]
   );
   const handleForward = useCallback(
-  async (targetConversationId: string) => {
-    if (selectedMessages.length === 0) return;
+    async (targetConversationId: string) => {
+      if (selectedMessages.length === 0) return;
 
-    try {
-      setForwarding(true);
+      try {
+        setForwarding(true);
 
-      const messageTimes = new Map(
-        messages.map((message) => [message.id, Date.parse(message.created_at)]),
-      );
-      const orderedMessageIds = [...selectedMessages].sort(
-        (a, b) => (messageTimes.get(a) ?? 0) - (messageTimes.get(b) ?? 0),
-      );
+        const messageTimes = new Map(
+          messages.map((message) => [
+            message.id,
+            Date.parse(message.created_at),
+          ])
+        );
+        const orderedMessageIds = [...selectedMessages].sort(
+          (a, b) => (messageTimes.get(a) ?? 0) - (messageTimes.get(b) ?? 0)
+        );
 
-      for (const messageId of orderedMessageIds) {
-        const response = await fetch("/api/whatsapp/forward", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messageId,
-            conversationId: targetConversationId,
-          }),
-        });
+        for (const messageId of orderedMessageIds) {
+          const response = await fetch('/api/whatsapp/forward', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messageId,
+              conversationId: targetConversationId,
+            }),
+          });
 
-        const result = await response.json();
+          const result = await response.json();
 
-        if (!response.ok) {
-          throw new Error(result.error || "Forward failed");
+          if (!response.ok) {
+            throw new Error(result.error || 'Forward failed');
+          }
         }
-      }
 
-      setForwardModalOpen(false);
-      setSelectionMode(false);
-      setSelectedMessages([]);
-    } catch (error) {
-      console.error("Forward failed:", error);
-      toast.error(
-        error instanceof Error ? error.message : "No se pudo reenviar el mensaje",
-      );
-    } finally {
-      setForwarding(false);
-    }
-  },
-  [messages, selectedMessages],
-);
+        setForwardModalOpen(false);
+        setSelectionMode(false);
+        setSelectedMessages([]);
+      } catch (error) {
+        console.error('Forward failed:', error);
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : 'No se pudo reenviar el mensaje'
+        );
+      } finally {
+        setForwarding(false);
+      }
+    },
+    [messages, selectedMessages]
+  );
 
   // Build a quick id → Message map so reply quotes can be rendered without
   // an extra fetch — the thread already holds the full conversation.
@@ -833,17 +903,16 @@ const toggleMessageSelection = (messageId: string) => {
     return map;
   }, [reactions]);
 
-  const contactDisplayName = contact?.name || contact?.phone || "Customer";
+  const contactDisplayName = contact?.name || contact?.phone || 'Customer';
 
   // Author label for a quoted message: "You" when we sent the parent,
   // contact name when the customer sent it.
   const authorLabelFor = useCallback(
     (m: Message): string => {
-      const isAgentMsg =
-        m.sender_type === "agent" || m.sender_type === "bot";
-      return isAgentMsg ? "You" : contactDisplayName;
+      const isAgentMsg = m.sender_type === 'agent' || m.sender_type === 'bot';
+      return isAgentMsg ? 'You' : contactDisplayName;
     },
-    [contactDisplayName],
+    [contactDisplayName]
   );
 
   const handleStartReply = useCallback(
@@ -854,7 +923,7 @@ const toggleMessageSelection = (messageId: string) => {
         preview: buildReplyPreview(msg, tQuote),
       });
     },
-    [authorLabelFor],
+    [authorLabelFor]
   );
 
   // Single reaction-set primitive. emoji === "" removes; otherwise adds/swaps.
@@ -864,11 +933,11 @@ const toggleMessageSelection = (messageId: string) => {
   const postReaction = useCallback(
     async (messageId: string, emoji: string) => {
       if (!user?.id || !conversation) {
-        console.warn("[reactions] missing user or conversation");
+        console.warn('[reactions] missing user or conversation');
         return;
       }
-      if (messageId.startsWith("temp-")) {
-        toast.error("Wait for the message to finish sending");
+      if (messageId.startsWith('temp-')) {
+        toast.error('Wait for the message to finish sending');
         return;
       }
 
@@ -883,10 +952,10 @@ const toggleMessageSelection = (messageId: string) => {
         const own = prev.find(
           (r) =>
             r.message_id === messageId &&
-            r.actor_type === "agent" &&
-            r.actor_id === userId,
+            r.actor_type === 'agent' &&
+            r.actor_id === userId
         );
-        if (emoji === "") return own ? prev.filter((r) => r !== own) : prev;
+        if (emoji === '') return own ? prev.filter((r) => r !== own) : prev;
         if (own) return prev.map((r) => (r === own ? { ...own, emoji } : r));
         return [
           ...prev,
@@ -894,7 +963,7 @@ const toggleMessageSelection = (messageId: string) => {
             id: `temp-${Date.now()}`,
             message_id: messageId,
             conversation_id: convId,
-            actor_type: "agent",
+            actor_type: 'agent',
             actor_id: userId,
             emoji,
             created_at: new Date().toISOString(),
@@ -903,9 +972,9 @@ const toggleMessageSelection = (messageId: string) => {
       });
 
       try {
-        const res = await fetch("/api/whatsapp/react", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const res = await fetch('/api/whatsapp/react', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message_id: messageId, emoji }),
         });
         if (!res.ok) {
@@ -913,49 +982,77 @@ const toggleMessageSelection = (messageId: string) => {
           throw new Error(payload?.error || `HTTP ${res.status}`);
         }
       } catch (err) {
-        const reason = err instanceof Error ? err.message : "network error";
+        const reason = err instanceof Error ? err.message : 'network error';
         toast.error(`Reaction failed: ${reason}`);
         setReactions(snapshot);
       }
     },
-    [conversation, user?.id],
+    [conversation, user?.id]
   );
 
   const handleAssignChange = useCallback(
     async (agentId: string | null) => {
       if (!conversation) return;
 
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("conversations")
-        .update({ assigned_agent_id: agentId })
-        .eq("id", conversation.id);
-
-      if (error) {
-        console.error("Failed to update assignment:", error);
-        toast.error("Failed to update assignment");
-        return;
-      }
-
-      onAssignChange(conversation.id, agentId);
+      const from = profiles.find(
+          (p) => p.user_id === conversation.assigned_agent_id
+        ),
+        to = profiles.find((p) => p.user_id === agentId);
+      setTransfer({
+        agent: agentId,
+        full: !!from?.area && from.area === to?.area,
+      });
     },
-    [conversation, onAssignChange],
+    [conversation, profiles]
   );
+
+  async function confirmTransfer() {
+    if (!conversation || !transfer) return;
+    setTransferring(true);
+    try {
+      const res = await fetch('/api/inbox/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversation: conversation.id,
+            agent: transfer.agent,
+            full_history: transfer.full,
+          }),
+        }),
+        data = await res.json();
+      if (!res.ok) throw Error(data.error);
+      onAssignChange(conversation.id, transfer.agent);
+      setTransfer(null);
+      onRefresh?.();
+      toast.success(
+        'Traspaso realizado. La presentación queda pendiente de Enviar.'
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo traspasar');
+    } finally {
+      setTransferring(false);
+    }
+  }
 
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
   if (!conversation || !contact) {
     return (
-      <div className={cn("flex flex-1 flex-col items-center justify-center", DOODLE_BG_CLASSES)}>
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-          <MessageSquare className="h-8 w-8 text-muted-foreground" />
+      <div
+        className={cn(
+          'flex flex-1 flex-col items-center justify-center',
+          DOODLE_BG_CLASSES
+        )}
+      >
+        <div className="bg-muted flex h-16 w-16 items-center justify-center rounded-full">
+          <MessageSquare className="text-muted-foreground h-8 w-8" />
         </div>
-        <h3 className="mt-4 text-sm font-medium text-muted-foreground">
-          {t("selectConversation")}
+        <h3 className="text-muted-foreground mt-4 text-sm font-medium">
+          {t('selectConversation')}
         </h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t("selectConversationHint")}
+        <p className="text-muted-foreground mt-1 text-xs">
+          {t('selectConversationHint')}
         </p>
       </div>
     );
@@ -969,8 +1066,8 @@ const toggleMessageSelection = (messageId: string) => {
   const assignedAgentId = conversation.assigned_agent_id ?? null;
   const currentAssignee = profiles.find((p) => p.user_id === assignedAgentId);
   const assignLabel = assignedAgentId
-    ? (currentAssignee?.full_name ?? t("assigned"))
-    : t("assign");
+    ? (currentAssignee?.full_name ?? t('assigned'))
+    : t('assign');
 
   return (
     // `min-w-0` is load-bearing: the page already puts min-w-0 on the
@@ -981,246 +1078,262 @@ const toggleMessageSelection = (messageId: string) => {
     // clipped and the hover toolbar overlaps the Tags panel. Letting the
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
-    <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
+    <div className={cn('flex min-w-0 flex-1 flex-col', DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
       {selectionMode ? (
-  <div className="flex items-center justify-between border-b border-border bg-card px-3 py-3 sm:px-4">
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={() => {
-          setSelectionMode(false);
-          setSelectedMessages([]);
-        }}
-        className="rounded-md p-2 hover:bg-muted"
-      >
-        <ArrowLeft className="h-5 w-5" />
-      </button>
-
-      <span className="font-medium">
-        {selectedMessages.length} seleccionado
-        {selectedMessages.length !== 1 ? "s" : ""}
-      </span>
-    </div>
-
-    <div className="flex items-center gap-2">
-  <button
-  type="button"
-  onClick={() => setForwardModalOpen(true)}
-  className="rounded-md p-2 hover:bg-muted"
-  title="Reenviar"
->
-  ↗️
-</button>
-
-  <button
-    type="button"
-    disabled
-    className="cursor-not-allowed rounded-md p-2 opacity-40"
-    title="Próximamente: eliminar para todos"
-  >
-    🗑️
-  </button>
-</div>
-  </div>
-) : (
-  <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          {/* Back-to-list button — mobile only. Hidden on lg+ where the
-              conversation list is always visible next to the thread. */}
-          {onBack && (
+        <div className="border-border bg-card flex items-center justify-between border-b px-3 py-3 sm:px-4">
+          <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={onBack}
-              aria-label={t("backToConversations")}
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
+              onClick={() => {
+                setSelectionMode(false);
+                setSelectedMessages([]);
+              }}
+              className="hover:bg-muted rounded-md p-2"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
-          )}
-          <div
-  className={cn(
-    "flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white transition-all duration-200",
-    "bg-gradient-to-br from-sky-500 to-blue-700 shadow-lg shadow-sky-500/30"
-  )}
->
-            {displayName.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-white">{displayName}</h2>
-            <p className="truncate text-xs text-slate-400">{contact.phone}</p>
-          </div>
-          {/* Session timer badge — hidden on the narrowest phones so
-              the name + back arrow keep their room. */}
-          <Badge
-            variant="outline"
-            className={cn(
-              "ml-2 hidden gap-1 rounded-full border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] sm:inline-flex",
-              sessionInfo.expired
-  ? "border-red-500/40 bg-red-500/10 text-red-300"
-  : "border-sky-500/40 bg-sky-500/10 text-sky-300"
-            )}
-          >
-            <Clock className="h-3 w-3" />
-            {sessionInfo.remaining}
-          </Badge>
-        </div>
 
-        <div className="flex items-center gap-2">
-          {/* Contact-panel toggle — desktop only. The contact sidebar
+            <span className="font-medium">
+              {selectedMessages.length} seleccionado
+              {selectedMessages.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setForwardModalOpen(true)}
+              className="hover:bg-muted rounded-md p-2"
+              title="Reenviar"
+            >
+              ↗️
+            </button>
+
+            <button
+              type="button"
+              disabled
+              className="cursor-not-allowed rounded-md p-2 opacity-40"
+              title="Próximamente: eliminar para todos"
+            >
+              🗑️
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="border-border bg-card flex items-center justify-between gap-2 border-b px-3 py-3 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            {/* Back-to-list button — mobile only. Hidden on lg+ where the
+              conversation list is always visible next to the thread. */}
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label={t('backToConversations')}
+                className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md lg:hidden"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+            )}
+            <div
+              className={cn(
+                'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white transition-all duration-200',
+                'bg-gradient-to-br from-sky-500 to-blue-700 shadow-lg shadow-sky-500/30'
+              )}
+            >
+              {displayName.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold text-white">
+                {displayName}
+              </h2>
+              <p className="truncate text-xs text-slate-400">{contact.phone}</p>
+            </div>
+            {/* Session timer badge — hidden on the narrowest phones so
+              the name + back arrow keep their room. */}
+            <Badge
+              variant="outline"
+              className={cn(
+                'ml-2 hidden gap-1 rounded-full border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] sm:inline-flex',
+                sessionInfo.expired
+                  ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                  : 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+              )}
+            >
+              <Clock className="h-3 w-3" />
+              {sessionInfo.remaining}
+            </Badge>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just
               want to read and reply. Hidden on mobile, where the sidebar
               never renders as a permanent panel anyway. Issue #258. */}
-          {onToggleContactPanel && (
-            <button
-              type="button"
-              onClick={onToggleContactPanel}
-              aria-label={
-                contactPanelOpen ? t("hideContactPanel") : t("showContactPanel")
-              }
-              title={contactPanelOpen ? t("hideContact") : t("showContact")}
-              aria-pressed={contactPanelOpen}
-              className={cn(
-                "hidden h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground lg:inline-flex",
-                contactPanelOpen ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              {contactPanelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
-            </button>
-          )}
+            {onToggleContactPanel && (
+              <button
+                type="button"
+                onClick={onToggleContactPanel}
+                aria-label={
+                  contactPanelOpen
+                    ? t('hideContactPanel')
+                    : t('showContactPanel')
+                }
+                title={contactPanelOpen ? t('hideContact') : t('showContact')}
+                aria-pressed={contactPanelOpen}
+                className={cn(
+                  'hover:bg-muted hover:text-foreground hidden h-7 w-7 items-center justify-center rounded-md transition-colors lg:inline-flex',
+                  contactPanelOpen ? 'text-primary' : 'text-muted-foreground'
+                )}
+              >
+                {contactPanelOpen ? (
+                  <PanelRightClose className="h-4 w-4" />
+                ) : (
+                  <PanelRightOpen className="h-4 w-4" />
+                )}
+              </button>
+            )}
 
-          {/* Manual refresh — forces a refetch of the messages + the
+            {/* Manual refresh — forces a refetch of the messages + the
               conversation list (the parent bumps its resyncToken). Useful
               when realtime missed an event or the agent just wants to be
               sure nothing's stale. Only rendered when the parent wires
               up `onRefresh`. */}
-          {onRefresh && (
-            <button
-              type="button"
-              onClick={handleRefreshClick}
-              disabled={isRefreshing}
-              aria-label={t("refreshConversation")}
-              title={t("refresh")}
-              className={cn(
-                "inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 text-slate-300 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-60",
-              )}
-            >
-              <RefreshCw
-                className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
-              />
-            </button>
-          )}
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={handleRefreshClick}
+                disabled={isRefreshing}
+                aria-label={t('refreshConversation')}
+                title={t('refresh')}
+                className={cn(
+                  'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 text-slate-300 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-60'
+                )}
+              >
+                <RefreshCw
+                  className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')}
+                />
+              </button>
+            )}
 
-          {/* Status dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
-                  "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20",
-                  currentStatus?.color ?? "text-muted-foreground"
-                )}>
-                {currentStatus ? t(`status${currentStatus.label}`) : t("status")}
+            {/* Status dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20',
+                  currentStatus?.color ?? 'text-muted-foreground'
+                )}
+              >
+                {currentStatus
+                  ? t(`status${currentStatus.label}`)
+                  : t('status')}
                 <ChevronDown className="h-3 w-3" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="border-border bg-popover"
-            >
-              {STATUS_OPTIONS.map((opt) => (
-                <DropdownMenuItem
-                  key={opt.value}
-                  onClick={() => handleStatusChange(opt.value)}
-                  className={cn("text-sm", opt.color)}
-                >
-                  {t(`status${opt.label}`)}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Assign dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(
-                "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20",
-                assignedAgentId ? "text-primary" : "text-muted-foreground"
-              )}
-            >
-              <UserPlus className="h-3 w-3" />
-              <span className="hidden sm:inline">{assignLabel}</span>
-              <ChevronDown className="h-3 w-3" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="border-border bg-popover"
-            >
-              {profiles.length === 0 ? (
-                <DropdownMenuItem disabled className="text-sm text-muted-foreground">
-                  {t("noTeammates")}
-                </DropdownMenuItem>
-              ) : (
-                profiles.map((p) => {
-                  const isSelected = p.user_id === assignedAgentId;
-                  const presence = getPresence(p.user_id);
-                  return (
-                    <DropdownMenuItem
-                      key={p.id}
-                      onClick={() => handleAssignChange(p.user_id)}
-                      className={cn(
-                        "text-sm",
-                        isSelected ? "text-primary" : "text-popover-foreground"
-                      )}
-                    >
-                      <PresenceDot
-                        status={presence}
-                        label={presenceLabel(
-                          presence,
-                          getRow(p.user_id)?.last_seen_at ?? null,
-                          now
-                        )}
-                        className="mr-2"
-                      />
-                      <span className="flex-1">
-                        {p.full_name}
-                        {p.user_id === user?.id ? t("me") : ""}
-                      </span>
-                      {isSelected && <Check className="ml-2 h-3 w-3" />}
-                    </DropdownMenuItem>
-                  );
-                })
-              )}
-              {assignedAgentId && (
-                <>
-                  <DropdownMenuSeparator className="bg-border" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="border-border bg-popover"
+              >
+                {STATUS_OPTIONS.map((opt) => (
                   <DropdownMenuItem
-                    onClick={() => handleAssignChange(null)}
-                    className="text-sm text-muted-foreground"
+                    key={opt.value}
+                    onClick={() => handleStatusChange(opt.value)}
+                    className={cn('text-sm', opt.color)}
                   >
-                    {t("unassign")}
+                    {t(`status${opt.label}`)}
                   </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Assign dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={!canAssign}
+                className={cn(
+                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20',
+                  assignedAgentId ? 'text-primary' : 'text-muted-foreground'
+                )}
+              >
+                <UserPlus className="h-3 w-3" />
+                <span className="hidden sm:inline">{assignLabel}</span>
+                <ChevronDown className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="border-border bg-popover"
+              >
+                {profiles.length === 0 ? (
+                  <DropdownMenuItem
+                    disabled
+                    className="text-muted-foreground text-sm"
+                  >
+                    {t('noTeammates')}
+                  </DropdownMenuItem>
+                ) : (
+                  profiles.map((p) => {
+                    const isSelected = p.user_id === assignedAgentId;
+                    const presence = getPresence(p.user_id);
+                    return (
+                      <DropdownMenuItem
+                        key={p.id}
+                        onClick={() => handleAssignChange(p.user_id)}
+                        className={cn(
+                          'text-sm',
+                          isSelected
+                            ? 'text-primary'
+                            : 'text-popover-foreground'
+                        )}
+                      >
+                        <PresenceDot
+                          status={presence}
+                          label={presenceLabel(
+                            presence,
+                            getRow(p.user_id)?.last_seen_at ?? null,
+                            now
+                          )}
+                          className="mr-2"
+                        />
+                        <span className="flex-1">
+                          {p.full_name}
+                          {p.user_id === user?.id ? t('me') : ''}
+                        </span>
+                        {isSelected && <Check className="ml-2 h-3 w-3" />}
+                      </DropdownMenuItem>
+                    );
+                  })
+                )}
+                {assignedAgentId && (
+                  <>
+                    <DropdownMenuSeparator className="bg-border" />
+                    <DropdownMenuItem
+                      onClick={() => handleAssignChange(null)}
+                      className="text-muted-foreground text-sm"
+                    >
+                      {t('unassign')}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-      </div>
-)}
+      )}
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
-            <p className="text-sm text-muted-foreground">{t("noMessagesYet")}</p>
-            <p className="text-xs text-muted-foreground">
-              {t("sendTemplateHint")}
+            <p className="text-muted-foreground text-sm">
+              {t('noMessagesYet')}
+            </p>
+            <p className="text-muted-foreground text-xs">
+              {t('sendTemplateHint')}
             </p>
           </div>
         ) : (
@@ -1229,7 +1342,7 @@ const toggleMessageSelection = (messageId: string) => {
               <div key={group.date}>
                 {/* Date separator */}
                 <div className="mb-4 flex items-center justify-center">
-                  <span className="rounded-full bg-muted px-3 py-1 text-[10px] font-medium text-muted-foreground">
+                  <span className="bg-muted text-muted-foreground rounded-full px-3 py-1 text-[10px] font-medium">
                     {formatDateSeparator(group.date, t)}
                   </span>
                 </div>
@@ -1242,9 +1355,10 @@ const toggleMessageSelection = (messageId: string) => {
                     const reply = parent
                       ? {
                           authorLabel:
-                            parent.sender_type === "agent" || parent.sender_type === "bot"
-                              ? t("me") 
-                              : contact?.name || contact?.phone || "Unknown",
+                            parent.sender_type === 'agent' ||
+                            parent.sender_type === 'bot'
+                              ? t('me')
+                              : contact?.name || contact?.phone || 'Unknown',
                           preview: buildReplyPreview(parent, tQuote),
                         }
                       : null;
@@ -1254,10 +1368,9 @@ const toggleMessageSelection = (messageId: string) => {
                     const handlePillToggle = (emoji: string) => {
                       const own = msgReactions?.find(
                         (r) =>
-                          r.actor_type === "agent" &&
-                          r.actor_id === user?.id,
+                          r.actor_type === 'agent' && r.actor_id === user?.id
                       );
-                      const next = own?.emoji === emoji ? "" : emoji;
+                      const next = own?.emoji === emoji ? '' : emoji;
                       void postReaction(msg.id, next);
                     };
                     return (
@@ -1276,9 +1389,13 @@ const toggleMessageSelection = (messageId: string) => {
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
                           selectionMode={selectionMode}
-selected={selectedMessages.includes(msg.id)}
-onToggleSelection={() => toggleMessageSelection(msg.id)}
-onStartSelection={() => toggleMessageSelection(msg.id)}
+                          selected={selectedMessages.includes(msg.id)}
+                          onToggleSelection={() =>
+                            toggleMessageSelection(msg.id)
+                          }
+                          onStartSelection={() =>
+                            toggleMessageSelection(msg.id)
+                          }
                         />
                       </MessageActions>
                     );
@@ -1296,13 +1413,13 @@ onStartSelection={() => toggleMessageSelection(msg.id)}
       <AiThreadBanner
         conversationId={conversation.id}
         disabled={conversation.ai_autoreply_disabled ?? false}
-          aiEnabled={conversation.ai_enabled ?? true}
+        aiEnabled={conversation.ai_enabled ?? true}
         automationEnabled={conversation.automation_enabled ?? true}
         handoffSummary={conversation.ai_handoff_summary}
         assignedAgentId={assignedAgentId}
         currentUserId={user?.id}
         onChange={(patch) => {
-          if ("assigned_agent_id" in patch) {
+          if ('assigned_agent_id' in patch) {
             onAssignChange(conversation.id, patch.assigned_agent_id ?? null);
           }
         }}
@@ -1311,8 +1428,17 @@ onStartSelection={() => toggleMessageSelection(msg.id)}
       {/* Composer */}
       <MessageComposer
         key={conversation.id}
-        adviserIntroduction={getAdviserIntroduction(user?.id, assignedAgentId, currentAssignee, getAdviserNickname(user?.user_metadata))}
-        needsAdviserNickname={Boolean(user?.id && user.id === assignedAgentId && !getAdviserNickname(user.user_metadata))}
+        adviserIntroduction={getAdviserIntroduction(
+          user?.id,
+          assignedAgentId,
+          currentAssignee,
+          getAdviserNickname(user?.user_metadata)
+        )}
+        needsAdviserNickname={Boolean(
+          user?.id &&
+          user.id === assignedAgentId &&
+          !getAdviserNickname(user.user_metadata)
+        )}
         conversationId={conversation.id}
         sessionExpired={sessionInfo.expired}
         onSend={handleSend}
@@ -1328,52 +1454,106 @@ onStartSelection={() => toggleMessageSelection(msg.id)}
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
       />
-      {forwardModalOpen && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-    <div className="w-[420px] rounded-lg bg-card p-6 shadow-xl">
-      <h2 className="mb-4 text-lg font-semibold">
-        Reenviar mensaje
-      </h2>
-
-      <div className="mb-6 max-h-80 overflow-y-auto rounded-md border">
-  {loadingForwardConversations ? (
-    <div className="p-4 text-sm text-muted-foreground">
-      Cargando conversaciones...
-    </div>
-  ) : (
-    forwardConversations.map((conv) => (
-      <button
-        key={conv.id}
-        type="button"
-        onClick={() => handleForward(conv.id)}
-disabled={forwarding}
-        className="flex w-full items-center justify-between border-b p-3 text-left hover:bg-muted last:border-b-0"
+      <Dialog
+        open={!!transfer}
+        onOpenChange={(v) => {
+          if (!v) setTransfer(null);
+        }}
       >
-        <div>
-          <div className="font-medium">
-            {conv.contact?.name || conv.contact?.phone}
-          </div>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {transfer?.agent
+                ? 'TRASPASAR CONVERSACION'
+                : 'RETIRAR ASIGNACION'}
+            </DialogTitle>
+            <DialogDescription>
+              {transfer?.agent
+                ? 'Elige qué historial verá la persona receptora. Su presentación usará su apodo y ella pulsará Enviar.'
+                : 'El chat quedará a cargo de la automatización, conservando sus controles actuales.'}
+            </DialogDescription>
+          </DialogHeader>
+          {transfer?.agent && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">
+                {profiles.find((p) => p.user_id === transfer.agent)?.full_name}
+              </p>
+              <label className="flex gap-2 text-sm">
+                <input
+                  type="radio"
+                  checked={transfer.full}
+                  onChange={() => setTransfer({ ...transfer, full: true })}
+                />
+                TODO EL HISTORIAL
+              </label>
+              <label className="flex gap-2 text-sm">
+                <input
+                  type="radio"
+                  checked={!transfer.full}
+                  onChange={() => setTransfer({ ...transfer, full: false })}
+                />
+                ULTIMO MENSAJE DEL ESTUDIANTE Y LOS QUE SIGAN
+              </label>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={transferring}
+              onClick={() => setTransfer(null)}
+            >
+              CANCELAR
+            </Button>
+            <Button disabled={transferring} onClick={confirmTransfer}>
+              {transferring ? 'TRASPASANDO…' : 'CONFIRMAR'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {forwardModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card w-[420px] rounded-lg p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-semibold">Reenviar mensaje</h2>
 
-          <div className="text-xs text-muted-foreground">
-            {conv.contact?.phone}
+            <div className="mb-6 max-h-80 overflow-y-auto rounded-md border">
+              {loadingForwardConversations ? (
+                <div className="text-muted-foreground p-4 text-sm">
+                  Cargando conversaciones...
+                </div>
+              ) : (
+                forwardConversations.map((conv) => (
+                  <button
+                    key={conv.id}
+                    type="button"
+                    onClick={() => handleForward(conv.id)}
+                    disabled={forwarding}
+                    className="hover:bg-muted flex w-full items-center justify-between border-b p-3 text-left last:border-b-0"
+                  >
+                    <div>
+                      <div className="font-medium">
+                        {conv.contact?.name || conv.contact?.phone}
+                      </div>
+
+                      <div className="text-muted-foreground text-xs">
+                        {conv.contact?.phone}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => setForwardModalOpen(false)}
+                className="rounded-md border px-4 py-2"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
-      </button>
-    ))
-  )}
-</div>
-
-      <div className="flex justify-end">
-        <button
-          onClick={() => setForwardModalOpen(false)}
-          className="rounded-md border px-4 py-2"
-        >
-          Cerrar
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+      )}
     </div>
   );
 }

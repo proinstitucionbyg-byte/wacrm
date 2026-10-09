@@ -45,6 +45,10 @@ export interface TeamMember {
   user_id: string;
   full_name: string | null;
   account_role: string;
+  nickname?: string | null;
+  area?: string | null;
+  cargo?: string | null;
+  birth_date?: string | null;
 }
 export interface TeamThread {
   id: string;
@@ -53,6 +57,9 @@ export interface TeamThread {
   last_message_at: string;
   team_thread_members: { user_id: string; last_read_at: string | null }[];
   unread: number;
+  archived_at?: string | null;
+  personally_archived?: boolean;
+  can_send?: boolean;
 }
 export interface TeamMessage {
   id: string;
@@ -69,8 +76,9 @@ export function teamThreadTitle(
   const other = thread.team_thread_members.find(
     (m) => m.user_id !== currentUser
   );
+  const person = members.find((m) => m.user_id === other?.user_id);
   return (
-    members.find((m) => m.user_id === other?.user_id)?.full_name ||
+    person?.nickname || person?.full_name ||
     'CONVERSACION INTERNA'
   );
 }

@@ -222,6 +222,7 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
       content_type: 'template',
       template_name: 'order_update',
       sender_type: 'agent',
+      sender_id: 'user-1',
     })
   })
 
@@ -238,6 +239,13 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
 
     expect(conversationInserts).toHaveLength(0)
     expect(messageInserts[0]).toMatchObject({ conversation_id: 'conv-existing' })
+  })
+
+  it('does not persist adviser activity when Meta rejects the send', async () => {
+    sendTemplateMessage.mockRejectedValueOnce(new Error('META UNAVAILABLE'))
+    const response = await postContactTemplate()
+    expect(response.status).toBe(502)
+    expect(messageInserts).toHaveLength(0)
   })
 
   it('404s when the contact is not in the caller account', async () => {

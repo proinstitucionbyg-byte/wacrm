@@ -72,6 +72,8 @@ export class SendMessageError extends Error {
 }
 
 export interface SendMessageParams {
+  /** Authenticated dashboard sender. API integrations leave this unset. */
+  senderId?: string;
   conversationId: string;
   messageType: string;
   contentText?: string | null;
@@ -188,7 +190,8 @@ async function resolveForwardMediaLink(args: {
   accessToken: string
   filename?: string | null
 }) {
-  let { mediaLink, phoneNumberId, accessToken, filename } = args
+  let { mediaLink } = args
+  const { phoneNumberId, accessToken, filename } = args
 
   if (mediaLink.includes("/api/whatsapp/media/")) {
     const mediaId = mediaLink.substring(
@@ -386,7 +389,7 @@ export async function sendMessageToConversation(
       return result.messageId;
     }
     if (isMediaKind) {
-      let mediaLink = await resolveForwardMediaLink({
+      const mediaLink = await resolveForwardMediaLink({
   mediaLink: mediaUrl!,
   phoneNumberId: config.phone_number_id,
   accessToken,
@@ -501,6 +504,7 @@ export async function sendMessageToConversation(
     .insert({
       conversation_id: conversationId,
       sender_type: 'agent',
+      sender_id: params.senderId ?? null,
       content_type: messageType,
       content_text: interactiveBody ?? contentText ?? null,
       media_url: mediaUrl || null,

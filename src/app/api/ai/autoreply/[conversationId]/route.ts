@@ -18,8 +18,7 @@ type Params = { params: Promise<{ conversationId: string }> }
  *   - paused: false → hand the thread back to the bot: clear the pause,
  *                     reset the per-conversation reply count so it gets
  *                     fresh slots, and clear the handoff note. If the
- *                     caller currently owns the thread, unassign it too so
- *                     the bot isn't blocked by the "human owns this" gate.
+ *                     assignment is cleared only for this explicit action.
  *
  * Writes go through the RLS-scoped SSR client, so a conversation outside
  * the caller's account simply isn't found (404).
@@ -62,32 +61,10 @@ export async function POST(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
     }
 
-    const update: Record<string, unknown> = { ai_autoreply_disabled: paused }
-
-    if (paused) {
-      if (assignToMe) update.assigned_agent_id = userId
-    } else {
-      // Resuming hands the thread *back to the bot*. Clear the pause and
-      // the handoff note, and — crucially — release ANY assignment, not
-      // just the caller's own: the auto-reply eligibility gate stands
-      // down whenever a human is assigned, so leaving a stale assignee
-      // (e.g. the agent a prior handoff routed to) would silently keep
-      // the bot muted and make "Resume AI" a no-op. This is the explicit
-      // choice to let the bot own the thread again.
-      update.assigned_agent_id = null
-      // Give the bot a fresh reply budget on this thread. This is a
-      // deliberate, manual, rate-limited action (not automatable), so it
-      // can't be used to bypass the per-conversation cap at scale — it's
-      // a human choosing to re-engage the assistant.
-      update.ai_reply_count = 0
-      update.ai_handoff_summary = null
-    }
-
-    const { error: upErr } = await supabase
-      .from('conversations')
-      .update(update)
-      .eq('id', conversationId)
-      .eq('account_id', accountId)
+    // Pause and optional transfer commit together. Assignment by itself never pauses AI.
+    const { error: upErr } = await supabase.rpc('set_inbox_ai_pause', {
+      p_conversation: conversationId, p_paused: paused, p_assign_to_me: assignToMe,
+    })
     if (upErr) {
       console.error('[ai/autoreply] update error:', upErr)
       return NextResponse.json(

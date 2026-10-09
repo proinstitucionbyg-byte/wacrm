@@ -12,13 +12,16 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const { data: candidates, error } = await ctx.supabase
       .from('enrollment_drafts')
-      .select('id,review_id,version,status,data')
+      .select('id,review_id,version,status,data,sales_adviser')
       .eq('account_id', ctx.accountId)
+      .not('sales_adviser', 'is', null)
       .or(`status.eq.ready,and(status.eq.processing,lease_until.lt.${now})`)
       .order('created_at', { ascending: true })
       .limit(5);
     if (error) throw error;
     for (const row of candidates ?? []) {
+      // Older receipts lack a reliable snapshot; do not invent sales credit.
+      if (!row.sales_adviser?.trim()) continue;
       const cleanData = parseEnrollmentData(row.data);
       if (!cleanData || enrollmentIssues(cleanData).length) continue;
       const { data: review, error: reviewError } = await ctx.supabase
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
         .eq('version', row.version)
         .eq('status', row.status)
         .select(
-          'id,review_id,conversation_id,data,lease_token,version,created_at'
+          'id,review_id,conversation_id,data,lease_token,version,created_at,sales_adviser'
         )
         .maybeSingle();
       if (claimError) throw claimError;

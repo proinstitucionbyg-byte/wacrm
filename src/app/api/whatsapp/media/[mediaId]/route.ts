@@ -49,6 +49,10 @@ export async function GET(
     }
 
     // Fetch and decrypt WhatsApp config
+    // A media ID must belong to a message the caller can actually read.
+    const {data: visibleMessage,error: mediaAccessError}=await supabase.from('messages')
+      .select('id').eq('media_url',`/api/whatsapp/media/${mediaId}`).limit(1).maybeSingle()
+    if(mediaAccessError||!visibleMessage)return NextResponse.json({error:'Media not found'},{status:404})
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
@@ -85,7 +89,7 @@ console.log(mediaInfo);
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400',
+        'Cache-Control': 'private, no-store',
       },
     })
   } catch (error) {

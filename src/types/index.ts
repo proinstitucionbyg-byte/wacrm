@@ -117,6 +117,8 @@ export interface Contact {
 }
 
 export interface Tag {
+  kind?: 'process' | 'access' | 'system';
+  audience?: { users: string[]; areas: string[]; roles: string[] };
   id: string;
   user_id: string;
   name: string;

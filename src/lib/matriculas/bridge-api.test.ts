@@ -1,6 +1,6 @@
 import { beforeEach,describe,expect,it,vi } from 'vitest';
 import { NextResponse } from 'next/server';
-const mocks=vi.hoisted(()=>({key:vi.fn(),role:vi.fn(),from:vi.fn(),select:vi.fn(),eq:vi.fn(),or:vi.fn(),order:vi.fn(),limit:vi.fn(),update:vi.fn(),in:vi.fn(),single:vi.fn(),media:vi.fn(),download:vi.fn()}));
+const mocks=vi.hoisted(()=>({key:vi.fn(),role:vi.fn(),from:vi.fn(),select:vi.fn(),eq:vi.fn(),not:vi.fn(),or:vi.fn(),order:vi.fn(),limit:vi.fn(),update:vi.fn(),in:vi.fn(),single:vi.fn(),media:vi.fn(),download:vi.fn()}));
 vi.mock('@/lib/auth/api-context',()=>({requireApiKey:mocks.key}));
 vi.mock('@/lib/auth/account',()=>({requireRole:mocks.role,toErrorResponse:(e:{status?:number})=>NextResponse.json({error:'denied'},{status:e.status??500})}));
 vi.mock('@/lib/auth/permissions',()=>({requirePermission:mocks.role}));
@@ -17,8 +17,8 @@ const context=()=>({params:Promise.resolve({id,messageId:id})});
 const valid={full_name:'LUIS BRAYAN',document_type:'DNI',document_number:'12345678',phone1:'51937467119',email:'x@gmail.com',course:'NUTRICION Y DIETETICA',start_date:'2026-10-06',promotion_id:'PROMO 1',payment_date:'2026-10-05',amount:'19.90',payment_method:'YAPE',identity_message_ids:[id],identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9]};
 beforeEach(()=>{
   vi.resetAllMocks();
-  const chain={select:mocks.select,eq:mocks.eq,or:mocks.or,order:mocks.order,limit:mocks.limit,update:mocks.update,in:mocks.in,maybeSingle:mocks.single};
-  for(const fn of [mocks.from,mocks.select,mocks.eq,mocks.or,mocks.order,mocks.update,mocks.in])fn.mockReturnValue(chain);
+  const chain={select:mocks.select,eq:mocks.eq,not:mocks.not,or:mocks.or,order:mocks.order,limit:mocks.limit,update:mocks.update,in:mocks.in,maybeSingle:mocks.single};
+  for(const fn of [mocks.from,mocks.select,mocks.eq,mocks.not,mocks.or,mocks.order,mocks.update,mocks.in])fn.mockReturnValue(chain);
   const ctx={accountId:'account-a',userId:'agent-a',supabase:{from:mocks.from}};
   mocks.key.mockResolvedValue(ctx);mocks.role.mockResolvedValue(ctx);mocks.single.mockResolvedValue({data:null,error:null});mocks.limit.mockResolvedValue({data:[],error:null});
 });
@@ -26,17 +26,23 @@ describe('authenticated Google enrollment bridge',()=>{
   it('requires the dedicated scope before touching the queue',async()=>{
     expect((await claim(request({}))).status).toBe(200);
     expect(mocks.key).toHaveBeenCalledWith(expect.any(Request),'enrollments:sync');expect(mocks.eq).toHaveBeenCalledWith('account_id','account-a');
+    expect(mocks.not).toHaveBeenCalledWith('sales_adviser','is',null);
   });
   it('never claims a job with an unvalidated receipt',async()=>{
-    mocks.limit.mockResolvedValue({data:[{id,version:1,review_id:id,status:'ready',data:valid}],error:null});
+    mocks.limit.mockResolvedValue({data:[{id,version:1,review_id:id,status:'ready',data:valid,sales_adviser:'ASHLEY'}],error:null});
     mocks.single.mockResolvedValue({data:{status:'pending'},error:null});
     const response=await claim(request({}));expect(await response.json()).toEqual({data:{job:null}});expect(mocks.update).not.toHaveBeenCalled();
   });
   it('claims with a version check and returns only its assigned evidence IDs',async()=>{
-    mocks.limit.mockResolvedValue({data:[{id,version:1,review_id:id,status:'ready',data:valid}],error:null});
-    mocks.single.mockResolvedValueOnce({data:{status:'validated',message_id:'voucher'},error:null}).mockResolvedValueOnce({data:{id,lease_token:'lease',data:valid},error:null});
-    const response=await claim(request({}));expect((await response.json()).data.job.voucher_message_id).toBe('voucher');
+    mocks.limit.mockResolvedValue({data:[{id,version:1,review_id:id,status:'ready',data:{...valid,sales_adviser:'FORGED'},sales_adviser:'ASHLEY'}],error:null});
+    mocks.single.mockResolvedValueOnce({data:{status:'validated',message_id:'voucher'},error:null}).mockResolvedValueOnce({data:{id,lease_token:'lease',data:valid,sales_adviser:'ASHLEY'},error:null});
+    const response=await claim(request({}));const job=(await response.json()).data.job;
+    expect(job.voucher_message_id).toBe('voucher');expect(job.sales_adviser).toBe('ASHLEY');expect(job.data.sales_adviser).toBeUndefined();
     expect(mocks.eq).toHaveBeenCalledWith('version',1);expect(mocks.update.mock.calls[0][0].status).toBe('processing');
+  });
+  it('does not guess attribution for a historical receipt without a snapshot',async()=>{
+    mocks.limit.mockResolvedValue({data:[{id,version:1,review_id:id,status:'ready',data:valid,sales_adviser:null}],error:null});
+    expect((await (await claim(request({}))).json()).data.job).toBeNull();expect(mocks.update).not.toHaveBeenCalled();
   });
   it('rejects result callbacks with another lease',async()=>{
     mocks.single.mockResolvedValue({data:{status:'processing',lease_token:'other'},error:null});

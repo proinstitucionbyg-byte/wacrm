@@ -8,14 +8,14 @@ export async function GET() {
       ctx.supabase
         .from('team_threads')
         .select(
-          'id,kind,title,last_message_at,team_thread_members(user_id,last_read_at)'
+          'id,kind,title,last_message_at,archived_at,team_thread_members(user_id,last_read_at,archived_at)'
         )
         .eq('account_id', ctx.accountId)
         .order('last_message_at', { ascending: false })
         .limit(100),
       ctx.supabase
         .from('profiles')
-        .select('user_id,full_name,account_role')
+        .select('user_id,full_name,account_role,nickname,area,cargo,birth_date')
         .eq('account_id', ctx.accountId)
         .in('account_role', ['owner', 'admin', 'agent']),
       ctx.supabase
@@ -36,6 +36,8 @@ export async function GET() {
     return NextResponse.json({
       threads: (rooms.data ?? []).map((r) => ({
         ...r,
+        personally_archived: !!r.team_thread_members.find((m: {user_id: string; archived_at: string | null}) => m.user_id === ctx.userId)?.archived_at,
+        can_send: !r.archived_at && r.team_thread_members.some((m: {user_id: string}) => m.user_id === ctx.userId),
         unread: counts.get(r.id) ?? 0,
       })),
       members: people.data ?? [],

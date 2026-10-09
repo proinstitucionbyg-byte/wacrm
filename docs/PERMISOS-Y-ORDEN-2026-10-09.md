@@ -1,5 +1,30 @@
 # PERMISOS Y ORDEN DEL CRM
 
+## CIERRE DEL LOTE 09/10/2026 — ESTADO ACTUAL
+
+Las secciones posteriores conservan el historial de trabajo. Este apartado sustituye los pendientes antiguos que ya se implementaron.
+
+- Aplicadas seis migraciones: ventana comercial, etiquetas y traspasos, comandos, archivo del chat interno, entrega de documentos e identidad mínima del responsable.
+- Ventana de dos horas renovada por cada mensaje de la asesora. Cliente y bot no renuevan. La asignación conserva IA y automatización.
+- Etiquetas de acceso y de proceso separadas; catálogo con destinatarios combinables, selección múltiple y menú contextual. Servidor y RLS verifican permisos.
+- Traspaso con historial completo o desde el último mensaje del estudiante. Presentación con APODO pendiente de envío.
+- MANDAR(NOMBRE DEL BLOQUE) y selector de bloques activos. Identificador de envío único; el comando nunca sale como mensaje literal.
+- Chat interno con ficha, cumpleaños, presencia, archivo personal/restauración, supervisión administrativa y eliminación definitiva reservada al CEO con confirmación.
+- Barrido de cola de ventas y caducidad. Programador incluido en el contenedor para ejecutar las rutas existentes de automatizaciones y flujos, sin laptop ni navegador. Utiliza el secreto ya configurado; un ciclo no se solapa consigo mismo.
+- Atribución comercial capturada al recibir el comprobante y protegida del JSON editable. Se escribe ASESORA DE VTAS. en Google.
+- Puente Apps Script actualizado y reinstalado: ejecución completada a las 11:21 del 09/10/2026. Activador de cinco minutos reutilizado.
+- PDF: subida privada a Meta y entrega de BOLETA, CRONOGRAMA y FICHA con registro independiente por documento. Un envío incierto exige revisión para evitar duplicados.
+- Prueba PostgreSQL con ROLLBACK aprobada: historial restringido, renovación, caducidad, retirada de etiqueta, atribución inmutable, límites de agentes y archivo/restauración del chat interno. No dejó datos de prueba.
+- Pendiente de comprobación final: despliegue de este lote y recorrido real de WhatsApp a Google/documentos. Las pruebas locales y SQL no equivalen a esa prueba real.
+
+### DATOS QUE SIGUEN DEPENDIENDO DEL USUARIO
+
+- El CEO configura área, cargo y porcentajes reales. No se han inventado ni activado esos valores.
+- Completar APODO de cada asesora. Hay cuentas sin APODO y una sin nombre; no se asignarán chats a perfiles sin identidad. Se conserva el nombre como alternativa para los perfiles existentes.
+- Imagen, audio y texto de bienvenida aplazados expresamente por el usuario. No se declara activa esa bienvenida.
+- No se adjudican ventas históricas sin captura de atribución. Requieren revisión.
+- Una promoción, identidad o inicio incompletos quedan pendientes de confirmación; la lectura de imagen no valida por sí sola un pago.
+
 ## DECISIONES DEL USUARIO
 
 - El CEO configura por cuenta/correo el AREA, CARGO y PORCENTAJE. No asignar esos valores por él.
@@ -83,3 +108,15 @@
 - Supervisión/archivo/recuperación del chat interno y acceso por conversación.
 - Revisar el resto de módulos existentes: disponer de un interruptor en el catálogo no acredita que todas las rutas y tablas históricas lo apliquen.
 - Entrega de PDF por WhatsApp y bienvenida con imagen/audio: pendiente; el usuario aplazó enviar esos recursos.
+
+## VENTANA COMERCIAL Y ATRIBUCION — LOTE LOCAL, NO PUBLICADO
+
+- Aclaración expresa: **cada mensaje de la asesora reinicia dos horas completas**. No se aplica un umbral de 90 minutos. Cliente e IA no renuevan.
+- Preparación local: `20261009151931_sales_assignment_two_hour_window.sql`. Asignación inicial abre la ventana; solo mensajes enviados por su responsable la renuevan. La intervención se registra junto con el mensaje exitoso, después de la aceptación por Meta. Un envío rechazado no cuenta.
+- Caducidad: retirar asignación y su etiqueta exacta, conservar etiquetas de proceso, no reasignar inmediatamente el mismo contacto. Barrido en el cron existente y comprobación al volver a recibir mensajes. La frecuencia real del cron todavía debe verificarse antes de activarlo.
+- Recibo: congelar APODO de la responsable que intervino dentro de la ventana; si no hubo intervención válida, INSTITUCION. OCR tardío, validación del CEO y cambios posteriores del apodo no deben modificar esa atribución.
+- Matrícula: transmitir atribución en columna protegida separada del JSON editable; el puente escribe ASESORA DE VTAS. Los recibos históricos sin captura quedan sin atribución y requieren revisión; no adjudicarles una asesora por suposición ni bloquear por ellos los trabajos nuevos.
+- Pendiente de comprobación en PostgreSQL: límites exactos de dos horas, bloqueo concurrente renovación/caducidad, retirada de etiqueta y conservación de atribución al validar. No se ha aplicado esta migración ni actualizado Apps Script en producción.
+- El traspaso manual, los comandos MANDAR y las restricciones por destinatarios siguen siendo trabajo del lote: deben integrarse con esta ventana antes de dar por terminado el flujo completo.
+- Publicación acumulada solicitada por el usuario: no hacer push/despliegues individuales de esta preparación.
+- Comprobaciones locales del lote parcial: **847/847 pruebas aprobadas**, TypeScript sin errores, lint de archivos tocados sin errores y compilación de 67 páginas aprobada. Informe: output/verificacion/ventana-asesora-tests.json. Esto no verifica todavía la nueva migración en PostgreSQL ni el flujo WhatsApp en producción.

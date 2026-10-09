@@ -7,6 +7,10 @@ function setup() {
     readFileSync('docs/apps-script/PUENTE_CRM_MATRICULAS.gs', 'utf8'),
     context
   );
+  runInContext(
+    "stored={CRM_BASE_URL:'https://crm.example',CRM_SYNC_KEY:'test'}; PropertiesService={getScriptProperties:function(){return {getProperty:function(k){return stored[k];},getProperties:function(){return stored;},setProperty:function(k,v){stored[k]=v;},deleteProperty:function(k){delete stored[k];}};}}; V2={admin:'admin'}; SpreadsheetApp={openById:function(){return {getSheetByName:function(){return null;}};}};",
+    context
+  );
   return (code: string) => runInContext(code, context);
 }
 describe('puente Google CRM', () => {
@@ -30,6 +34,9 @@ describe('puente Google CRM', () => {
       "calls=[]; BLOQUEO_=function(fn){return fn();}; C_API_=function(path,body){calls.push([path,body]);return {job:{id:'case',lease_token:'lease'}};}; C_REGISTRAR_=function(){return {registered_number:'3',student_folder_url:'folder'};}; SINCRONIZAR_CRM_MATRICULAS();"
     );
     expect(run('calls[1][1].status')).toBe('registered');
+    expect(
+      run("JSON.parse(stored['CRM DOCUMENTOS:case']).registered_number")
+    ).toBe('3');
     expect(run('calls[1][1].registered_number')).toBe('3');
   });
   it('preserves a successful registration for retry after a result timeout', () => {
@@ -55,5 +62,18 @@ describe('puente Google CRM', () => {
       "C_CONFIG_=function(){return {};}; seen=false; folder={getFiles:function(){return {hasNext:function(){return !seen;},next:function(){seen=true;return {getName:function(){return 'VOUCHER-id.jpg';},marker:1};}};}};"
     );
     expect(run("C_FOTO_({},'id',folder,'VOUCHER').marker")).toBe(1);
+  });
+  it('sends only the three generated PDFs and removes a completed task', () => {
+    const run = setup();
+    run(
+      "stored['CRM DOCUMENTOS:case']=JSON.stringify({lease_token:'lease',status:'registered',registered_number:'3'}); C_CONFIG_=function(){return {base:'https://crm.example',key:'test'};}; C_API_=function(){return {};}; CLAVE_=function(x){return x;}; calls=[]; SpreadsheetApp.openById=function(){return {getSheetByName:function(){return {getLastRow:function(){return 2;},getRange:function(){return {getValues:function(){return [['3','','','','','','','','','','','','https://drive.google.com/file/d/one/view','https://drive.google.com/file/d/two/view','https://drive.google.com/file/d/three/view','GENERADO','']];}};}};}};}; DriveApp={getFileById:function(id){return {getMimeType:function(){return 'application/pdf';},getBlob:function(){return {getBytes:function(){return [1,2,3];}};}};}}; UrlFetchApp={fetch:function(url){calls.push(url);return {getResponseCode:function(){return 200;}};}}; C_ENVIAR_DOCUMENTOS_PENDIENTES_();"
+    );
+    expect(Array.from(run('calls'))).toEqual(
+      ['BOLETA', 'CRONOGRAMA', 'FICHA'].map(
+        (kind) =>
+          `https://crm.example/api/v1/enrollments/case/documents/${kind}`
+      )
+    );
+    expect(run("stored['CRM DOCUMENTOS:case']")).toBeUndefined();
   });
 });

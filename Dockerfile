@@ -34,7 +34,8 @@ ENV HOSTNAME=0.0.0.0
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/scripts/server-entrypoint.mjs ./server-entrypoint.mjs
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["node", "server-entrypoint.mjs"]

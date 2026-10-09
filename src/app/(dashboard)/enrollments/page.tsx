@@ -20,10 +20,19 @@ type Evidence = {
     fields?: Record<string, string | null>;
   } | null;
 };
-function EnrollmentEditor({ initial, canEdit }: { initial: EnrollmentDraft; canEdit: boolean }) {
+function EnrollmentEditor({
+  initial,
+  canEdit,
+}: {
+  initial: EnrollmentDraft;
+  canEdit: boolean;
+}) {
   const [draft, setDraft] = useState(initial);
   const [data, setData] = useState<EnrollmentData>(initial.data);
   const [images, setImages] = useState<Evidence[]>([]);
+  const [documents, setDocuments] = useState<
+    { kind: string; status: string; error: string | null }[]
+  >([]);
   const [issues, setIssues] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -31,7 +40,10 @@ function EnrollmentEditor({ initial, canEdit }: { initial: EnrollmentDraft; canE
   useEffect(() => {
     let cancelled = false;
     setCollecting(true);
-    (canEdit ? fetch(`/api/enrollments/${initial.id}/collect`, { method: 'POST' }) : Promise.resolve(null))
+    (canEdit
+      ? fetch(`/api/enrollments/${initial.id}/collect`, { method: 'POST' })
+      : Promise.resolve(null)
+    )
       .then(async (res) => {
         if (res && !res.ok) throw new Error((await res.json()).error);
         return fetch(`/api/enrollments/${initial.id}`, { cache: 'no-store' });
@@ -43,27 +55,42 @@ function EnrollmentEditor({ initial, canEdit }: { initial: EnrollmentDraft; canE
         setDraft(json.draft);
         setData(json.draft.data);
         setImages(json.images);
+        setDocuments(json.documents ?? []);
         setIssues(json.issues);
       })
-      .catch((err) => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setCollecting(false); });
-    return () => { cancelled = true; };
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setCollecting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [initial.id, canEdit]);
-  const locked = !canEdit || ['ready', 'processing', 'registered'].includes(draft.status);
+  const locked =
+    !canEdit || ['ready', 'processing', 'registered'].includes(draft.status);
   const dirty = JSON.stringify(data) !== JSON.stringify(draft.data);
   async function enqueue() {
     setSaving(true);
     try {
       const res = await fetch(`/api/enrollments/${draft.id}/submit`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version: draft.version }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setDraft(json.draft); setError('');
-      toast.success('Ficha en cola de registro. Todavía no confirma documentos enviados.');
-    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo enviar'); }
-    finally { setSaving(false); }
+      setDraft(json.draft);
+      setError('');
+      toast.success(
+        'Ficha en cola de registro. Todavía no confirma documentos enviados.'
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo enviar');
+    } finally {
+      setSaving(false);
+    }
   }
   async function save() {
     setSaving(true);
@@ -86,23 +113,69 @@ function EnrollmentEditor({ initial, canEdit }: { initial: EnrollmentDraft; canE
       setSaving(false);
     }
   }
-  if (collecting) return <p className="p-5 text-sm">RECOGIENDO LOS DATOS DEL CHAT...</p>;
+  if (collecting)
+    return <p className="p-5 text-sm">RECOGIENDO LOS DATOS DEL CHAT...</p>;
   return (
     <article className="border-border bg-card space-y-4 rounded-lg border p-5">
       <h2 className="font-semibold">
         {data.full_name || 'MATRICULA CON DATOS PENDIENTES'}
       </h2>
-      {!canEdit && <p className="text-sm text-muted-foreground">Acceso de consulta. No tienes permiso para modificar esta matrícula.</p>}
+      {!canEdit && (
+        <p className="text-muted-foreground text-sm">
+          Acceso de consulta. No tienes permiso para modificar esta matrícula.
+        </p>
+      )}
       <p className="text-muted-foreground text-sm">
         PAGO VALIDADO ·{' '}
         {draft.status === 'registered'
           ? `REGISTRO ${draft.registered_number}`
           : draft.status === 'processing'
             ? 'REGISTRANDO'
-            : draft.status === 'ready' ? 'EN COLA PARA GOOGLE' : 'COMPLETAR DATOS'}
+            : draft.status === 'ready'
+              ? 'EN COLA PARA GOOGLE'
+              : 'COMPLETAR DATOS'}
       </p>
-      {draft.error && <p role="alert" className="text-red-400">REVISAR REGISTRO: {draft.error}</p>}
-      {draft.status === 'ready' && <p className="text-sm text-muted-foreground">El programa de Google procesará esta ficha cuando la conexión esté instalada y activa. Este estado todavía no acredita registro ni entrega de PDF.</p>}
+      {draft.error && (
+        <p role="alert" className="text-red-400">
+          REVISAR REGISTRO: {draft.error}
+        </p>
+      )}
+      {draft.status === 'ready' && (
+        <p className="text-muted-foreground text-sm">
+          El programa de Google procesará esta ficha cuando la conexión esté
+          instalada y activa. Este estado todavía no acredita registro ni
+          entrega de PDF.
+        </p>
+      )}
+      {draft.status === 'registered' && (
+        <section className="border-border rounded border p-3">
+          <h3 className="mb-2 text-sm font-semibold">
+            DOCUMENTOS POR WHATSAPP
+          </h3>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {['BOLETA', 'CRONOGRAMA', 'FICHA'].map((kind) => {
+              const item = documents.find((d) => d.kind === kind);
+              return (
+                <div key={kind} className="bg-muted rounded p-2 text-xs">
+                  <strong>{kind}</strong>
+                  <p>
+                    {item?.status === 'sent'
+                      ? 'ENVIADO'
+                      : item?.status === 'review'
+                        ? 'REQUIERE REVISION'
+                        : item?.status === 'sending'
+                          ? 'ENVIO INICIADO'
+                          : 'ESPERANDO PDF'}
+                  </p>
+                  {item?.error && (
+                    <p className="mt-1 text-red-400">{item.error}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
       {draft.conversation_id && (
         <Link
           href={`/inbox?c=${draft.conversation_id}`}
@@ -293,9 +366,21 @@ function EnrollmentEditor({ initial, canEdit }: { initial: EnrollmentDraft; canE
       )}
       {!locked && (
         <div className="flex flex-wrap gap-3">
-          <Button disabled={saving} onClick={save}>Guardar datos</Button>
-          <Button variant="outline" disabled={saving || dirty || issues.length > 0} onClick={enqueue}>Enviar a cola de registro</Button>
-          {dirty && <p className="text-xs text-muted-foreground">Guarda los cambios antes de enviar la ficha.</p>}
+          <Button disabled={saving} onClick={save}>
+            Guardar datos
+          </Button>
+          <Button
+            variant="outline"
+            disabled={saving || dirty || issues.length > 0}
+            onClick={enqueue}
+          >
+            Enviar a cola de registro
+          </Button>
+          {dirty && (
+            <p className="text-muted-foreground text-xs">
+              Guarda los cambios antes de enviar la ficha.
+            </p>
+          )}
         </div>
       )}
       {draft.student_folder_url && (
@@ -343,8 +428,8 @@ function EnrollmentsPageContent() {
     <section className="space-y-5">
       <h1 className="text-2xl font-bold">REGISTRO DE MATRICULAS</h1>
       <p className="text-muted-foreground text-sm">
-        Cada ficha corresponde a un pago validado por una persona autorizada. Los faltantes no
-        eliminan la aprobación.
+        Cada ficha corresponde a un pago validado por una persona autorizada.
+        Los faltantes no eliminan la aprobación.
       </p>
       <Button variant="outline" onClick={load} disabled={loading}>
         Actualizar

@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
+import { TeamMemberProfile } from '@/components/inbox/team-member-profile';
 import {
   type TeamMember,
   type TeamMessage,
@@ -147,15 +148,21 @@ function TeamConversation({
         <h2 className="font-semibold">
           {teamThreadTitle(thread, members, userId)}
         </h2>
-        <p className="text-muted-foreground text-xs">
+        <div className="flex flex-wrap gap-1">
           {thread.team_thread_members
-            .map(
-              (p) =>
-                members.find((m) => m.user_id === p.user_id)?.full_name ||
-                'MIEMBRO DEL EQUIPO'
-            )
-            .join(' · ')}
-        </p>
+            .map((p) => members.find((m) => m.user_id === p.user_id))
+            .filter((m): m is TeamMember => !!m)
+            .map((member) => (
+              <TeamMemberProfile key={member.user_id} member={member} />
+            ))}
+        </div>
+        {thread.can_send === false && (
+          <p className="text-muted-foreground text-xs">
+            {thread.archived_at
+              ? 'CONVERSACION ARCHIVADA'
+              : 'VISTA DE SUPERVISION · SOLO LECTURA'}
+          </p>
+        )}
       </header>
       <div
         className="max-h-[55vh] min-h-64 flex-1 space-y-3 overflow-y-auto p-4"
@@ -219,7 +226,7 @@ function TeamConversation({
           id="team-message"
           value={body}
           maxLength={4000}
-          disabled={sending}
+          disabled={sending || thread.can_send === false}
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={(e) => {
             if (
@@ -237,7 +244,10 @@ function TeamConversation({
           <span className="text-muted-foreground text-xs">
             Enter envía · Shift + Enter agrega una línea
           </span>
-          <Button type="submit" disabled={sending || !body.trim()}>
+          <Button
+            type="submit"
+            disabled={sending || !body.trim() || thread.can_send === false}
+          >
             {sending ? 'Enviando…' : 'Enviar'}
           </Button>
         </div>
@@ -256,16 +266,32 @@ function TeamChatContent() {
     [creating, setCreating] = useState(false),
     [error, setError] = useState(''),
     [showNew, setShowNew] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [admin, setAdmin] = useState(false),
+    [owner, setOwner] = useState(false);
   const load = useCallback(async () => {
     try {
       const data = await jsonRequest('/api/team-chat');
       setThreads(data.threads);
       setMembers(data.members);
+      setAdmin(
+        data.members.some(
+          (m: TeamMember) =>
+            m.user_id === user?.id &&
+            ['owner', 'admin'].includes(m.account_role)
+        )
+      );
+      setOwner(
+        data.members.some(
+          (m: TeamMember) =>
+            m.user_id === user?.id && m.account_role === 'owner'
+        )
+      );
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar');
     }
-  }, []);
+  }, [user?.id]);
   useEffect(() => {
     void load();
     const timer = setInterval(() => {
@@ -300,6 +326,36 @@ function TeamChatContent() {
     }
   }
   const room = threads.find((t) => t.id === active);
+  async function archive(global: boolean, restore: boolean) {
+    if (!room) return;
+    try {
+      await jsonRequest(`/api/team-chat/${room.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ global, restore }),
+      });
+      await load();
+      setActive('');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo archivar');
+    }
+  }
+  async function deleteRoom() {
+    if (
+      !room ||
+      !window.confirm(
+        `ELIMINAR DEFINITIVAMENTE: ${teamThreadTitle(room, members, user?.id || '')}\nSe borrarán sus mensajes para todo el equipo. Esta acción no se puede deshacer.`
+      )
+    )
+      return;
+    try {
+      await jsonRequest(`/api/team-chat/${room.id}`, { method: 'DELETE' });
+      await load();
+      setActive('');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo eliminar');
+    }
+  }
   return (
     <div className="space-y-4">
       <div className="flex justify-between gap-3">
@@ -360,6 +416,44 @@ function TeamChatContent() {
           </Button>
         </section>
       )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          onClick={() => {
+            setShowArchived(!showArchived);
+            setActive('');
+          }}
+        >
+          {showArchived ? 'VER ACTIVAS' : 'VER ARCHIVADAS'}
+        </Button>
+        {room && (
+          <>
+            <Button
+              variant="outline"
+              onClick={() => archive(false, !!room.personally_archived)}
+            >
+              {room.personally_archived
+                ? 'RECUPERAR PARA MI'
+                : 'ARCHIVAR PARA MI'}
+            </Button>
+            {admin && (
+              <Button
+                variant="outline"
+                onClick={() => archive(true, !!room.archived_at)}
+              >
+                {room.archived_at
+                  ? 'RECUPERAR PARA TODOS'
+                  : 'ARCHIVAR PARA TODOS'}
+              </Button>
+            )}
+            {owner && (
+              <Button variant="destructive" onClick={deleteRoom}>
+                ELIMINAR DEFINITIVAMENTE
+              </Button>
+            )}
+          </>
+        )}
+      </div>
       <div className="grid gap-4 lg:grid-cols-[16rem_1fr]">
         <nav aria-label="Conversaciones internas" className="space-y-2">
           {threads.length === 0 ? (
@@ -367,20 +461,28 @@ function TeamChatContent() {
               Aún no tienes conversaciones internas.
             </p>
           ) : (
-            threads.map((thread) => (
-              <button
-                key={thread.id}
-                onClick={() => setActive(thread.id)}
-                className={`flex w-full items-center justify-between gap-2 rounded border p-3 text-left text-sm ${active === thread.id ? 'border-primary bg-primary/10' : 'border-border'}`}
-              >
-                <span>{teamThreadTitle(thread, members, user?.id || '')}</span>
-                {thread.unread > 0 && (
-                  <span className="bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-xs">
-                    {thread.unread > 99 ? '99+' : thread.unread}
+            threads
+              .filter(
+                (thread) =>
+                  showArchived ===
+                  !!(thread.archived_at || thread.personally_archived)
+              )
+              .map((thread) => (
+                <button
+                  key={thread.id}
+                  onClick={() => setActive(thread.id)}
+                  className={`flex w-full items-center justify-between gap-2 rounded border p-3 text-left text-sm ${active === thread.id ? 'border-primary bg-primary/10' : 'border-border'}`}
+                >
+                  <span>
+                    {teamThreadTitle(thread, members, user?.id || '')}
                   </span>
-                )}
-              </button>
-            ))
+                  {thread.unread > 0 && (
+                    <span className="bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-xs">
+                      {thread.unread > 99 ? '99+' : thread.unread}
+                    </span>
+                  )}
+                </button>
+              ))
           )}
         </nav>
         {room ? (

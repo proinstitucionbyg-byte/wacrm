@@ -34,9 +34,16 @@ export async function GET(
       .order('created_at', { ascending: false })
       .limit(30);
     if (imagesError) throw imagesError;
+    const { data: documents, error: documentsError } = await ctx.supabase
+      .from('enrollment_document_deliveries')
+      .select('kind,status,sent_at,error')
+      .eq('enrollment_id', id)
+      .eq('account_id', ctx.accountId);
+    if (documentsError) throw documentsError;
     return NextResponse.json({
       draft,
       images: images ?? [],
+      documents: documents ?? [],
       issues: enrollmentIssues(draft.data),
     });
   } catch (error) {

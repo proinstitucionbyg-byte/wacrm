@@ -32,6 +32,8 @@ import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 // ------------------------------------------------------------
 
 export interface AutomationContext {
+  /** Explicit adviser command; set only by the authenticated server endpoint. */
+  manual_agent_id?: string
   /** Raw message text, for keyword_match + message_content conditions. */
   message_text?: string
   /** Conversation the event belongs to, if any. */
@@ -169,6 +171,7 @@ export async function runAutomationById(input: {
   contactId: string
   conversationId: string
   messageText?: string
+  manualAgentId?: string
 }): Promise<boolean> {
   try {
     const db = supabaseAdmin()
@@ -197,15 +200,21 @@ export async function runAutomationById(input: {
       .eq('contact_id', input.contactId)
       .eq('status', 'pending')
 
-    await executeAutomation(automation as Automation, {
+    const logId = await executeAutomation(automation as Automation, {
       accountId: input.accountId,
       triggerType: 'keyword_match',
       contactId: input.contactId,
       context: {
         message_text: input.messageText ?? '',
         conversation_id: input.conversationId,
+        ...(input.manualAgentId ? { manual_agent_id: input.manualAgentId } : {}),
       },
     })
+    if (input.manualAgentId) {
+      if (!logId) return false
+      const { data: result, error: resultError } = await db.from('automation_logs').select('status').eq('id', logId).single()
+      return !resultError && result?.status !== 'failed'
+    }
     return true
   } catch (err) {
     console.error('[automations] runAutomationById failed:', err)
@@ -247,7 +256,14 @@ export async function resumePendingExecution(pending: {
   }
   // Si la asesora escribió hace menos de 5 min, o la automatización
   // está apagada en este chat, el paso no se envía.
-  if (pending.context?.conversation_id) {
+  if (pending.context?.manual_agent_id) {
+    const { data: profile } = await db.from('profiles').select('account_id').eq('user_id', pending.context.manual_agent_id).maybeSingle()
+    const { data: allowed } = await db.rpc('has_member_permission', { p_user_id: pending.context.manual_agent_id, p_module: 'inbox', p_action: 'send' })
+    if (profile?.account_id !== pending.account_id || allowed !== true || automation.is_active !== true) {
+      await markPending(pending.id, 'cancelled')
+      return
+    }
+  } else if (pending.context?.conversation_id) {
     const { data: conv } = await db
       .from('conversations')
       .select('automation_enabled, last_human_message_at')
@@ -331,6 +347,7 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
   if (rpcErr) {
     console.error('[automations] increment counter failed:', rpcErr)
   }
+  return log.id as string
 }
 
 interface ExecuteArgs {

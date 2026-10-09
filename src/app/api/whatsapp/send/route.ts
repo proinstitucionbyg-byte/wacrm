@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { isInboxCommand } from '@/lib/inbox/commands'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -68,6 +69,10 @@ export async function POST(request: Request) {
       interactive_payload,
       reply_to_message_id,
     } = body
+
+    if (typeof content_text === 'string' && isInboxCommand(content_text)) {
+      return NextResponse.json({ error: 'Envía los comandos desde BLOQUES PREPARADOS; no se enviarán como texto al estudiante.' }, { status: 400 })
+    }
 
     if ((!conversationIdInput && !contact_id) || !message_type) {
       return NextResponse.json(
@@ -209,19 +214,6 @@ export async function POST(request: Request) {
     const channel = contact?.channel as Channel | undefined
     const externalId = contact?.external_id as string | undefined
     
-    // Anota la hora de la última intervención humana. Sirve para que
-    // la automatización y la IA se pausen mientras la asesora atiende.
-    const { error: humanErr } = await supabase
-      .from('conversations')
-      .update({
-  last_human_message_at: new Date().toISOString(),
-})
-      .eq('id', conversationId)
-      .eq('account_id', accountId)
-    if (humanErr) {
-      console.error('[send] last_human_message_at failed:', humanErr)
-    }
-
     if (!channel) {
       return NextResponse.json(
         { error: 'Conversation has no channel' },
@@ -240,6 +232,7 @@ export async function POST(request: Request) {
           accountId,
           {
             conversationId,
+            senderId: user.id,
             messageType: message_type,
             contentText: content_text,
             mediaUrl: media_url,
@@ -303,6 +296,7 @@ export async function POST(request: Request) {
       await saveOutboundMessage({
         supabase,
         conversationId,
+        senderId: user.id,
         contentType: message_type,
         contentText: content_text,
         mediaUrl: media_url,
@@ -354,6 +348,7 @@ export async function POST(request: Request) {
       await saveOutboundMessage({
         supabase,
         conversationId,
+        senderId: user.id,
         contentType: message_type,
         contentText: content_text,
         mediaUrl: media_url,
@@ -542,6 +537,7 @@ async function sendInstagramMessage({
 async function saveOutboundMessage({
   supabase,
   conversationId,
+  senderId,
   contentType,
   contentText,
   mediaUrl,
@@ -549,6 +545,7 @@ async function saveOutboundMessage({
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>
   conversationId: string
+  senderId: string
   contentType: string
   contentText?: string
   mediaUrl?: string
@@ -559,6 +556,7 @@ async function saveOutboundMessage({
     .insert({
       conversation_id: conversationId,
       sender_type: 'agent',
+      sender_id: senderId,
       content_type: contentType,
       content_text: contentText || null,
       media_url: mediaUrl || null,
@@ -571,6 +569,7 @@ async function saveOutboundMessage({
       '[Meta Send] Error saving outbound message:',
       error
     )
+    throw new Error('Message sent but could not save its delivery record')
   }
 
   await supabase

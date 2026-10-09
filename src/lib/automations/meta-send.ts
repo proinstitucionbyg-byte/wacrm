@@ -258,7 +258,7 @@ const template_name =
     content_text,
     template_name,
     message_id: waMessageId,
-           media_url: input.kind === 'media' ? input.mediaUrl : null,
+    media_url: input.kind === 'media' ? (/^\d+$/.test(input.mediaUrl) ? `/api/whatsapp/media/${input.mediaUrl}` : input.mediaUrl) : null,
     status: 'sent',
   })
   if (msgErr) {
