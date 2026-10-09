@@ -12,6 +12,7 @@ import type { Conversation, ConversationStatus, Tag } from "@/types";
 import { Search, ChevronDown, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
+import Link from 'next/link';
 import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
@@ -126,7 +127,7 @@ export function ConversationList({
     // up on any events sent while the WS was disconnected or throttled.
   }, [resyncToken]);
 
-  // Tag definitions for the filter picker — loaded once so labels/colours
+  // Tag definitions for the filter picker — refreshed on inbox resynchronization.
   // stay stable regardless of which conversations happen to be loaded.
   useEffect(() => {
     const supabase = createClient();
@@ -138,7 +139,7 @@ export function ConversationList({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resyncToken]);
 
   // Company options are derived from the loaded conversations — there's no
   // separate companies table, and only companies with a live conversation
@@ -226,6 +227,7 @@ export function ConversationList({
     <div className="flex h-full w-full flex-col border-r border-border bg-card lg:w-80">
       {/* Search + Filter */}
       <div className="space-y-3 border-b border-border p-4">
+        <Link href="/payments" className="block rounded-md border border-amber-500/40 p-2 text-center text-xs font-semibold text-amber-400">VALIDACION DE PAGOS</Link>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input

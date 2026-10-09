@@ -78,7 +78,9 @@ Devuelve SOLO un objeto JSON con estas propiedades:
   "observations": ["solo dificultades o detalles visibles que la asesora debería revisar"]
 }
 
-Reglas: copia únicamente datos que puedas leer claramente; usa null si algo no se distingue; no completes ni adivines datos; no transcribas información ajena a esos campos. Describe reflejos, cortes o baja calidad si afectan la lectura. No determines autenticidad, titularidad ni si un pago fue realmente recibido o validado. La asesora debe comparar los datos con sus registros antes de confirmar.`
+Reglas: copia únicamente datos que puedas leer claramente; usa null si algo no se distingue; no completes ni adivines datos; no transcribas información ajena a esos campos.
+En comprobantes, recipient es el nombre visible de la persona o empresa que recibe el dinero. Yape, Plin o el banco corresponden a institution, nunca al nombre del destinatario. Conserva los asteriscos y abreviaciones del nombre tal como aparecen. Si no puedes identificar al destinatario, usa null; no lo deduzcas de otro campo. payer es quien envía el dinero. full_name corresponde al titular del documento de identidad; en comprobantes usa null y coloca cada nombre en payer o recipient según su función.
+Describe reflejos, cortes o baja calidad si afectan la lectura. No determines autenticidad, titularidad ni si un pago fue realmente recibido o validado. La asesora debe comparar los datos con sus registros antes de confirmar.`
 
 function failed(
   failureReason: NonNullable<ImageAnalysis['failure_reason']>,

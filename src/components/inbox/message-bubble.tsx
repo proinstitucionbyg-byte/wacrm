@@ -21,6 +21,7 @@ import { MessageReactions } from "./message-reactions";
 import { InteractivePreview } from "@/components/interactive/interactive-preview";
 import { useTranslations } from "next-intl";
 import { MediaViewer } from "@/components/media/media-viewer";
+import { PaymentReviewControls } from '@/components/payments/payment-review-controls';
 
 interface MessageBubbleProps {
   message: Message;
@@ -283,6 +284,7 @@ function MessageContent({
             </p>
           )}
           <ImageAnalysisPanel message={message} />
+          {message.sender_type === 'customer' && <PaymentReviewControls messageId={message.id} />}
         </div>
       );
 

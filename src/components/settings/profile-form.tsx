@@ -18,6 +18,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useTranslations } from 'next-intl';
 import { SettingsPanelHead } from './settings-panel-head';
 import { getAdviserNickname } from '@/lib/inbox/adviser-introduction';
+import { isValidBirthDate, todayInLima } from '@/lib/settings/birth-date';
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const ALLOWED_MIME = new Set([
@@ -40,6 +41,7 @@ export function ProfileForm() {
 
   const [fullName, setFullName] = useState('');
   const [nickname, setNickname] = useState('');
+  const [birthDate, setBirthDate] = useState('');
   const savedNickname = getAdviserNickname(user?.user_metadata);
   const [email, setEmail] = useState('');
   const [pendingAvatar, setPendingAvatar] = useState<File | null>(null);
@@ -53,6 +55,7 @@ export function ProfileForm() {
     if (!profile) return;
     setFullName(profile.full_name ?? '');
     setNickname(savedNickname);
+    setBirthDate(profile.birth_date ?? '');
     setEmail(profile.email ?? '');
   }, [profile, savedNickname]);
 
@@ -106,6 +109,10 @@ export function ProfileForm() {
     if (!user || !profile) return;
 
     const trimmedName = fullName.trim();
+    if (!isValidBirthDate(birthDate)) {
+      toast.error('Ingresa una fecha de nacimiento válida, que no sea futura.');
+      return;
+    }
     const trimmedNickname = nickname.trim().replace(/\s+/g, ' ');
     if (trimmedNickname.length > 80) {
       toast.error('El apodo debe tener como máximo 80 caracteres.');
@@ -154,6 +161,7 @@ export function ProfileForm() {
         .update({
           full_name: trimmedName,
           avatar_url: nextAvatarUrl,
+          birth_date: birthDate || null,
         })
         .eq('user_id', user.id);
       if (updateError) {
@@ -209,6 +217,7 @@ export function ProfileForm() {
     !!profile &&
     (fullName.trim() !== (profile.full_name ?? '') ||
       nickname.trim().replace(/\s+/g, ' ') !== savedNickname ||
+      birthDate !== (profile.birth_date ?? '') ||
       email.trim().toLowerCase() !== (profile.email ?? '').toLowerCase() ||
       pendingAvatar !== null ||
       removeAvatar);
@@ -305,6 +314,22 @@ export function ProfileForm() {
             />
             <p id="profile-nickname-hint" className="text-xs text-muted-foreground">
               Así te presentarás al estudiante: «Hola, soy Ashley». Guarda el apodo antes de preparar tu presentación.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="profile-birth-date" className="text-foreground">Cumpleaños</Label>
+            <Input
+              id="profile-birth-date"
+              type="date"
+              value={birthDate}
+              max={todayInLima()}
+              onChange={(e) => setBirthDate(e.target.value)}
+              disabled={saving}
+              aria-describedby="profile-birth-date-hint"
+            />
+            <p id="profile-birth-date-hint" className="text-xs text-muted-foreground">
+              Fecha de nacimiento de la asesora. Este campo es opcional.
             </p>
           </div>
 

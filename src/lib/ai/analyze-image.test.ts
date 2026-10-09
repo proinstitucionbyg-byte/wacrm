@@ -40,6 +40,12 @@ describe('lectura de comprobantes', () => {
     fetchMock.mockResolvedValue(response(null))
     expect((await analyzeInboundImage(args)).analysis.recipient_check?.status).toBe('missing')
   })
+  it('instructs the reader to separate the recipient from the payment service', async () => {
+    await analyzeInboundImage(args)
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(JSON.stringify(body)).toContain('Yape, Plin o el banco corresponden a institution')
+    expect(JSON.stringify(body)).toContain('Conserva los asteriscos y abreviaciones')
+  })
   it('does not compare identity document names against the payment recipient', async () => {
     fetchMock.mockResolvedValue(response(null, 'identity_document'))
     expect((await analyzeInboundImage(args)).analysis.recipient_check).toBeUndefined()
