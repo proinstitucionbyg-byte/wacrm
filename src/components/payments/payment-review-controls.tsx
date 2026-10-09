@@ -25,6 +25,7 @@ export function PaymentDecision({ review, canReview, onChanged }: { review: Paym
     <p className="text-xs text-muted-foreground">Origen: {review.origin} · {review.source_area}{review.source_adviser ? ` · ${review.source_adviser}` : ''}</p>
     {review.note && <p className="whitespace-pre-wrap text-sm">Motivo: {review.note}</p>}
     {review.reviewed_at && <p className="text-xs text-muted-foreground">Decisión del CEO: {new Date(review.reviewed_at).toLocaleString('es-PE', { timeZone: 'America/Lima' })}</p>}
+    {review.status === 'validated' && <Link href={`/enrollments?review_id=${review.id}`} className="block text-sm underline">Continuar al registro del estudiante</Link>}
     {canReview && review.status !== 'validated' && <>
       <label className="block text-xs">Observación de tu revisión
         <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} disabled={saving} className="mt-1 min-h-20 w-full rounded-md border border-border bg-background p-2 text-sm" />

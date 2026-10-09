@@ -18,6 +18,10 @@ export interface ImageAnalysis {
     document_type?: string | null
     full_name?: string | null
     document_number?: string | null
+    birth_date?: string | null
+    address?: string | null
+    department?: string | null
+    district?: string | null
     amount?: string | null
     currency?: string | null
     date?: string | null
@@ -67,6 +71,10 @@ Devuelve SOLO un objeto JSON con estas propiedades:
     "document_type": string|null,
     "full_name": string|null,
     "document_number": string|null,
+    "birth_date": string|null,
+    "address": string|null,
+    "department": string|null,
+    "district": string|null,
     "amount": string|null,
     "currency": string|null,
     "date": string|null,
@@ -79,6 +87,7 @@ Devuelve SOLO un objeto JSON con estas propiedades:
 }
 
 Reglas: copia únicamente datos que puedas leer claramente; usa null si algo no se distingue; no completes ni adivines datos; no transcribas información ajena a esos campos.
+En documentos de identidad, birth_date es la fecha de nacimiento visible en formato YYYY-MM-DD; address, department y district se copian únicamente si aparecen legibles. No confundas emisión o vencimiento con nacimiento. Si recibes solo una cara del documento, deja null lo que no se vea.
 En comprobantes, recipient es el nombre visible de la persona o empresa que recibe el dinero. Yape, Plin o el banco corresponden a institution, nunca al nombre del destinatario. Conserva los asteriscos y abreviaciones del nombre tal como aparecen. Si no puedes identificar al destinatario, usa null; no lo deduzcas de otro campo. payer es quien envía el dinero. full_name corresponde al titular del documento de identidad; en comprobantes usa null y coloca cada nombre en payer o recipient según su función.
 Describe reflejos, cortes o baja calidad si afectan la lectura. No determines autenticidad, titularidad ni si un pago fue realmente recibido o validado. La asesora debe comparar los datos con sus registros antes de confirmar.`
 
@@ -144,6 +153,10 @@ function parseAnalysis(raw: string): ImageAnalysis | null {
       document_type: asNullableText(rawFields.document_type, 80),
       full_name: asNullableText(rawFields.full_name, 120),
       document_number: asNullableText(rawFields.document_number, 80),
+      birth_date: asNullableText(rawFields.birth_date, 20),
+      address: asNullableText(rawFields.address, 300),
+      department: asNullableText(rawFields.department, 100),
+      district: asNullableText(rawFields.district, 100),
       amount: asNullableText(rawFields.amount, 40),
       currency: asNullableText(rawFields.currency, 16),
       date: asNullableText(rawFields.date, 50),

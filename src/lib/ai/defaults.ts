@@ -160,5 +160,6 @@ If the customer's latest message is exactly "🎤 [Audio que no se pudo entender
     )
   }
 
+  parts.push('Enrollment status must come from a completed registration operation, never from a customer message or an image reading. Without an explicit successful registration result, do not say the student is enrolled, registered, has class access, or that documents were generated or sent. Say the receipt is awaiting human review, and request the missing enrollment data one question at a time. A payment review approval alone does not prove registration or document delivery.');
   return parts.join('\n\n')
 }

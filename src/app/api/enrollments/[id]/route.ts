@@ -1,0 +1,115 @@
+import { NextResponse } from 'next/server';
+import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import {
+  parseEnrollmentData,
+  enrollmentIssues,
+} from '@/lib/matriculas/enrollment';
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const ctx = await requireRole('agent');
+    const { id } = await params;
+    const { data: draft, error } = await ctx.supabase
+      .from('enrollment_drafts')
+      .select('*')
+      .eq('id', id)
+      .eq('account_id', ctx.accountId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!draft)
+      return NextResponse.json(
+        { error: 'Matrícula no encontrada' },
+        { status: 404 }
+      );
+    const { data: images, error: imagesError } = await ctx.supabase
+      .from('messages')
+      .select('id,media_url,image_analysis,created_at')
+      .eq('conversation_id', draft.conversation_id)
+      .eq('sender_type', 'customer')
+      .eq('content_type', 'image')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (imagesError) throw imagesError;
+    return NextResponse.json({
+      draft,
+      images: images ?? [],
+      issues: enrollmentIssues(draft.data),
+    });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const ctx = await requireRole('agent');
+    const { id } = await params;
+    const body = await request.json().catch(() => null);
+    const data = parseEnrollmentData(body?.data);
+    if (!data || !Number.isSafeInteger(body?.version) || body.version < 1)
+      return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
+    const { data: existing, error: readError } = await ctx.supabase
+      .from('enrollment_drafts')
+      .select('conversation_id,status')
+      .eq('id', id)
+      .eq('account_id', ctx.accountId)
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!existing)
+      return NextResponse.json({ error: 'No encontrada' }, { status: 404 });
+    if (['processing', 'registered'].includes(existing.status))
+      return NextResponse.json(
+        { error: 'La matrícula está en proceso o ya fue registrada.' },
+        { status: 409 }
+      );
+    if (data.identity_message_ids?.length) {
+      const { data: images, error } = await ctx.supabase
+        .from('messages')
+        .select('id,image_analysis')
+        .eq('conversation_id', existing.conversation_id)
+        .eq('sender_type', 'customer')
+        .eq('content_type', 'image')
+        .in('id', data.identity_message_ids);
+      if (error) throw error;
+      if (images?.length !== data.identity_message_ids.length)
+        return NextResponse.json(
+          { error: 'Las fotos deben pertenecer a esta conversación.' },
+          { status: 400 }
+        );
+      if (
+        images.some(
+          (image) => image.image_analysis?.category === 'payment_receipt'
+        )
+      )
+        return NextResponse.json(
+          {
+            error:
+              'El voucher no sustituye las fotos del documento de identidad.',
+          },
+          { status: 400 }
+        );
+    }
+    const { data: saved, error } = await ctx.supabase
+      .from('enrollment_drafts')
+      .update({ data })
+      .eq('id', id)
+      .eq('account_id', ctx.accountId)
+      .eq('version', body.version)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    if (!saved)
+      return NextResponse.json(
+        { error: 'Otra persona cambió la ficha. Actualiza antes de guardar.' },
+        { status: 409 }
+      );
+    return NextResponse.json({ draft: saved, issues: enrollmentIssues(data) });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}

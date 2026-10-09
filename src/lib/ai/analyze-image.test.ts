@@ -21,6 +21,12 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 describe('lectura de comprobantes', () => {
+  it('extracts visible identity dates and address without inventing a district', async () => {
+    fetchMock.mockResolvedValue({ok:true,json:async()=>({output:[{content:[{type:'output_text',text:JSON.stringify({category:'identity_document',fields:{full_name:'ESTUDIANTE DE PRUEBA',document_number:'00000000',birth_date:'2000-01-02',address:'DIRECCION VISIBLE',department:'LIMA',district:null}})}]}]})});
+    const result=await analyzeInboundImage(args);
+    expect(result.analysis.fields?.birth_date).toBe('2000-01-02');expect(result.analysis.fields?.address).toBe('DIRECCION VISIBLE');expect(result.analysis.fields?.district).toBeNull();
+    expect(result.analysis.status).toBe('pending_review');
+  })
   it('extracts visible fields and matches the corrected full recipient without approving payment', async () => {
     const result = await analyzeInboundImage(args)
     expect(result.analysis.status).toBe('pending_review')

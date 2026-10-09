@@ -277,6 +277,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
             {can('inbox', 'view') && <li><Link href="/payments" className="flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium hover:bg-muted"><CheckCheck />Validación de pagos</Link></li>}
+            {can('inbox', 'view') && <li><Link href="/enrollments" className="flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium hover:bg-muted"><Users />Registro de matrículas</Link></li>}
             {navItems
   .filter(
     (item) =>
