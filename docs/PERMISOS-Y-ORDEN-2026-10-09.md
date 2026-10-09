@@ -28,7 +28,21 @@
 - 18 pruebas dirigidas de API/permisos: aprobadas.
 - TypeScript: aprobado.
 - Prueba de RLS ejecutada con rol authenticated: agente sin acceso a pagos no ve filas; negar consulta de matrículas oculta las filas. Todas las excepciones de prueba se revirtieron con ROLLBACK; no se modificaron asignaciones reales.
-- Compilación y publicación de este lote: confirmar antes de presentarlo como instalado.
+- 830 pruebas completas aprobadas; compilación aprobada. Publicado en commit f2b051b y panel de permisos comprobado en el CRM.
+
+## REPARTO DE VENTAS PREPARADO
+
+- Panel integrado en AJUSTES > MIEMBROS: cada cuenta muestra AREA, CARGO, PORCENTAJE y presencia. El usuario elige todos los valores.
+- Guardado en una sola transacción con versión; no permite sobreescribir cambios de otra sesión ni un equipo que cambió durante la edición.
+- El cargo comercial no cambia el rol de acceso: COORDINADOR no equivale automáticamente a administrador.
+- Reparto se activa solo con total 100%, destinatarios de ventas y permisos de consulta/envío del chat. Cero excluye a una cuenta.
+- Se cuentan cuatro grupos de respuestas del bot desde que se activa el reparto. Imagen/texto/audio consecutivos forman un mismo turno. Al siguiente mensaje del alumno se deriva.
+- Rotación ponderada, serializada por cuenta; solo candidatos conectados con heartbeat reciente. Si queda uno conectado, recibe los nuevos chats pendientes que escriban aunque los demás estén desconectados.
+- Al derivar: etiqueta AREA VENTAS y ASESOR [APODO/NOMBRE]; pausa IA/automatizaciones y finaliza esperas automáticas previas.
+- Si no hay candidatos: PENDIENTE DE ASIGNACION VENTAS. Se reintenta al recibir otro mensaje. **Todavía no hay barrido periódico que reasigne pendientes sin que llegue un nuevo mensaje.**
+- Simulación SQL en transacción: antes de cuatro turnos no deriva; siguiente mensaje deriva al único agente al 100%, crea etiqueta de área y pausa automatizaciones. ROLLBACK elimina los datos simulados y restaura la configuración.
+- 12 pruebas dirigidas y 842 pruebas completas aprobadas. TypeScript, lint y compilación aprobados.
+- La configuración real se deja desactivada/sin porcentajes hasta que el CEO guarde sus valores.
 
 ## INCIDENCIA DE CONECTIVIDAD RESUELTA
 
@@ -40,7 +54,8 @@
 
 ## TRABAJO QUE SIGUE PENDIENTE
 
-- Controles de área/cargo/porcentaje, reparto ponderado y derivación exacta después del cuarto contacto.
+- Prueba WhatsApp real del reparto, después de que el CEO configure a Luis y los porcentajes desde el panel.
+- Reasignar automáticamente la cola sin conexión cuando una persona vuelva a conectarse, sin esperar un nuevo mensaje.
 - Etiquetado múltiple/contextual, restricciones por etiqueta y etiquetas de agente/área.
 - Atajos MANDAR(...) y selector de bloques preparados.
 - Traspaso con alcance de historial y presentación pendiente de envío.

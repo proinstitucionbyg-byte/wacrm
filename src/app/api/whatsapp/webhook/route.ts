@@ -10,6 +10,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { routeInboundSales } from '@/lib/ai/sales-routing'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
 import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
 import { collectConversationEnrollments } from '@/lib/matriculas/collect'
@@ -829,8 +830,10 @@ const followupReplyHandled = interactiveReplyId
     })
   : false
 
+const salesRoutingHandled = !humanRecentlyActive && !followupReplyHandled &&
+  await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id,contactId:contactRecord.id,userId:configOwnerUserId})
 const automationPaused =
-  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled
+  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled || salesRoutingHandled
   let automationMatched = false
   let flowConsumed = followupReplyHandled
 

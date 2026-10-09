@@ -76,6 +76,7 @@ import {
 import { InviteMemberDialog } from './invite-member-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
+import { SalesRoutingPanel } from './sales-routing-panel';
 
 interface Member {
   user_id: string;
@@ -334,6 +335,8 @@ async function loadMemberPermissions(userId: string) {
           </RequireRole>
         }
       />
+
+      {canManageMembers && <SalesRoutingPanel />}
 
       {/* Live presence summary across the roster. Updates without a
           full refresh as heartbeats and the local re-derive tick land. */}
