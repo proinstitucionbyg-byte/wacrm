@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   retrieveKnowledge: vi.fn(),
   generateReply: vi.fn(),
   engineSendText: vi.fn(),
+  routeArea: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
@@ -57,7 +58,8 @@ vi.mock('./admin-client', () => ({
   }),
 }))
 vi.mock('./handoff-routing', () => ({
-  findConnectedAgentForArea: vi.fn().mockResolvedValue({ agentId: null }),
+  routeConversationToArea: h.routeArea,
+  explicitlyRequestedArea: (text: string) => /area academica/i.test(text) ? 'fidelizacion' : null,
 }))
 
 import { dispatchInboundToAiReply } from './auto-reply'
@@ -99,6 +101,7 @@ beforeEach(() => {
   h.retrieveKnowledge.mockResolvedValue([])
   h.generateReply.mockResolvedValue({ text: 'Hello!', handoff: false })
   h.engineSendText.mockResolvedValue({ whatsapp_message_id: 'm1' })
+  h.routeArea.mockReset().mockResolvedValue({ agentId: null });
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
@@ -220,12 +223,19 @@ describe('dispatchInboundToAiReply — handoff', () => {
     expect(h.state.updatePayload).not.toHaveProperty('assigned_agent_id')
   })
 
-  it('routes to the configured handoff agent on handoff', async () => {
+  it('routes through the requested area rather than a fallback from another area', async () => {
     h.loadAiConfig.mockResolvedValue(aiConfig({ handoffAgentId: 'agent-7' }))
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
-    expect(h.state.updatePayload).toMatchObject({
-      assigned_agent_id: 'agent-7',
-    })
+    expect(h.routeArea).toHaveBeenCalledWith(expect.anything(), 'acct-1', 'conv-1', 'ventas');
+    expect(h.state.updatePayload).not.toHaveProperty('assigned_agent_id');
   })
+  it('transfers from sales to academic support even after an earlier handoff', async () => {
+    h.state.conv = { assigned_agent_id: 'sales', ai_enabled: true, ai_reply_count: 0, ai_handed_off_at: new Date().toISOString(), ai_handoff_area: 'VENTAS' };
+    h.buildConversationContext.mockResolvedValue([{ role: 'user', content: 'Necesito hablar con el area academica' }]);
+    h.routeArea.mockResolvedValue({ agentId: 'fidelity' });
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.routeArea).toHaveBeenCalledWith(expect.anything(), 'acct-1', 'conv-1', 'fidelizacion');
+    expect(h.state.updatePayload).not.toHaveProperty('ai_enabled');
+  });
 })

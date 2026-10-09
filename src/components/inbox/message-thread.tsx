@@ -1078,7 +1078,7 @@ export function MessageThread({
     // clipped and the hover toolbar overlaps the Tags panel. Letting the
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
-    <div className={cn('flex min-w-0 flex-1 flex-col', DOODLE_BG_CLASSES)}>
+    <div data-message-thread={conversation.id} className={cn('flex min-w-0 flex-1 flex-col', DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
       {selectionMode ? (
@@ -1428,6 +1428,7 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         key={conversation.id}
+        alreadyContacted={messages.some((message) => message.sender_type === 'agent' && message.sender_id === user?.id)}
         adviserIntroduction={getAdviserIntroduction(
           user?.id,
           assignedAgentId,

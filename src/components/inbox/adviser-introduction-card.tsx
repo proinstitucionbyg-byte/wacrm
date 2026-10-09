@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { buildAdviserIntroduction, type AdviserIntroduction } from "@/lib/inbox/adviser-introduction";
 
@@ -9,15 +9,30 @@ export function AdviserIntroductionCard({
   disabled,
   hasDraft,
   onUse,
+  storageKey,
+  alreadyContacted = false,
 }: {
   adviser: AdviserIntroduction;
   disabled: boolean;
   hasDraft: boolean;
   onUse: (text: string) => void;
+  storageKey: string;
+  alreadyContacted?: boolean;
 }) {
   const [area, setArea] = useState(adviser.area ?? "");
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    if (alreadyContacted) return true;
+    try { return typeof window !== 'undefined' && localStorage.getItem(storageKey) === 'seen'; }
+    catch { return false; }
+  });
+  function dismiss() {
+    setDismissed(true);
+    try { localStorage.setItem(storageKey, 'seen'); } catch { /* Private browsing may disable storage. */ }
+  }
   const preview = buildAdviserIntroduction(adviser.name, area);
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, 'seen'); } catch { /* Storage is optional. */ }
+  }, [storageKey]);
 
   if (dismissed) {
     return (
@@ -31,7 +46,7 @@ export function AdviserIntroductionCard({
     <section className="mb-3 rounded-lg border border-primary/25 bg-primary/5 p-3" aria-label="Presentación de la asesora">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">Tu presentación · {adviser.name}</p>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setDismissed(true)}>Cerrar</Button>
+        <Button type="button" variant="ghost" size="sm" onClick={dismiss}>Cerrar</Button>
       </div>
       <label className="mt-2 block text-xs">
         Área de atención
@@ -57,7 +72,7 @@ export function AdviserIntroductionCard({
         onClick={() => {
           if (disabled || hasDraft || !preview) return;
           onUse(preview);
-          setDismissed(true);
+          dismiss();
         }}
       >
         Usar presentación

@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { TeamMemberProfile } from '@/components/inbox/team-member-profile';
+import { TeamWhatsappTransfer } from '@/components/inbox/team-whatsapp-transfer';
 import {
   type TeamMember,
   type TeamMessage,
@@ -35,6 +36,19 @@ function TeamConversation({
     [sending, setSending] = useState(false),
     [older, setOlder] = useState<string | null>(null),
     [loadingOlder, setLoadingOlder] = useState(false);
+  const [attachment, setAttachment] = useState<{ attachment_path: string; attachment_name: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  async function attach(file: File) {
+    if (sending || uploading || thread.can_send === false) return;
+    setUploading(true);
+    try {
+      const form = new FormData(); form.set('file', file);
+      setAttachment(await jsonRequest(`/api/team-chat/${thread.id}/attachments`, { method: 'POST', body: form }));
+      attempt.current = null;
+      setError('');
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo adjuntar'); }
+    finally { setUploading(false); }
+  }
   const attempt = useRef<{ id: string; body: string } | null>(null),
     bottom = useRef<HTMLDivElement>(null),
     initial = useRef(true);
@@ -113,7 +127,7 @@ function TeamConversation({
     }
   }
   async function send() {
-    if (!body.trim() || sending) return;
+    if ((!body.trim() && !attachment) || sending || uploading || thread.can_send === false) return;
     setSending(true);
     const normalized = body.replace(/\r\n?/g, '\n').trim();
     if (!attempt.current || attempt.current.body !== normalized)
@@ -122,7 +136,7 @@ function TeamConversation({
       const result = await jsonRequest(`/api/team-chat/${thread.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(attempt.current),
+        body: JSON.stringify({ ...attempt.current, ...attachment }),
       });
       setMessages((prev) =>
         prev.some((m) => m.id === result.message.id)
@@ -130,6 +144,7 @@ function TeamConversation({
           : [...prev, result.message]
       );
       setBody('');
+      setAttachment(null);
       attempt.current = null;
       setError('');
     } catch (err) {
@@ -143,7 +158,9 @@ function TeamConversation({
     }
   }
   return (
-    <section className="border-border bg-card flex min-h-[32rem] flex-col rounded-lg border">
+    <section className="border-border bg-card flex min-h-[32rem] flex-col rounded-lg border"
+      onDragOver={(event) => { if (thread.can_send !== false && event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+      onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); if (event.dataTransfer.files.length === 1) void attach(event.dataTransfer.files[0]); else setError('Adjunta un archivo por mensaje.'); } }}>
       <header className="border-border border-b p-4">
         <h2 className="font-semibold">
           {teamThreadTitle(thread, members, userId)}
@@ -193,6 +210,7 @@ function TeamConversation({
             <p className="text-sm break-words whitespace-pre-wrap">
               {message.body}
             </p>
+            {message.attachment_name && (message.attachment_url ? <a href={message.attachment_url} target="_blank" rel="noopener noreferrer" className="block break-all text-sm underline">ARCHIVO: {message.attachment_name}</a> : <span className="block text-xs">ARCHIVO: {message.attachment_name} · cargando enlace</span>)}
             <time
               className="text-muted-foreground text-[11px]"
               dateTime={message.created_at}
@@ -222,6 +240,10 @@ function TeamConversation({
         <label htmlFor="team-message" className="text-sm">
           Mensaje al equipo
         </label>
+        <label className="block text-sm">{uploading ? 'SUBIENDO ARCHIVO…' : 'ADJUNTAR ARCHIVO (MAXIMO 16 MB)'}
+          <input type="file" disabled={sending || uploading || thread.can_send === false} onChange={(event) => { const file = event.target.files?.[0]; if (file) void attach(file); event.target.value = ''; }} />
+        </label>
+        {attachment && <p className="text-sm">{attachment.attachment_name} <button type="button" disabled={sending} onClick={() => { setAttachment(null); attempt.current = null; }}>QUITAR</button></p>}
         <textarea
           id="team-message"
           value={body}
@@ -246,7 +268,7 @@ function TeamConversation({
           </span>
           <Button
             type="submit"
-            disabled={sending || !body.trim() || thread.can_send === false}
+            disabled={sending || uploading || (!body.trim() && !attachment) || thread.can_send === false}
           >
             {sending ? 'Enviando…' : 'Enviar'}
           </Button>
@@ -417,6 +439,7 @@ function TeamChatContent() {
         </section>
       )}
       <div className="flex flex-wrap gap-2">
+        <TeamWhatsappTransfer members={members} />
         <Button
           variant="outline"
           onClick={() => {

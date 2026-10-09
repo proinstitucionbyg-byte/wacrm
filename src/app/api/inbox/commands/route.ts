@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            'Usa MANDAR(NOMBRE EXACTO DEL BLOQUE) o selecciona un bloque preparado.',
+            'Usa MANDAR(PROMOCION Y CURSO) o selecciona un bloque preparado.',
         },
         { status: 400 }
       );

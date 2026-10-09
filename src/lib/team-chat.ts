@@ -2,7 +2,7 @@ export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function parseTeamMessage(
   body: unknown
-): { id: string; body: string } | null {
+): { id: string; body: string; attachment_path?: string; attachment_name?: string } | null {
   if (!body || typeof body !== 'object') return null;
   const value = body as Record<string, unknown>;
   if (
@@ -12,6 +12,10 @@ export function parseTeamMessage(
   )
     return null;
   const text = value.body.replace(/\r\n?/g, '\n').trim();
+  if (value.attachment_path !== undefined || value.attachment_name !== undefined) {
+    if (typeof value.attachment_path !== 'string' || !/^account-[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/.test(value.attachment_path) || typeof value.attachment_name !== 'string' || !value.attachment_name.trim() || value.attachment_name.length > 180 || text.length > 4000) return null;
+    return { id: value.id, body: text, attachment_path: value.attachment_path, attachment_name: value.attachment_name.trim() };
+  }
   if (!text || text.length > 4000) return null;
   return { id: value.id, body: text };
 }
@@ -66,6 +70,9 @@ export interface TeamMessage {
   sender_id: string | null;
   body: string;
   created_at: string;
+  attachment_name?: string | null;
+  attachment_path?: string | null;
+  attachment_url?: string | null;
 }
 export function teamThreadTitle(
   thread: TeamThread,

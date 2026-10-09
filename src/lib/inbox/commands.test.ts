@@ -23,4 +23,17 @@ describe('prepared adviser commands', () => {
         { id: 'two', name: 'pago' },
       ])
     ).toBeNull());
+  it('recognizes a promotion with course aliases and typing mistakes', () => {
+    const blocks = [{ id: 'promo', name: 'ASISTENTE 19.90' }, { id: 'malla', name: 'MALLAS DE ADMIN' }, { id: 'other', name: 'FARMACIA 19.90' }];
+    expect(resolveCommand('super promod e asistentae administrayvo', blocks)?.id).toBe('promo');
+    expect(resolveCommand('malla curricular de asistente administrativo', blocks)?.id).toBe('malla');
+    expect(resolveCommand('super promo de auxiliar de farmacia', blocks)?.id).toBe('other');
+    expect(resolveCommand('promo de nutricion', blocks)).toBeNull();
+  });
+  it('requires an exact amount when specified and never guesses between offers', () => {
+    const blocks = [{ id: 'one', name: 'FARMACIA 19.90' }, { id: 'two', name: 'FARMACIA 39.90' }];
+    expect(resolveCommand('promo farmacia', blocks)).toBeNull();
+    expect(resolveCommand('promo 19.90 farmacia', blocks)?.id).toBe('one');
+    expect(resolveCommand('promo 29.90 farmacia', blocks)).toBeNull();
+  });
 });

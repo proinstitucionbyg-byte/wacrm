@@ -36,6 +36,10 @@ export async function GET(request: Request) {
   await reactivateExpiredManualControls();
   await runIdleFollowups();
   const admin = supabaseAdmin();
+  const { error: areaRoutingError } = await admin.rpc('route_waiting_area_conversations');
+  if (areaRoutingError) return NextResponse.json({ error: 'No se pudo actualizar la cola de areas' }, { status: 500 });
+  const { error: noticesError } = await admin.rpc('publish_operational_notices');
+  if (noticesError) return NextResponse.json({ error: 'No se pudieron actualizar los avisos' }, { status: 500 });
   const { data: due, error } = await admin
     .from('automation_pending_executions')
     .select('*')

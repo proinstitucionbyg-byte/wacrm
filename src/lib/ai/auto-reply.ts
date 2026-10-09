@@ -5,7 +5,7 @@ import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { findCandidateAutomations } from './automation-match'
-import { findConnectedAgentForArea } from './handoff-routing'
+import { routeConversationToArea, explicitlyRequestedArea } from './handoff-routing'
 import {
   SCHEDULE_TEXT,
   buildHandoffNotice,
@@ -19,6 +19,7 @@ import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
 import { runAutomationById } from '@/lib/automations/engine'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { academicContext } from '@/lib/matriculas/calendar'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -78,7 +79,7 @@ export async function dispatchInboundToAiReply(
     const { data: conv, error: convErr } = await db
       .from('conversations')
       .select(
-        'assigned_agent_id, ai_autoreply_disabled, ai_reply_count, ai_enabled, ai_handed_off_at',
+        'assigned_agent_id, ai_autoreply_disabled, ai_reply_count, ai_enabled, ai_handed_off_at, ai_handoff_area',
       )
       .eq('id', conversationId)
       .maybeSingle()
@@ -92,11 +93,13 @@ export async function dispatchInboundToAiReply(
     const handedOffAt = conv.ai_handed_off_at
       ? new Date(conv.ai_handed_off_at).getTime()
       : 0
-    const handedOff =
+    let handedOff =
       handedOffAt > 0 && Date.now() - handedOffAt < HANDOFF_MEMORY_MS
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
+    const requestedArea = explicitlyRequestedArea(latestUserMessage(messages));
+    if (requestedArea && requestedArea.toUpperCase() !== conv.ai_handoff_area) handedOff = false;
 
     // Account-wide throttle on the shared BYO key. Over the limit → skip
     // the auto-reply; the inbound still sits in the inbox for a human.
@@ -118,6 +121,7 @@ export async function dispatchInboundToAiReply(
       config,
       latestUserMessage(messages),
     )
+    knowledge.push(...await academicContext(db, accountId));
 
     // Automations the model may launch (best-effort, never throws).
     const candidates = await findCandidateAutomations(db, accountId, messages)
@@ -155,7 +159,7 @@ export async function dispatchInboundToAiReply(
         ? automationId
         : null
 
-    if (handoff || (!text && !chosenAutomationId)) {
+    if (handoff || requestedArea || (!text && !chosenAutomationId)) {
       // Already handed off recently: do not notify again, just reassure.
       // The AI stays on.
       if (handedOff) {
@@ -173,7 +177,7 @@ export async function dispatchInboundToAiReply(
       // First handoff: (1) remember it, (2) assign a connected agent of the
       // chosen area if there is one, (3) tell the customer once.
       // The AI is NOT switched off.
-      const area = handoffArea ?? 'ventas'
+      const area = requestedArea ?? handoffArea ?? 'ventas'
       const summary = buildHandoffSummary({
         messages,
         replyCount: conv.ai_reply_count ?? 0,
@@ -183,21 +187,8 @@ export async function dispatchInboundToAiReply(
         ai_handed_off_at: new Date().toISOString(),
       }
 
-      let agentConnected = false
-      // Never stomp an existing human assignment.
-      if (!conv.assigned_agent_id) {
-        const { agentId } = await findConnectedAgentForArea(
-          db,
-          accountId,
-          area,
-        )
-        if (agentId) {
-          update.assigned_agent_id = agentId
-          agentConnected = true
-        } else if (config.handoffAgentId) {
-          update.assigned_agent_id = config.handoffAgentId
-        }
-      }
+      const { agentId } = await routeConversationToArea(db, accountId, conversationId, area);
+      const agentConnected = Boolean(agentId);
       await db.from('conversations').update(update).eq('id', conversationId)
 
       // Optional short apology the model wrote before the marker.

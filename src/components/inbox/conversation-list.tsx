@@ -91,10 +91,9 @@ export function ConversationList({
   const [checkedChats, setCheckedChats] = useState<string[]>([]),
     [labelOpen, setLabelOpen] = useState(false),
     [managerOpen, setManagerOpen] = useState(false),
-    [tagChoice, setTagChoice] = useState(''),
     [tagBusy, setTagBusy] = useState(false),
     [labelsRevision, setLabelsRevision] = useState(0);
-  async function applyLabel(remove: boolean) {
+  async function applyLabel(remove: boolean, tag: string) {
     setTagBusy(true);
     try {
       const res = await fetch('/api/inbox/labels', {
@@ -102,21 +101,23 @@ export function ConversationList({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             conversations: checkedChats,
-            tag: tagChoice,
+            tag,
             remove,
           }),
         }),
         data = await res.json();
       if (!res.ok) throw Error(data.error);
       setLabelsRevision((x) => x + 1);
-      setLabelOpen(false);
-      setCheckedChats([]);
       toast.success(remove ? 'Etiqueta retirada' : 'Chats etiquetados');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo etiquetar');
     } finally {
       setTagBusy(false);
     }
+  }
+  const checkedTagCounts = new Map<string, number>();
+  for (const chat of conversations.filter((chat) => checkedChats.includes(chat.id))) {
+    for (const tag of chat.contact?.tags ?? []) checkedTagCounts.set(tag.id, (checkedTagCounts.get(tag.id) ?? 0) + 1);
   }
 
   // Keep the latest callback in a ref so the fetch effect below can
@@ -309,6 +310,11 @@ export function ConversationList({
                 CATALOGO
               </Button>
             )}
+            {checkedChats.length > 0 && tags.filter((tag) => checkedTagCounts.has(tag.id)).map((tag) => (
+              <button key={tag.id} type="button" disabled={tagBusy} onClick={() => void applyLabel(true, tag.id)} aria-label={`Retirar ${tag.name} de los chats seleccionados`} className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs" style={{ color: tag.color }}>
+                {tag.name} ({checkedTagCounts.get(tag.id)}/{checkedChats.length}) <X className="h-3 w-3" />
+              </button>
+            ))}
           </div>
         )}
         <div className="relative">
@@ -549,36 +555,19 @@ export function ConversationList({
               Aplica o retira una etiqueta de los chats seleccionados.
             </DialogDescription>
           </DialogHeader>
-          <select
-            aria-label="Etiqueta"
-            value={tagChoice}
-            onChange={(e) => setTagChoice(e.target.value)}
-            className="bg-background rounded-md border p-2"
-          >
-            <option value="">SELECCIONA UNA ETIQUETA</option>
-            {tags
+            <p className="text-sm text-muted-foreground">Marca para aplicar; desmarca para retirar. El número indica cuántos chats seleccionados tienen la etiqueta.</p>
+            <div className="max-h-80 space-y-2 overflow-y-auto">
+              {tags
               .filter((t) => canManageTags || !t.kind || t.kind === 'process')
               .map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
+                  <label key={t.id} className="flex items-center gap-2 rounded-md border p-3 text-sm">
+                    <input type="checkbox" disabled={tagBusy} checked={checkedTagCounts.get(t.id) === checkedChats.length && checkedChats.length > 0} onChange={(event) => void applyLabel(!event.target.checked, t.id)} />
+                    <span style={{ color: t.color }}>{t.name}</span>
+                    <span className="ml-auto text-muted-foreground">{checkedTagCounts.get(t.id) ?? 0}/{checkedChats.length}</span>
+                  </label>
               ))}
-          </select>
-          <div className="flex gap-2">
-            <Button
-              disabled={tagBusy || !tagChoice}
-              onClick={() => applyLabel(false)}
-            >
-              APLICAR
-            </Button>
-            <Button
-              variant="outline"
-              disabled={tagBusy || !tagChoice}
-              onClick={() => applyLabel(true)}
-            >
-              RETIRAR
-            </Button>
-          </div>
+            </div>
+            <Button variant="outline" onClick={() => setLabelOpen(false)}>LISTO</Button>
         </DialogContent>
       </Dialog>
       <Dialog

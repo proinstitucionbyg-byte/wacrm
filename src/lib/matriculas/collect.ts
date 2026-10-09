@@ -4,8 +4,11 @@ import {
   collectPaymentData,
   type IntakeMessage,
 } from './collect-data';
+import { prepareAutomaticIntake, type IntakeEvidence } from './auto-intake';
+import { loadAcademicCalendar } from './calendar';
+import { enrollmentIssues } from './enrollment';
 
-/** Account-scoped, collecting drafts only, version checked. Never queues a registration. */
+/** Only queues a complete, consistent intake after human payment validation. */
 export async function collectConversationEnrollments(
   db: SupabaseClient,
   accountId: string,
@@ -29,24 +32,25 @@ export async function collectConversationEnrollments(
     .maybeSingle();
   if (reviewError) throw reviewError;
   if (review?.status !== 'validated') return;
-  // Only this intake: don't reuse old DNI photos from an earlier conversation history.
+  // Include data sent before the voucher. Contradictory written/photo values stay pending.
   const { data: messages, error: messageError } = await db
     .from('messages')
-    .select('id,content_text,image_analysis')
+    .select('id,content_text,image_analysis,sender_type,ai_generated,created_at')
     .eq('conversation_id', conversationId)
-    .eq('sender_type', 'customer')
-    .gte('created_at', review.created_at)
     .order('created_at', { ascending: false })
     .limit(100);
   if (messageError) throw messageError;
-  const next = collectEnrollmentData(
+  const evidence = (messages ?? []) as IntakeEvidence[];
+  let next = collectEnrollmentData(
     collectPaymentData(draft.data, review.evidence?.fields),
-    (messages ?? []) as IntakeMessage[]
+    evidence.filter((message) => message.sender_type === 'customer' || !message.sender_type) as IntakeMessage[]
   );
-  if (JSON.stringify(next) === JSON.stringify(draft.data)) return;
+  if (next.course) next = prepareAutomaticIntake(next, evidence, await loadAcademicCalendar(db, accountId), review.created_at);
+  const ready = enrollmentIssues(next).length === 0;
+  if (!ready && JSON.stringify(next) === JSON.stringify(draft.data)) return;
   const { error: saveError } = await db
     .from('enrollment_drafts')
-    .update({ data: next })
+    .update({ data: next, ...(ready ? { status: 'ready', error: null } : {}) })
     .eq('id', draft.id)
     .eq('account_id', accountId)
     .eq('status', 'collecting')

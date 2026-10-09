@@ -48,7 +48,7 @@ beforeEach(() => {
   });
 });
 describe('scoped enrollment collection', () => {
-  it('scopes reads and saves by account, version and intake date', async () => {
+  it('scopes reads and saves by account/version and includes data sent before the voucher', async () => {
     await collectConversationEnrollments(db, 'account', 'conversation');
     expect(update).toHaveBeenCalledWith({
       data: { phone1: '51987000000', email: 'uno@gmail.com' },
@@ -56,7 +56,7 @@ describe('scoped enrollment collection', () => {
     expect(eq).toHaveBeenCalledWith('account_id', 'account');
     expect(eq).toHaveBeenCalledWith('conversation_id', 'conversation');
     expect(eq).toHaveBeenCalledWith('version', 2);
-    expect(gte).toHaveBeenCalledWith('created_at', '2026-10-09T00:00:00Z');
+    expect(gte).not.toHaveBeenCalled();
   });
   it('does not mix several simultaneous drafts', async () => {
     drafts = [{}, {}];

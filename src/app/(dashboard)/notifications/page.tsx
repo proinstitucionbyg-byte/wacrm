@@ -16,6 +16,7 @@ import { toast } from "sonner";
 const TYPE_ICON: Record<Notification["type"], typeof Bell> = {
   conversation_assigned: UserPlus,
   team_message: MessageSquare,
+  system_notice: Bell,
 };
 
 export default function NotificationsPage() {
@@ -115,7 +116,9 @@ export default function NotificationsPage() {
   const handleClick = useCallback(
     (n: Notification) => {
       if (!n.read_at) markRead(n.id);
-      if (n.team_thread_id) {
+      if (n.target_url && /^https:\/\/docs\.google\.com\/spreadsheets\/d\//.test(n.target_url)) {
+        window.open(n.target_url, '_blank', 'noopener,noreferrer');
+      } else if (n.team_thread_id) {
         router.push(`/team-chat?thread=${n.team_thread_id}`);
       } else if (n.conversation_id) {
         router.push(`/inbox?c=${n.conversation_id}`);
@@ -250,7 +253,7 @@ export default function NotificationsPage() {
                       )}
                     </div>
                     {n.body && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-muted-foreground">
                         {n.body}
                       </p>
                     )}

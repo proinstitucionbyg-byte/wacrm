@@ -14,7 +14,7 @@ export async function GET(
     const asOf = new Date().toISOString();
     let query = ctx.supabase
       .from('team_messages')
-      .select('id,sender_id,body,created_at')
+      .select('id,sender_id,body,created_at,attachment_path,attachment_name')
       .eq('thread_id', id)
       .eq('account_id', ctx.accountId);
     if (before) {
@@ -42,7 +42,11 @@ export async function GET(
     if (error) throw error;
     const rows = data ?? [];
     return NextResponse.json({
-      messages: rows.toReversed(),
+      messages: await Promise.all(rows.toReversed().map(async (row) => {
+        if (!row.attachment_path) return row;
+        const signed = await ctx.supabase.storage.from('team-chat-media').createSignedUrl(row.attachment_path, 600);
+        return { ...row, attachment_url: signed.data?.signedUrl ?? null };
+      })),
       next: rows.length === 100 ? rows[rows.length - 1].id : null,
       as_of: asOf,
     });
@@ -75,6 +79,13 @@ export async function POST(
         { error: 'Chat no disponible' },
         { status: 404 }
       );
+    if (input.attachment_path) {
+      const prefix = `account-${ctx.accountId}/${id}/`;
+      if (!input.attachment_path.startsWith(prefix)) return NextResponse.json({ error: 'Archivo de otro chat' }, { status: 400 });
+      const objectName = input.attachment_path.slice(prefix.length);
+      const listed = await ctx.supabase.storage.from('team-chat-media').list(prefix.slice(0,-1), { search: objectName, limit: 1 });
+      if (listed.error || !listed.data?.some((file) => file.name === objectName)) return NextResponse.json({ error: 'Adjunta el archivo nuevamente' }, { status: 400 });
+    }
     const { data, error } = await ctx.supabase
       .from('team_messages')
       .insert({
@@ -83,20 +94,20 @@ export async function POST(
         account_id: ctx.accountId,
         sender_id: ctx.userId,
       })
-      .select('id,sender_id,body,created_at')
+      .select('id,sender_id,body,created_at,attachment_path,attachment_name')
       .single();
     if (error) {
       if (error.code === '23505') {
         const old = await ctx.supabase
           .from('team_messages')
-          .select('id,sender_id,body,created_at')
+          .select('id,sender_id,body,created_at,attachment_path,attachment_name')
           .eq('id', input.id)
           .eq('thread_id', id)
           .eq('account_id', ctx.accountId)
           .eq('sender_id', ctx.userId)
           .maybeSingle();
         if (old.error) throw old.error;
-        if (old.data?.body === input.body)
+        if (old.data?.body === input.body && (old.data.attachment_path ?? undefined) === input.attachment_path)
           return NextResponse.json({ message: old.data });
         return NextResponse.json(
           { error: 'Actualiza antes de reintentar este envío.' },

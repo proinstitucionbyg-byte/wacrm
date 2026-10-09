@@ -11,6 +11,7 @@ function setup() {
     "stored={CRM_BASE_URL:'https://crm.example',CRM_SYNC_KEY:'test'}; PropertiesService={getScriptProperties:function(){return {getProperty:function(k){return stored[k];},getProperties:function(){return stored;},setProperty:function(k,v){stored[k]=v;},deleteProperty:function(k){delete stored[k];}};}}; V2={admin:'admin'}; SpreadsheetApp={openById:function(){return {getSheetByName:function(){return null;}};}};",
     context
   );
+  runInContext("C_SINCRONIZAR_CUADRO_=function(){};", context);
   return (code: string) => runInContext(code, context);
 }
 describe('puente Google CRM', () => {

@@ -109,6 +109,7 @@ interface MediaDraft {
 interface MessageComposerProps {
   adviserIntroduction?: AdviserIntroduction | null;
   needsAdviserNickname?: boolean;
+  alreadyContacted?: boolean;
   conversationId: string;
   sessionExpired: boolean;
   onSend: (text: string, replyToId?: string) => void;
@@ -136,6 +137,7 @@ const OPUS_ENCODER_PATH = '/opus/encoderWorker.min.js';
 export function MessageComposer({
   adviserIntroduction,
   needsAdviserNickname,
+  alreadyContacted,
   conversationId,
   sessionExpired,
   onSend,
@@ -431,6 +433,25 @@ export function MessageComposer({
     },
     [stageUpload]
   );
+  useEffect(() => {
+    const inThread = (event: DragEvent) => event.target instanceof Element && Boolean(event.target.closest('[data-message-thread]'));
+    const over = (event: DragEvent) => {
+      if (inThread(event) && event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    };
+    const drop = (event: DragEvent) => {
+      if (!inThread(event) || !event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      if (inputsDisabled || busy || recording) return;
+      if (event.dataTransfer.files.length !== 1) { toast.error('Adjunta un archivo cada vez.'); return; }
+      const file = event.dataTransfer.files[0];
+      const kind = (Object.keys(PICKER_ACCEPT) as Array<keyof typeof PICKER_ACCEPT>).find((candidate) => PICKER_ACCEPT[candidate].split(',').includes(file.type));
+      if (!kind) { toast.error('Formato no compatible. Usa una imagen, video, PDF o documento de Office.'); return; }
+      void stageUpload(kind, file);
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
+  }, [stageUpload, inputsDisabled, busy, recording]);
 
   // ---- Voice recording (client-side Ogg/Opus, no server transcode) ---
 
@@ -581,8 +602,10 @@ export function MessageComposer({
       )}
       {adviserIntroduction && !readOnly && (
         <AdviserIntroductionCard
-          key={`${conversationId}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ''}`}
+          key={`${conversationId}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ''}:${Boolean(alreadyContacted)}`}
           adviser={adviserIntroduction}
+          storageKey={`adviser-intro:${conversationId}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ''}`}
+          alreadyContacted={alreadyContacted}
           disabled={inputsDisabled || sending || busy || drafting || recording}
           hasDraft={Boolean(text.trim() || draft || replyTo || interactiveOpen)}
           onUse={(presentation) => {

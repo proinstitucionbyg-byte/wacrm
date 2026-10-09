@@ -7,6 +7,12 @@ import {
 const id = '11111111-1111-4111-8111-111111111111',
   other = '22222222-2222-4222-8222-222222222222';
 describe('internal team chat input', () => {
+  it('accepts a file without text but rejects incomplete or external paths', () => {
+    const path = `account-${id}/${other}/${id}`;
+    expect(parseTeamMessage({id,body:'',attachment_path:path,attachment_name:'DNI.pdf'})).toMatchObject({body:'',attachment_path:path});
+    expect(parseTeamMessage({id,body:'',attachment_path:path})).toBeNull();
+    expect(parseTeamMessage({id,body:'',attachment_path:'https://external/file',attachment_name:'x'})).toBeNull();
+  });
   it('preserves paragraphs, indentation and line breaks', () => {
     expect(
       parseTeamMessage({ id, body: 'Hola\r\n\r\n  Segunda linea' })

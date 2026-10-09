@@ -25,7 +25,7 @@ export async function findConnectedAgentForArea(
       .from('profiles')
       .select('user_id')
       .eq('account_id', accountId)
-      .eq('area', area)
+      .ilike('area', area)
     if (error || !members || members.length === 0) return { agentId: null }
 
     const ids = (members as Array<{ user_id: string }>).map((m) => m.user_id)
@@ -74,4 +74,19 @@ export async function findConnectedAgentForArea(
     console.error('[ai auto-reply] findConnectedAgentForArea failed:', err)
     return { agentId: null }
   }
+}
+
+/** Atomic service-only transfer, including the shared fidelity audience. */
+export async function routeConversationToArea(db: Db, accountId: string, conversationId: string, area: string): Promise<AreaAgentResult> {
+  const { data, error } = await db.rpc('route_conversation_area', { p_account: accountId, p_conversation: conversationId, p_area: area });
+  if (error) throw error;
+  return { agentId: data?.agent_id ?? null };
+}
+
+export function explicitlyRequestedArea(text: string): 'ventas' | 'fidelizacion' | null {
+  const value = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (!/hablar|pasame|pasen|comunicar|contactar|deriva|area|asesor/.test(value)) return null;
+  if (/academi|fideliza/.test(value)) return 'fidelizacion';
+  if (/\bventas\b/.test(value)) return 'ventas';
+  return null;
 }
