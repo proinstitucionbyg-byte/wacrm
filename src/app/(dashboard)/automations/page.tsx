@@ -19,7 +19,9 @@ import {
   Folder,
   FolderPlus,
   FolderInput,
-  ChevronDown,
+  ArrowLeft,
+  ArrowRight,
+  CornerLeftUp,
 } from "lucide-react"
 
 import { createClient } from "@/lib/supabase/client"
@@ -47,6 +49,9 @@ import {
 import { AUTOMATION_TEMPLATES, type TemplateSlug } from "@/lib/automations/templates"
 import { triggerMeta, formatRelative } from "@/lib/automations/trigger-meta"
 import { cn } from "@/lib/utils"
+
+import { FolderDestination } from '@/components/automations/folder-destination'
+import { folderPath } from '@/lib/automations/folder-path'
 
 const TEMPLATE_ORDER: TemplateSlug[] = [
   "welcome_message",
@@ -364,6 +369,15 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
         </section>
       )}
 
+      <nav aria-label="Navegacion de carpetas" className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3">
+        <Button variant="outline" size="sm" onClick={() => router.back()}><ArrowLeft className="h-4 w-4" />ATRAS</Button>
+        <Button variant="outline" size="sm" onClick={() => router.forward()}><ArrowRight className="h-4 w-4" />ADELANTE</Button>
+        <Button variant="outline" size="sm" disabled={!selectedFolderId} onClick={() => {
+          const parent = folderList.find(f => f.id === selectedFolderId)?.parent_id;
+          router.push(parent ? `/automations?folder=${parent}` : '/automations');
+        }}><CornerLeftUp className="h-4 w-4" />CARPETA ANTERIOR</Button>
+        <span className="min-w-0 break-words text-sm text-muted-foreground">{folderPath(folderList, selectedFolderId)}</span>
+      </nav>
 <section className="space-y-3">
   <div className="flex items-center justify-between">
     <h2 className="text-sm font-semibold text-muted-foreground">
@@ -556,180 +570,24 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
   </DialogContent>
 </Dialog>
 
-<Dialog
-  open={!!movingFolder}
-  onOpenChange={(open) => {
-    if (!open) setMovingFolder(null)
-  }}
->
+<Dialog open={!!movingFolder} onOpenChange={open => { if (!open) setMovingFolder(null) }}>
   <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Mover carpeta</DialogTitle>
-      <DialogDescription>
-        Selecciona dónde quieres mover "{movingFolder?.name}".
-      </DialogDescription>
-    </DialogHeader>
-
-    <div className="space-y-2">
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full justify-start"
-        onClick={async () => {
-          if (!movingFolder) return
-
-          const res = await fetch("/api/automations/folders", {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              id: movingFolder.id,
-              parent_id: null,
-            }),
-          })
-
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}))
-            toast.error(body?.error ?? "No se pudo mover la carpeta")
-            return
-          }
-
-          toast.success("Carpeta movida")
-          setMovingFolder(null)
-          await load()
-        }}
-      >
-        <Folder className="mr-2 h-4 w-4" />
-        Carpeta principal
-      </Button>
-
-      {folderList
-        .filter((folder) => folder.id !== movingFolder?.id)
-        .map((folder) => (
-          <Button
-            key={folder.id}
-            type="button"
-            variant="outline"
-            className="w-full justify-start"
-            onClick={async () => {
-              if (!movingFolder) return
-
-              const res = await fetch("/api/automations/folders", {
-                method: "PATCH",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  id: movingFolder.id,
-                  parent_id: folder.id,
-                }),
-              })
-
-              if (!res.ok) {
-                const body = await res.json().catch(() => ({}))
-                toast.error(body?.error ?? "No se pudo mover la carpeta")
-                return
-              }
-
-              toast.success("Carpeta movida")
-              setMovingFolder(null)
-              await load()
-            }}
-          >
-            <Folder className="mr-2 h-4 w-4" />
-            {folder.name}
-          </Button>
-        ))}
-    </div>
+    <DialogHeader><DialogTitle>MOVER CARPETA</DialogTitle><DialogDescription>Selecciona el destino de {movingFolder?.name}.</DialogDescription></DialogHeader>
+    {movingFolder && <FolderDestination key={movingFolder.id} folders={folderList} movingFolderId={movingFolder.id} currentFolderId={movingFolder.parent_id} onMove={async destination => {
+      const res = await fetch('/api/automations/folders', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id:movingFolder.id,parent_id:destination}) });
+      if (!res.ok) { const body = await res.json().catch(()=>({})); toast.error(body.error ?? 'No se pudo mover la carpeta'); return; }
+      toast.success('Carpeta movida'); setMovingFolder(null); await load();
+    }} />}
   </DialogContent>
 </Dialog>
-<Dialog
-  open={!!movingAutomation}
-  onOpenChange={(open) => {
-    if (!open) setMovingAutomation(null)
-  }}
->
+<Dialog open={!!movingAutomation} onOpenChange={open => { if (!open) setMovingAutomation(null) }}>
   <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Mover automatización</DialogTitle>
-      <DialogDescription>
-        Selecciona la carpeta donde quieres mover "{movingAutomation?.name}".
-      </DialogDescription>
-    </DialogHeader>
-
-    <div className="space-y-2">
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full justify-start"
-        onClick={async () => {
-          if (!movingAutomation) return
-
-          const res = await fetch(`/api/automations/${movingAutomation.id}`, {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              folder_id: null,
-            }),
-          })
-
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}))
-            toast.error(
-              body?.error ?? "No se pudo mover la automatización",
-            )
-            return
-          }
-
-          toast.success("Automatización movida")
-          setMovingAutomation(null)
-          await load()
-        }}
-      >
-        <Folder className="mr-2 h-4 w-4" />
-        Carpeta principal
-      </Button>
-
-      {folderList.map((folder) => (
-        <Button
-          key={folder.id}
-          type="button"
-          variant="outline"
-          className="w-full justify-start"
-          onClick={async () => {
-            if (!movingAutomation) return
-
-            const res = await fetch(`/api/automations/${movingAutomation.id}`, {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                folder_id: folder.id,
-              }),
-            })
-
-            if (!res.ok) {
-              const body = await res.json().catch(() => ({}))
-              toast.error(
-                body?.error ?? "No se pudo mover la automatización",
-              )
-              return
-            }
-
-            toast.success("Automatización movida")
-            setMovingAutomation(null)
-            await load()
-          }}
-        >
-          <Folder className="mr-2 h-4 w-4" />
-          {folder.name}
-        </Button>
-      ))}
-    </div>
+    <DialogHeader><DialogTitle>MOVER AUTOMATIZACION</DialogTitle><DialogDescription>Selecciona el destino de {movingAutomation?.name}.</DialogDescription></DialogHeader>
+    {movingAutomation && <FolderDestination key={movingAutomation.id} folders={folderList} currentFolderId={movingAutomation.folder_id} onMove={async destination => {
+      const res = await fetch(`/api/automations/${movingAutomation.id}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder_id:destination})});
+      if (!res.ok) { const body = await res.json().catch(()=>({})); toast.error(body.error ?? 'No se pudo mover la automatizacion'); return; }
+      toast.success('Automatizacion movida'); setMovingAutomation(null); await load();
+    }} />}
   </DialogContent>
 </Dialog>
 <Dialog
@@ -789,8 +647,8 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
     <DialogHeader>
       <DialogTitle>Eliminar carpeta</DialogTitle>
       <DialogDescription>
-        ¿Estás seguro de que quieres eliminar la carpeta "
-        {pendingFolderDelete?.name}"?
+        ¿Estás seguro de que quieres eliminar la carpeta &quot;
+        {pendingFolderDelete?.name}&quot;?
         Las automatizaciones no se eliminarán.
       </DialogDescription>
     </DialogHeader>

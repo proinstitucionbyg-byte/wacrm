@@ -5,6 +5,7 @@ import {
   parseEnrollmentData,
   enrollmentIssues,
 } from '@/lib/matriculas/enrollment';
+import { declarationEvidence } from '@/lib/matriculas/identity-evidence';
 
 export async function GET(
   _request: Request,
@@ -101,6 +102,18 @@ export async function PATCH(
           },
           { status: 400 }
         );
+    }
+    if (data.declaration_message_ids?.length) {
+      const {data: declarations,error: declarationError}=await ctx.supabase.from('messages').select('id,content_text').eq('conversation_id',existing.conversation_id).eq('sender_type','customer').eq('content_type','text').in('id',data.declaration_message_ids);
+      if (declarationError) throw declarationError;
+      if (declarations?.length !== data.declaration_message_ids.length || declarationEvidence(data,declarations).length !== declarations.length)
+        return NextResponse.json({error:'El respaldo debe contener nombre, documento y correo escritos por el estudiante en este chat.'},{status:400});
+    }
+    if (data.guardian_message_ids?.length) {
+      const {data: guardians,error: guardianError}=await ctx.supabase.from('messages').select('id,image_analysis').eq('conversation_id',existing.conversation_id).eq('sender_type','customer').eq('content_type','image').in('id',data.guardian_message_ids);
+      if (guardianError) throw guardianError;
+      if(guardians?.length!==data.guardian_message_ids.length || guardians.some(image=>image.image_analysis?.category==='payment_receipt'))
+        return NextResponse.json({error:'Selecciona las fotos del documento del tutor o padres de este chat.'},{status:400});
     }
     const { data: saved, error } = await ctx.supabase
       .from('enrollment_drafts')

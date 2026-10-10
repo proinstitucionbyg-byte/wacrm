@@ -724,13 +724,15 @@ export function MessageComposer({
                     ? undefined
                     : t('attachMedia')
               }
-              className="text-muted-foreground hover:text-foreground inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Adjuntar archivo"
+              className="text-muted-foreground hover:text-foreground inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-border px-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Paperclip className="h-4 w-4" />
               )}
+              <span className="hidden text-xs sm:inline">ADJUNTAR ARCHIVO</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"

@@ -6,6 +6,10 @@ Este documento consolida el estado actual. Las listas del 08/10 describen estado
 
 ## COMO LEER EL ESTADO
 
+PUBLICACION VERIFICADA: commit b93f00c97c753b2dd2a5e221bae369efaa304cb8. EasyPanel finalizo con Success el 09/10/2026 a las 20:22:43 Lima. En produccion se verificaron ADJUNTAR ARCHIVO, DERIVAR, tareas SISTEMA y control administrativo de tiempos. Esto no acredita la matricula completa con entrega de los tres PDF.
+
+ALCANCE DE ACCESOS GOOGLE: solo MATRIZ GENERAL INSTICRECE se movio desde INSTICRECE a Mi unidad para retirar el acceso heredado por enlace, conservando ID y URL. Quedo privada para la cuenta propietaria. Se cancelo expresamente la opcion de Google que habria retirado acceso de la carpeta superior INSTICRECE. No se cambiaron permisos de esa carpeta ni de MATRICULAS Y CONTROL DE INGRESOS. El libro operativo conserva su acceso por enlace. No se ha definido una lista de administradores adicionales para la matriz.
+
 - COMPROBADO: hay evidencia directa indicada, limitada a ese alcance.
 - IMPLEMENTADO / FALTA PRUEBA COMPLETA: existe la conexion en codigo; no se ha demostrado todo el recorrido con un estudiante.
 - PENDIENTE: falta una conexion, pantalla, regla o configuracion identificada.
@@ -104,7 +108,7 @@ Este documento consolida el estado actual. Las listas del 08/10 describen estado
 | Solo tres PDF y originales, sin Excel temporal | IMPLEMENTADO limpieza despues de completar tres PDF; no elimina plantillas. Falta revisar/limpiar copias antiguas de simulacion y comprobar carpeta real final |
 | Tres PDF enviados al mismo chat | IMPLEMENTADO en puente y API; 15 pruebas de envio/puente pasaron en esta sesion. CERO envios reales registrados hasta la consulta actual |
 | Libro operativo limpio y matriz administrativa aparte | COMPROBADO: operativo con MATRICULAS, CUADRO DE INICIOS y cinco WA; matriz con ocho pestañas administrativas incluido CONTROL DE CLASES. Se compararon siete rangos completos antes de retirar duplicados; respaldo RESPALDO MATRICULAS ANTES DE LIMPIEZA 09-10-2026 conservado |
-| Permisos privados de Google por equipo | Falta verificar lista de acceso real de ambos libros/carpeta; no afirmar privacidad por existir matriz separada |
+| Permisos privados de Google por equipo | MATRIZ comprobada privada para propietario tras mover solo ese archivo a Mi unidad; mismo ID y URL. Carpeta superior y libro operativo sin cambios de permisos. Falta designacion de otros administradores autorizados si deben ver la matriz |
 
 ## D. INICIOS, FIDELIZACION Y DOCENTES
 
@@ -175,10 +179,22 @@ CONCLUSION: la informacion principal esta recogida, pero el sistema no esta term
 
 ## COMPROBACIONES DEL LOTE ACTUAL
 
+- Revision de alcance posterior a la instruccion de conservar lo aprobado: se revisaron los cambios de adjuntos, derivacion, presentacion, reenvio, soporte academico, avisos, cumpleanos y operacion Google contra observaciones expresas. No se revirtieron estas correcciones solicitadas ni se modificaron plantillas aprobadas, montos, fechas del alumno o accesos Google durante esta comprobacion.
+- Revalidacion local: 77 pruebas en nueve archivos pasaron el 09/10/2026 a las 20:29 Lima, cubriendo presentacion, derivacion, adjuntos internos, reenvio, identidad, validacion de ficha, puente Google, operacion y soporte academico. No equivale a una nueva matricula real ni a envio real de documentos.
+- Decision pendiente presentada al usuario: tratamiento de S/0.10 adicionales. No modificar el pago validado de S/20 ni la promocion de S/19.90 para superar el bloqueo.
+
 - 944 pruebas automaticas, 101 archivos, sin fallos (09/10/2026 19:55 Lima).
 - Compilacion de produccion y TypeScript correctos. ESLint de los cambios nuevos correcto tras corregir orden de callbacks; no se certifica el lint global, que tiene fallos previos.
 - Base real: pruebas transaccionales de retorno de pago observado, nueva asignacion, tareas compartidas/idempotencia/reapertura, destinatarios de cumpleanos y tiempos de presencia. Todo con rollback; no quedan pagos, tareas o cumpleanos ficticios.
 - Control administrativo de tiempos y tareas rechaza a agentes; CEO ve titulo de tarea, responsable y hora mediante funciones limitadas a su cuenta.
 - Historial de presencia empieza al instalarse: no se inventan tiempos de los tres dias anteriores. Desconexion se detecta con el umbral existente de 75 segundos; no se cuenta indefinidamente una pestaña cerrada.
 - Capturas locales: output/verificacion/lista-whatsapp-20261009.png y control-clases-20261009.png.
-- Privacidad: separar pestañas administrativas no acredita que los archivos Google sean privados. Se observo acceso por enlace en el libro operativo; falta revisar destinatarios autorizados antes de ajustar permisos.
+- Privacidad: matriz comprobada privada para propietario; captura output/verificacion/matriz-privada-20261009.png. Solo se movio la matriz, sin modificar permisos de carpeta superior ni libro operativo. No ampliar ni retirar otros accesos sin una instruccion concreta del usuario.
+- Produccion: capturas chat-interno-publicado-20261009.png, control-equipo-publicado-20261009.png y avisos-sistema-publicados-20261009.png en output/verificacion. Ninguna prueba visual envio archivos, derivo conversaciones ni marco tareas reales como terminadas.
+
+## CIERRE TECNICO 10-10-2026
+- 973 pruebas / 105 archivos pasaron. Build de produccion correcto, 74 paginas.
+- Implementado: secuencias internas de comprobante y cierre 15/30; espera protegida de dos horas; check de bienvenida; solicitud y aceptacion de traspaso interno; destino y navegacion de carpetas; tolerancia 19-21 para promocion 19.90; evidencia textual y documentos de tutor; asignacion de fidelizacion por nombre configurado; checks de avisos de reprogramacion.
+- Tres migraciones aplicadas. Puente Google y generador de boletas guardados y leidos de vuelta sin diferencias.
+- No se cambiaron accesos Google en este lote. MAINET/ANTONELLA requieren cuentas/apodos configurados por CEO; no se inventaron cuentas ni asignaciones.
+- Falta acreditar recorrido real WhatsApp, validacion humana y entrega de los tres PDF. Calendar y analisis Meet siguen aplazados por el usuario.

@@ -123,6 +123,7 @@ export async function dispatchInboundToAiReply(
       latestUserMessage(messages),
     )
     knowledge.push(...await academicContext(db, accountId));
+    knowledge.push('REGISTRO: si la fecha de nacimiento indica que el estudiante es menor de 18 anos, solicita tambien "DNI DEL TUTOR O PADRES". Pide que envie esa foto con la descripcion "DOCUMENTO DEL TUTOR" para identificarla. Si falta la foto del estudiante, solicita NOMBRE COMPLETO, DNI o CARNE DE EXTRANJERIA o PASAPORTE y CORREO ELECTRONICO por escrito; se conservara ese texto como respaldo y se dejara FOTO DEL DOCUMENTO PENDIENTE. Nunca declares verificada una identidad sin foto. Todos los comprobantes requieren validacion humana del CEO.');
 
     // Automations the model may launch (best-effort, never throws).
     const candidates = await findCandidateAutomations(db, accountId, messages)

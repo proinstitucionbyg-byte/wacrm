@@ -34,6 +34,7 @@ export async function POST(
         body.error.length > 1000)
     )
       throw badRequest('Falta observación del error');
+    if (body.intake_adviser !== undefined && (typeof body.intake_adviser !== 'string' || body.intake_adviser.length>100)) throw badRequest('Asesora de ingreso invalida');
     const { data: existing, error: readError } = await ctx.supabase
       .from('enrollment_drafts')
       .select('status,lease_token,registered_number,student_folder_url')
@@ -68,6 +69,7 @@ export async function POST(
             status: 'registered',
             registered_number: String(body.registered_number),
             student_folder_url: body.student_folder_url,
+            ...(body.intake_adviser !== undefined ? {intake_adviser:body.intake_adviser.trim().toUpperCase()} : {}),
             error: null,
           }
         : { status: 'error', error: body.error.trim() };

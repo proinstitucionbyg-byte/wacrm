@@ -10,6 +10,7 @@ import { uploadMedia } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { engineSendMedia } from '@/lib/automations/meta-send';
 import { UUID_PATTERN } from '@/lib/team-chat';
+import { startEnrollmentSequence } from '@/lib/matriculas/sequence';
 
 /** Receives only the three generated PDFs for an already registered and human-validated enrollment. */
 export async function POST(
@@ -91,7 +92,10 @@ export async function POST(
           'El PDF cambió; requiere revisión administrativa',
           409
         );
-      if (prior.status === 'sent') return ok({ sent: true });
+      if (prior.status === 'sent') {
+        try { await startEnrollmentSequence(ctx.supabase,ctx.accountId,id,'final'); } catch(error){console.error('[matriculas] final sequence needs review',error);}
+        return ok({ sent: true });
+      }
       throw new ApiError(
         'bad_request',
         'Hay un envío anterior por revisar; no se repetirá automáticamente',
@@ -170,6 +174,7 @@ export async function POST(
         .eq('account_id', ctx.accountId)
         .eq('kind', kind);
       if (savedError) throw savedError;
+      try { await startEnrollmentSequence(ctx.supabase,ctx.accountId,id,'final'); } catch(error){console.error('[matriculas] final sequence needs review',error);}
       return ok({ sent: true });
     } catch (sendError) {
       // A timeout may occur AFTER Meta accepted the PDF. Freeze for review to avoid duplicate sends.

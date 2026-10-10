@@ -1,12 +1,13 @@
 import type { EnrollmentData } from './enrollment';
 import type { IntakeMessage } from './collect-data';
 import { academicOffer, courseKey, type AcademicModule } from './calendar';
+import { declarationEvidence, isGuardianMessage } from './identity-evidence';
 export interface IntakeEvidence extends IntakeMessage { sender_type?: string; ai_generated?: boolean; created_at?: string }
 const key = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
 /** Matching written identifiers to the photo is not payment validation. The caller requires the CEO's payment decision first. */
 export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvidence[], calendar: AcademicModule[], receivedAt: string): EnrollmentData {
   const next = { ...data };
-  const customer = messages.filter((message) => message.sender_type === 'customer');
+  const customer = messages.filter((message) => message.sender_type === 'customer' && !isGuardianMessage(message));
   if (!next.identity_confirmed && next.full_name && next.document_number) {
     const writtenNames = new Set<string>(), writtenDocs = new Set<string>();
     for (const message of customer) for (const line of (message.content_text ?? '').replace(/\\n/g, '\n').split(/\r?\n/)) {
@@ -24,6 +25,11 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     const front = photos.some((photo) => key(String(photo.image_analysis?.fields?.full_name ?? '')) === key(next.full_name!) && String(photo.image_analysis?.fields?.document_number ?? '').replace(/\s/g, '') === next.document_number);
     if (consistent && front && writtenNames.size === 1 && writtenNames.has(key(next.full_name)) && writtenDocs.size === 1 && writtenDocs.has(next.document_number)) next.identity_confirmed = true;
   }
+  const photos = customer.filter(message => message.image_analysis?.category === 'identity_document');
+  // A contradictory photo must be resolved, not bypassed with the written-data exception.
+  if (!next.identity_confirmed && photos.length === 0) {
+    next.declaration_message_ids = declarationEvidence(next, customer);
+  } else next.declaration_message_ids = [];
   if (!next.offer_confirmed && next.course) {
     const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => key(message.content_text ?? '').replace(/\\N/g, '\n').replace(/[*_~]/g, '')).filter((text) => courseKey(text) === courseKey(next.course!));
     const prices = new Map<string, number[]>();

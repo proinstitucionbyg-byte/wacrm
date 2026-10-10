@@ -90,7 +90,7 @@ function D_DATOS(numero) {
   if (!Array.isArray(promo.precios) || promo.precios.length !== 6) throw new Error('PROMOCION INCOMPLETA');
   promo.precios = promo.precios.map(D_MONTO);
   if (D_TEXTO(get('PROMO')) && D_CLAVE(get('PROMO')) !== promo.id) throw new Error('PROMO DE MATRICULA Y PAGO NO COINCIDEN');
-  const monto = D_MONTO(pago[3]); if (monto !== promo.precios[0]) throw new Error('PAGO PARCIAL O DIFERENTE: REQUIERE REVISION ANTES DEL CRONOGRAMA');
+  const monto = D_MONTO(pago[3]); if (monto !== promo.precios[0] && !(promo.precios[0]===19.9 && monto>=19 && monto<=21)) throw new Error('PAGO PARCIAL O DIFERENTE: REQUIERE REVISION ANTES DEL CRONOGRAMA');
   const x = { numero: D_TEXTO(numero), nombre: nombre, tipo: tipo, doc: doc, curso: curso, inicio: D_DIA(get('FECHA DE INICIO')), pago: D_DIA(pago[2]), monto: monto, metodo: D_CLAVE(pago[4]), promo: promo, emision: D_DIA(new Date()), nacimiento: get('F. NACIMIENTO') ? D_DIA(get('F. NACIMIENTO')) : '', direccion: D_TEXTO(get('DIRECCION')).toUpperCase(), departamento: D_TEXTO(get('DEPARTAMENTO')).toUpperCase(), celulares: [get('CELULAR 1'), get('CELULAR 2')].map(D_TEXTO).filter(Boolean).join(' / '), correo: D_TEXTO(get('CORREO ELECTRONICO')), estudianteId: folder.getId() };
   if (!x.celulares || !x.correo || !x.metodo) throw new Error('FALTAN CELULAR, CORREO O METODO DE PAGO');
   props.setProperty(key, JSON.stringify(x)); return x;
@@ -112,9 +112,10 @@ function D_LLENAR(s, tipo, x, serie) {
   const put = function (c, v, f) { D_PONER(s, c, v, f); }, fechas = D_VENCIMIENTOS(x.inicio);
   if (tipo === 'BOLETA') {
     put('E10', x.nombre, '@'); put('E11', x.doc, '@'); put('B11', x.tipo); put('B15', D_FECHA(x.emision), 'dd/MM/yyyy');
-    put('M15', D_METODO(x.metodo)); put('B18', 1); put('E18', 'PRIMERA CUOTA - ' + D_CURSO_VISIBLE(x.curso)); put('M18', x.promo.precios[0]);
+    const pagoAceptado=x.promo.precios[0]===19.9&&x.monto>=19&&x.monto<=21;
+    put('M15', D_METODO(x.metodo)); put('B18', 1); put('E18', 'PRIMERA CUOTA - ' + D_CURSO_VISIBLE(x.curso)); put('M18', pagoAceptado?x.monto:x.promo.precios[0]);
     s.getRange('O18').setFormula('=ROUND(M18*B18,2)'); s.getRange('O56').setFormula('=O18');
-    put('O57', x.monto < x.promo.precios[0] ? x.monto : 0); put('O58', x.monto);
+    put('O57', !pagoAceptado&&x.monto < x.promo.precios[0] ? x.monto : 0); put('O58', x.monto);
     s.getRange('O59').setFormula('=ROUND(O56-O58,2)'); s.getRange('O62').setFormula('=O58');
     s.getRange('O60').setFormula('=ROUND(O62/1.18,2)'); s.getRange('O61').setFormula('=ROUND(O62-O60,2)');
     put('M6', serie); put('T62', serie); s.getRange('O56:O62').setNumberFormat('0.00');

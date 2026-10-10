@@ -32,6 +32,8 @@ import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 // ------------------------------------------------------------
 
 export interface AutomationContext {
+  /** Server-owned enrollment sequence. Its two-hour wait is independent of ordinary chat activity. */
+  enrollment_sequence_id?: string
   /** Explicit adviser command; set only by the authenticated server endpoint. */
   manual_agent_id?: string
   /** Raw message text, for keyword_match + message_content conditions. */
@@ -136,7 +138,8 @@ export async function runAutomationsForTrigger(
           .from("automation_pending_executions")
           .update({ status: "cancelled" })
           .eq("contact_id", input.contactId)
-          .eq("status", "pending");
+          .eq("status", "pending")
+          .is('context->>enrollment_sequence_id', null);
       }
       try {
         await executeAutomation(automation, input);
@@ -172,6 +175,7 @@ export async function runAutomationById(input: {
   conversationId: string
   messageText?: string
   manualAgentId?: string
+  sequenceId?: string
 }): Promise<boolean> {
   try {
     const db = supabaseAdmin()
@@ -192,6 +196,7 @@ export async function runAutomationById(input: {
       .eq('is_active', true)
       .maybeSingle()
     if (error || !automation) return false
+    if ((automation.trigger_config as Record<string,unknown>)?.internal_only && !input.sequenceId) return false
 
     // Same as the normal dispatcher: cancel stale pending waits first.
     await db
@@ -199,6 +204,7 @@ export async function runAutomationById(input: {
       .update({ status: 'cancelled' })
       .eq('contact_id', input.contactId)
       .eq('status', 'pending')
+      .is('context->>enrollment_sequence_id', null)
 
     const logId = await executeAutomation(automation as Automation, {
       accountId: input.accountId,
@@ -208,12 +214,13 @@ export async function runAutomationById(input: {
         message_text: input.messageText ?? '',
         conversation_id: input.conversationId,
         ...(input.manualAgentId ? { manual_agent_id: input.manualAgentId } : {}),
+        ...(input.sequenceId ? { enrollment_sequence_id: input.sequenceId } : {}),
       },
     })
-    if (input.manualAgentId) {
+    if (input.manualAgentId || input.sequenceId) {
       if (!logId) return false
       const { data: result, error: resultError } = await db.from('automation_logs').select('status').eq('id', logId).single()
-      return !resultError && result?.status !== 'failed'
+      return !resultError && ['success','partial'].includes(result?.status)
     }
     return true
   } catch (err) {
@@ -256,7 +263,12 @@ export async function resumePendingExecution(pending: {
   }
   // Si la asesora escribió hace menos de 5 min, o la automatización
   // está apagada en este chat, el paso no se envía.
-  if (pending.context?.manual_agent_id) {
+  if (pending.context?.enrollment_sequence_id) {
+    const {data:sequence,error:sequenceError}=await db.from('enrollment_sequence_runs').select('completed_at,conversation_id,automation_id,stage,status').eq('id',pending.context.enrollment_sequence_id).eq('account_id',pending.account_id).maybeSingle()
+    if(sequenceError){await markPending(pending.id,'failed');return}
+    if(!sequence || sequence.status!=='started' || sequence.automation_id!==pending.automation_id || sequence.conversation_id!==pending.context.conversation_id || sequence.stage!=='final' || sequence.completed_at || automation.is_active!==true){await markPending(pending.id,'cancelled');return}
+    // Ordinary adviser/student messages do not cancel or extend the welcome deadline.
+  } else if (pending.context?.manual_agent_id) {
     const { data: profile } = await db.from('profiles').select('account_id').eq('user_id', pending.context.manual_agent_id).maybeSingle()
     const { data: allowed } = await db.rpc('has_member_permission', { p_user_id: pending.context.manual_agent_id, p_module: 'inbox', p_action: 'send' })
     if (profile?.account_id !== pending.account_id || allowed !== true || automation.is_active !== true) {
@@ -289,6 +301,11 @@ export async function resumePendingExecution(pending: {
       logId: pending.log_id,
       triggerEvent: 'resumed_wait',
     })
+    if(pending.context?.enrollment_sequence_id){
+      const {data: outcome,error: outcomeError}=await db.from('automation_logs').select('status').eq('id',pending.log_id).maybeSingle()
+      const failed=outcomeError||outcome?.status!=='success'
+      await db.from('enrollment_sequence_runs').update(failed?{status:'review',error:'REVISAR ENVIO DE BIENVENIDA'}:{backup_sent_at:new Date().toISOString()}).eq('id',pending.context.enrollment_sequence_id).eq('account_id',pending.account_id)
+    }
     await markPending(pending.id, 'done')
   } catch (err) {
     console.error('[automations] resume failed:', err)
@@ -399,7 +416,8 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     if (step.step_type === 'wait') {
       const cfg = step.step_config as WaitStepConfig
       const ms = waitMs(cfg)
-      await db.from('automation_pending_executions').insert({
+      const dueAt = new Date(Date.now() + ms).toISOString()
+      const {error: waitError} = await db.from('automation_pending_executions').insert({
         automation_id: args.automation.id,
         // Tenancy: account_id required NOT NULL post-017.
         account_id: args.automation.account_id,
@@ -410,9 +428,17 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         branch: args.branch,
         next_step_position: step.position + 1,
         context: args.context,
-        run_at: new Date(Date.now() + ms).toISOString(),
+        run_at: dueAt,
         status: 'pending',
       })
+      if (waitError) {
+        await finalizeLog(args.logId,'failed','NO SE PUDO PROGRAMAR LA ESPERA')
+        return
+      }
+      if (args.context.enrollment_sequence_id) {
+        const {error: dueError}=await db.from('enrollment_sequence_runs').update({welcome_due_at:dueAt}).eq('id',args.context.enrollment_sequence_id).eq('account_id',args.automation.account_id)
+        if(dueError){await finalizeLog(args.logId,'failed','REVISAR EL PLAZO DE BIENVENIDA');return}
+      }
       results.push({
         step_id: step.id,
         step_type: step.step_type,
@@ -792,6 +818,7 @@ async function resolveConversationId(args: ExecuteArgs): Promise<string> {
 }
 
 export function triggerMatches(automation: Automation, ctx: AutomationContext | undefined): boolean {
+  if ((automation.trigger_config as Record<string,unknown>)?.internal_only === true) return false
   if (automation.trigger_type === 'keyword_match') {
     const cfg = automation.trigger_config as KeywordMatchTriggerConfig
     if (!cfg?.keywords || cfg.keywords.length === 0) return false

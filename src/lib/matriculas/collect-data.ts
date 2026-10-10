@@ -1,4 +1,5 @@
 import { parseEnrollmentData, type EnrollmentData } from './enrollment';
+import { isGuardianMessage } from './identity-evidence';
 
 export interface IntakeMessage {
   id: string;
@@ -38,12 +39,17 @@ export function collectEnrollmentData(
     candidates.set(field, values);
   };
   const photoIds: string[] = [];
+  const guardianIds: string[] = [];
   for (const message of messages) {
+    if (isGuardianMessage(message)) {
+      if (message.image_analysis?.category === 'identity_document') guardianIds.push(message.id);
+      continue;
+    }
     // Some captions arrive with literal backslash-n from the sender.
     const text = (message.content_text ?? '').replace(/\\n/g, '\n');
     for (const line of text.split(/\r?\n/)) {
       const labelled = line.match(
-        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|curso|promocion)\s*:\s*(.+)$/i
+        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*:\s*(.+)$/i
       );
       if (!labelled) continue;
       const label = key(labelled[1]);
@@ -59,9 +65,14 @@ export function collectEnrollmentData(
           phone.replace(/^\+/, '') !== data.phone1?.replace(/^\+/, '')
         )
           add(field, phone);
-      } else if (label === 'DNI' && /^\d{8}$/.test(value.trim())) {
-        add('document_type', 'DNI');
+      } else if (['DNI','CARNE DE EXTRANJERIA','PASAPORTE'].includes(label) && /^[A-Z0-9\s-]+$/i.test(value.trim())) {
+        add('document_type', label);
         add('document_number', value);
+      } else if (label === 'FECHA DE NACIMIENTO') {
+        const date = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+        add('birth_date', date ? `${date[3]}-${date[2].padStart(2,'0')}-${date[1].padStart(2,'0')}` : value);
+      } else if (['DIRECCION','DEPARTAMENTO','DISTRITO'].includes(label)) {
+        add(({DIRECCION:'address', DEPARTAMENTO:'department', DISTRITO:'district'} as const)[label as 'DIRECCION'|'DEPARTAMENTO'|'DISTRITO'],value);
       } else if (label === 'PROMOCION') add('promotion_id', value);
     }
     const normalized = key(text);
@@ -101,6 +112,7 @@ export function collectEnrollmentData(
   const ids = [...new Set([...(data.identity_message_ids ?? []), ...photoIds])];
   if (!data.identity_confirmed && photoIds.length && ids.length <= 4)
     next.identity_message_ids = ids;
+  if (guardianIds.length) next.guardian_message_ids = [...new Set([...(data.guardian_message_ids ?? []), ...guardianIds])].slice(0,4);
   return next;
 }
 

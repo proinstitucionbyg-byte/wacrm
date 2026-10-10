@@ -36,7 +36,9 @@ function C_REGISTRAR_(job) {
   if(index<0)throw new Error('REVISAR CURSO: NO COINCIDE CON EL CUADRO DE INICIOS');
   const curso=cursos[index], inicios=TABLA_('CUADRO DE INICIOS').filter(function(r){return CLAVE_(r[1])===curso&&DIA_(r[3])===d.start_date&&CLAVE_(r[4])==='SI';});
   if(inicios.length!==1)throw new Error('REVISAR FECHA OFICIAL: NO COINCIDE CON EL CUADRO DE INICIOS');
-  if(!d.identity_confirmed||!d.offer_confirmed||!d.identity_message_ids.length||d.prices.length!==6||Number(d.amount)!==d.prices[0])throw new Error('FALTAN CONFIRMACIONES DE IDENTIDAD U OFERTA');
+  const montoAceptado=Number(d.amount)===d.prices[0]||(d.prices[0]===19.9&&Number(d.amount)>=19&&Number(d.amount)<=21);
+  const identidad=(d.identity_confirmed&&d.identity_message_ids.length)||(d.declaration_message_ids||[]).length;
+  if(!identidad||!d.offer_confirmed||d.prices.length!==6||!montoAceptado)throw new Error('FALTAN CONFIRMACIONES DE IDENTIDAD U OFERTA');
   const markerColumn=29, header=CLAVE_(s.getRange(1,markerColumn).getValue());
   if(header&&header!=='ID MATRICULA CRM')throw new Error('LA COLUMNA AC ESTA OCUPADA; REVISAR ANTES DE INSTALAR');
   s.getRange(1,markerColumn).setValue('ID MATRICULA CRM');s.hideColumns(markerColumn);
@@ -67,6 +69,9 @@ function C_REGISTRAR_(job) {
   if(!job.voucher_message_id)throw new Error('FALTA FOTO DEL VOUCHER');
   const voucher=C_FOTO_(job,job.voucher_message_id,primerPago,'VOUCHER');
   const documentos=d.identity_message_ids.map(function(id){return C_FOTO_(job,id,primerPago,'DOCUMENTO');});
+  (d.declaration_message_ids||[]).forEach(function(id){documentos.push(C_FOTO_(job,id,primerPago,'DATOS DECLARADOS'));});
+  (d.guardian_message_ids||[]).forEach(function(id){C_FOTO_(job,id,primerPago,'DOCUMENTO TUTOR');});
+  if((d.declaration_message_ids||[]).length&&m['OBSERVACION'])s.getRange(fila,m['OBSERVACION']).setValue('FOTO DEL DOCUMENTO PENDIENTE. DATOS DECLARADOS POR EL ESTUDIANTE; RESPALDO DEL CHAT EN CARPETA.');
   s.getRange(fila,m['LINK DE CARPETA DEL ESTUDIANTE']).setValue(estudiante.getUrl());
   const validaciones=admin.getSheetByName('VALIDACIONES'), pagos=admin.getSheetByName('PAGOS DE MATRICULA');
   if(!validaciones||!pagos)throw new Error('FALTAN TABLAS ADMINISTRATIVAS');
@@ -75,7 +80,7 @@ function C_REGISTRAR_(job) {
   pagos.getRange(1,7).setValue('OFERTA CONFIRMADA JSON');
   C_FILA_ADMIN_(validaciones,numero,[numero,'VALIDADO','VALIDACION HUMANA CRM '+job.review_id,documentos[0].getId(),voucher.getId(),'','','']);
   C_FILA_ADMIN_(pagos,numero,[numero,CLAVE_(d.promotion_id),new Date(d.payment_date+'T12:00:00-05:00'),Number(d.amount),CLAVE_(d.payment_method),job.id,JSON.stringify(snapshot)]);
-  SpreadsheetApp.flush();return {registered_number:String(numero),student_folder_url:estudiante.getUrl()};
+  SpreadsheetApp.flush();return {registered_number:String(numero),student_folder_url:estudiante.getUrl(),intake_adviser:String(s.getRange(fila,m['ASESORA DE INGRESO']).getValue()||'').trim().toUpperCase()};
 }
 function SINCRONIZAR_CRM_MATRICULAS() {
   return BLOQUEO_(function(){

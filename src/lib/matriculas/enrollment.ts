@@ -22,6 +22,8 @@ export type EnrollmentData = Partial<
   identity_confirmed?: boolean;
   offer_confirmed?: boolean;
   identity_message_ids?: string[];
+  declaration_message_ids?: string[];
+  guardian_message_ids?: string[];
   prices?: number[];
 };
 export interface EnrollmentDraft {
@@ -92,6 +94,11 @@ export function parseEnrollmentData(raw: unknown): EnrollmentData | null {
   out.identity_message_ids = [
     ...new Set((input.identity_message_ids ?? []) as string[]),
   ];
+  for (const field of ['declaration_message_ids', 'guardian_message_ids'] as const) {
+    const ids = input[field] ?? [];
+    if (!Array.isArray(ids) || ids.length > 4 || ids.some(id => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) return null;
+    out[field] = [...new Set(ids)] as string[];
+  }
   if (
     input.prices !== undefined &&
     (!Array.isArray(input.prices) ||
@@ -107,6 +114,12 @@ export function parseEnrollmentData(raw: unknown): EnrollmentData | null {
     return null;
   out.prices = input.prices as number[] | undefined;
   return out;
+}
+export function isMinor(birthDate: string | undefined, today = new Date()): boolean {
+  if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || Number.isNaN(Date.parse(birthDate))) return false;
+  const localDay = today.toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+  const eighteenth = `${Number(birthDate.slice(0, 4)) + 18}${birthDate.slice(4)}`;
+  return birthDate <= localDay && localDay < eighteenth;
 }
 export function enrollmentIssues(data: EnrollmentData): string[] {
   const issues: string[] = [];
@@ -153,8 +166,10 @@ export function enrollmentIssues(data: EnrollmentData): string[] {
     )
       issues.push(`REVISAR ${ENROLLMENT_FIELDS[key]}`);
   }
-  if (!data.identity_confirmed || !data.identity_message_ids?.length)
+  if ((!data.identity_confirmed || !data.identity_message_ids?.length) && !data.declaration_message_ids?.length)
     issues.push('COMPARAR NOMBRE Y DOCUMENTO CON SUS FOTOS');
+  if (isMinor(data.birth_date) && !data.guardian_message_ids?.length)
+    issues.push('SOLICITAR DNI DEL TUTOR O PADRES');
   if (!data.offer_confirmed || data.prices?.length !== 6)
     issues.push('CONFIRMAR LA OFERTA DE SEIS CUOTAS QUE RECIBIO EL ESTUDIANTE');
   if (
@@ -162,7 +177,10 @@ export function enrollmentIssues(data: EnrollmentData): string[] {
     (!/^\d+(\.\d{1,2})?$/.test(data.amount) || Number(data.amount) <= 0)
   )
     issues.push('REVISAR MONTO');
-  if (data.prices?.length === 6 && Number(data.amount) !== data.prices[0])
+  // CEO-approved exception for this first-month promotion only; retain actual paid amount.
+  const paid = Number(data.amount);
+  const acceptedFirstMonth = data.prices?.[0] === 19.9 && paid >= 19 && paid <= 21;
+  if (data.prices?.length === 6 && paid !== data.prices[0] && !acceptedFirstMonth)
     issues.push('PAGO PARCIAL O DISTINTO DE LA OFERTA: REVISAR');
   return [...new Set(issues)];
 }

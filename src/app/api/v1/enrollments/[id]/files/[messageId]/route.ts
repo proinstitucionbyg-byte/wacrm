@@ -2,6 +2,7 @@ import { requireApiKey } from '@/lib/auth/api-context';
 import { ApiError, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api';
+import { declarationImage } from '@/lib/matriculas/declaration-image';
 
 export async function GET(
   request: Request,
@@ -37,20 +38,25 @@ export async function GET(
     const identityIds = Array.isArray(draft.data?.identity_message_ids)
       ? draft.data.identity_message_ids
       : [];
+    const declarationIds: string[] = draft.data?.declaration_message_ids ?? [];
+    const guardianIds: string[] = draft.data?.guardian_message_ids ?? [];
     if (
       review?.status !== 'validated' ||
-      (messageId !== review.message_id && !identityIds.includes(messageId))
+      (messageId !== review.message_id && !identityIds.includes(messageId) && !declarationIds.includes(messageId) && !guardianIds.includes(messageId))
     )
       throw new ApiError('not_found', 'Archivo no autorizado', 404);
     const { data: message, error: messageError } = await ctx.supabase
       .from('messages')
-      .select('media_url')
+      .select('media_url,content_type,content_text,created_at')
       .eq('id', messageId)
       .eq('conversation_id', draft.conversation_id)
       .eq('sender_type', 'customer')
-      .eq('content_type', 'image')
       .maybeSingle();
     if (messageError) throw messageError;
+    if (declarationIds.includes(messageId) && message?.content_type === 'text' && message.content_text) {
+      return declarationImage(message);
+    }
+    if (message?.content_type !== 'image') throw new ApiError('not_found', 'Imagen no disponible',404);
     const match = /^\/api\/whatsapp\/media\/(\d+)$/.exec(
       message?.media_url ?? ''
     );

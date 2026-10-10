@@ -51,6 +51,7 @@ import { TemplatePicker } from './template-picker';
 import { AiThreadBanner } from './ai-thread-banner';
 import { buildReplyPreview } from './reply-quote';
 import { toast } from 'sonner';
+import { EnrollmentWelcomeCheck } from './enrollment-welcome-check';
 import {
   getAdviserIntroduction,
   getAdviserNickname,
@@ -1431,6 +1432,7 @@ export function MessageThread({
       />
 
       {/* Composer */}
+      <EnrollmentWelcomeCheck key={conversation.id} conversationId={conversation.id} />
       <MessageComposer
         key={conversation.id}
         assignmentAt={conversation.inbox_assignment_at}

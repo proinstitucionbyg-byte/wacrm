@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { TeamMemberProfile } from '@/components/inbox/team-member-profile';
 import { TeamWhatsappTransfer } from '@/components/inbox/team-whatsapp-transfer';
+import { TeamTransferRequests } from '@/components/inbox/team-transfer-requests';
 import {
   type TeamMember,
   type TeamMessage,
@@ -190,6 +191,7 @@ function TeamConversation({
         className="max-h-[55vh] min-h-64 flex-1 space-y-3 overflow-y-auto p-4"
         aria-live="polite"
       >
+        <TeamTransferRequests key={thread.id} threadId={thread.id} userId={userId} />
         {older && (
           <Button variant="outline" disabled={loadingOlder} onClick={loadOlder}>
             Ver mensajes anteriores
@@ -446,7 +448,7 @@ function TeamChatContent() {
         </section>
       )}
       <div className="flex flex-wrap gap-2">
-        <TeamWhatsappTransfer members={members} />
+        {room && <TeamWhatsappTransfer key={room.id} threadId={room.id} members={members.filter(m => m.user_id !== user?.id && room.team_thread_members.some(p => p.user_id === m.user_id))} />}
         <Button
           variant="outline"
           onClick={() => {

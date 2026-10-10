@@ -56,7 +56,7 @@ describe('matricula posterior a pago humano', () => {
   it('rejects impossible dates and a partial payment without removing validation', () => {
     const issues = enrollmentIssues({
       birth_date: '2026-02-30',
-      amount: '20',
+      amount: '18.99',
       prices: [19.9, 79.9, 79.9, 79.9, 79.9, 79.9],
     });
     expect(issues).toContain('REVISAR FECHA DE NACIMIENTO');
@@ -65,5 +65,14 @@ describe('matricula posterior a pago humano', () => {
   it('rejects malformed inputs and too many evidence files', () => {
     expect(parseEnrollmentData({ phone1: 123 })).toBeNull();
     expect(parseEnrollmentData({ prices: [19.9] })).toBeNull();
+  });
+  it('accepts the approved 19 to 21 range only for the 19.90 first installment', () => {
+    for (const amount of ['19', '19.50', '19.90', '20', '21']) {
+      const data = { amount, prices: [19.9,79.9,79.9,79.9,79.9,79.9] };
+      expect(enrollmentIssues(data)).not.toContain('PAGO PARCIAL O DISTINTO DE LA OFERTA: REVISAR');
+      expect(data.amount).toBe(amount);
+    }
+    for (const [amount,first] of [['18.99',19.9],['21.01',19.9],['20',39.9]] as const)
+      expect(enrollmentIssues({amount,prices:[first,79.9,79.9,79.9,79.9,79.9]})).toContain('PAGO PARCIAL O DISTINTO DE LA OFERTA: REVISAR');
   });
 });

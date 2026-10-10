@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useMemberPermissions } from '@/hooks/use-member-permissions';
-import { PAYMENT_LABELS, type PaymentReview, type PaymentStatus } from '@/lib/payments/review';
+import { PAYMENT_LABELS, oldReceiptDate, type PaymentReview, type PaymentStatus } from '@/lib/payments/review';
 
 export function PaymentDecision({ review, canReview, onChanged }: { review: PaymentReview; canReview: boolean; onChanged: () => void }) {
   const { can } = useMemberPermissions();
@@ -24,6 +24,7 @@ export function PaymentDecision({ review, canReview, onChanged }: { review: Paym
   }
   return <div className="mt-3 space-y-2">
     <p className="font-semibold">{PAYMENT_LABELS[review.status]}</p>
+    {oldReceiptDate(review.evidence.fields?.date)&&<p className="rounded border border-amber-500 bg-amber-500/10 p-2 font-bold text-amber-600">COMPROBANTE CON MAS DE UNA SEMANA. REVISAR FECHA; NO CADUCA.</p>}
     <p className="text-xs text-muted-foreground">Origen: {review.origin} · {review.source_area}{review.source_adviser ? ` · ${review.source_adviser}` : ''}</p>
     {review.note && <p className="whitespace-pre-wrap text-sm">Motivo: {review.note}</p>}
     {review.reviewed_at && <p className="text-xs text-muted-foreground">Decisión registrada: {new Date(review.reviewed_at).toLocaleString('es-PE', { timeZone: 'America/Lima' })}</p>}
@@ -32,7 +33,7 @@ export function PaymentDecision({ review, canReview, onChanged }: { review: Paym
       <label className="block text-xs">Observación de tu revisión
         <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} disabled={saving} className="mt-1 min-h-20 w-full rounded-md border border-border bg-background p-2 text-sm" />
       </label>
-      <p className="text-xs text-muted-foreground">Valida únicamente después de comprobar el abono en tus registros. Esto no genera ni envía documentos todavía.</p>
+      <p className="text-xs text-muted-foreground">Valida despues de comprobar el abono en tus registros. Cuando los datos esten completos, se registrara la matricula y se enviaran los tres PDF.</p>
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" disabled={saving} onClick={() => decide('validated')}>✓ VALIDADO</Button>
         <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => decide('rejected')}>NO VALIDADO</Button>

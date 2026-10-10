@@ -197,6 +197,8 @@ export type NotificationType = 'conversation_assigned' | 'team_message' | 'syste
 
 export interface Notification {
   requires_action?: boolean;
+  dedup_key?: string | null;
+  action_checks?: Record<string,{completed:boolean;at:string;by:string}>;
   completed_at?: string | null;
   completed_by?: string | null;
   id: string;

@@ -40,6 +40,7 @@ export async function POST(
       // Clone into the same account as the original. account_id is NOT
       // NULL post-017, so the INSERT fails the constraint without it.
       account_id: original.account_id,
+      folder_id: original.folder_id ?? null,
       user_id: user.id,
       name: `${original.name} (Copy)`,
       description: original.description,

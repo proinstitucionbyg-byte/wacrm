@@ -1,4 +1,5 @@
 "use client";
+import { CalendarActions } from '@/components/notifications/calendar-actions';
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -275,7 +276,7 @@ export default function NotificationsPage() {
                     </p>
                   </div>
                 </button>
-                {n.requires_action && <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3">
+                {n.requires_action && n.dedup_key?.startsWith('calendar:') ? <CalendarActions notice={n} onChanged={load}/> : n.requires_action && <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3">
                   <Button size="sm" variant={n.completed_at ? 'secondary' : 'outline'} disabled={completing===n.id} onClick={()=>void completeTask(n)}>{completing===n.id ? 'GUARDANDO…' : n.completed_at ? '✓ REALIZADO · DESMARCAR' : 'MARCAR COMO REALIZADO'}</Button>
                   {n.completed_at && <span className="text-muted-foreground text-xs">Registrado el {new Date(n.completed_at).toLocaleString('es-PE',{timeZone:'America/Lima'})}. Responsable guardado para el reporte administrativo.</span>}
                 </div>}

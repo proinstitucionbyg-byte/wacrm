@@ -18,7 +18,10 @@ Se actualizaron los datos simulados al contrato actual: campos nuevos del result
 
 ## Pendiente de comprobacion en produccion
 
-- Autorizacion de commit y push, publicacion en EasyPanel y comprobacion de la version publicada.
+- Commit y push autorizados y completados: `cb5c6d6`, rama `main`, repositorio `proinstitucionbyg-byte/wacrm`.
+- EasyPanel `personal/wacrm` indicaba el commit anterior `bb2527d` y `autoDeploy: true`.
+- La llamada `deployAppService` fallo por conexion al panel; las lecturas posteriores tambien fallaron y el navegador devolvio `ERR_CONNECTION_REFUSED` para el panel. No hay confirmacion de que el despliegue haya iniciado.
+- El CRM sigue accesible. Tras recargar y abrir el perfil, aun no aparece el campo Apodo de esta actualizacion; la publicacion queda pendiente.
 - Envio de un comprobante desde el WhatsApp personal del usuario y verificacion de su lectura en el CRM.
 - El proveedor puede fallar por clave, saldo, modelo, formato o calidad de imagen. En ese caso se conserva un estado explicito de revision manual.
 

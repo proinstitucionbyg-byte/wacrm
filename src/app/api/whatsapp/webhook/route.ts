@@ -13,6 +13,7 @@ import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { routeInboundSales } from '@/lib/ai/sales-routing'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
 import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
+import { startEnrollmentSequence } from '@/lib/matriculas/sequence'
 import { collectConversationEnrollments } from '@/lib/matriculas/collect'
 import { logAiUsage } from '@/lib/ai/usage'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
@@ -761,6 +762,14 @@ async function processMessage(
     return
   }
 
+  if (imageAnalysis?.category === 'payment_receipt') {
+    try {
+      const db=supabaseAdmin()
+      const {data:inbound}=await db.from('messages').select('id').eq('conversation_id',conversation.id).eq('message_id',message.id).maybeSingle()
+      if(inbound){const {data:review}=await db.from('payment_reviews').select('id').eq('message_id',inbound.id).eq('account_id',accountId).maybeSingle();if(review)await startEnrollmentSequence(db,accountId,review.id,'receipt')}
+    } catch(error){console.error('[matriculas] receipt sequence needs review:',error)}
+  }
+
   // Persist intake data even when an adviser has paused AI replies.
   try {
     await collectConversationEnrollments(supabaseAdmin(), accountId, conversation.id)
@@ -930,6 +939,7 @@ for (const triggerType of automationTriggers) {
     .update({ status: 'cancelled' })
     .eq('contact_id', contactRecord.id)
     .eq('status', 'pending')
+    .is('context->>enrollment_sequence_id', null)
   await dispatchInboundToAiReply({
     accountId,
     conversationId: conversation.id,

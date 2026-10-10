@@ -102,7 +102,7 @@ export async function findCandidateAutomations(
       trigger_config: unknown
     }>
 
-    const docs: Doc[] = rows.map((r) => {
+    const docs: Doc[] = rows.filter(r => (r.trigger_config as Record<string,unknown> | null)?.internal_only !== true).map((r) => {
       const cfg = (r.trigger_config ?? {}) as { keywords?: unknown }
       const keywords = Array.isArray(cfg.keywords)
         ? cfg.keywords.filter((k): k is string => typeof k === 'string')

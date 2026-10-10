@@ -261,6 +261,7 @@ function EnrollmentEditor({
       </fieldset>
       <fieldset className="space-y-2">
         <legend className="text-sm font-semibold">FOTOS DEL DOCUMENTO</legend>
+        {!!data.declaration_message_ids?.length && <p className="rounded border border-amber-500/40 p-3 text-sm text-amber-600">FOTO DEL DOCUMENTO PENDIENTE. Se archivaran imagenes de los datos escritos por el estudiante como respaldo del chat.</p>}
         <p className="text-muted-foreground text-xs">
           Selecciona las fotos del documento de identidad. La lectura completa
           solamente campos vacíos; compara siempre con los datos escritos.
@@ -316,6 +317,7 @@ function EnrollmentEditor({
                     )}
                   </span>
                 </label>
+                <label className="mt-2 flex gap-2 text-xs"><input type="checkbox" disabled={locked||saving||(!data.guardian_message_ids?.includes(image.id)&&(data.guardian_message_ids?.length??0)>=4)} checked={data.guardian_message_ids?.includes(image.id)??false} onChange={e=>setData({...data,guardian_message_ids:e.target.checked?[...(data.guardian_message_ids??[]),image.id]:(data.guardian_message_ids??[]).filter(id=>id!==image.id)})}/>DOCUMENTO DEL TUTOR O PADRES (SI ES MENOR DE EDAD)</label>
                 {image.image_analysis?.category === 'identity_document' && (
                   <Button
                     className="mt-2"
