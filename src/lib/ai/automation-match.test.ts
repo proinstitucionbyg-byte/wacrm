@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findCandidateAutomations } from './automation-match'
+import { findCandidateAutomations, preferredCourseInformationAutomation } from './automation-match'
 import { buildSystemPrompt } from './defaults'
 import type { ChatMessage } from './types'
 
@@ -15,6 +15,18 @@ function db() {
 async function candidates(messages: ChatMessage[]) { return findCandidateAutomations(db(), 'account-test', messages) }
 
 describe('prioridad de informacion inicial del curso', () => {
+  it('selects the actual Nutricion block instead of rewriting its steps', async () => {
+    const messages: ChatMessage[]=[{role:'user',content:'Hola, quiero informacion de la promocion activa de NUTRICION Y DIETETICA.'}]
+    expect(preferredCourseInformationAutomation(await candidates(messages),messages)).toBe('promo-nutricion')
+  })
+  it('selects an explicitly requested curriculum but does not restart sales for dates or payments',()=>{
+    const options=catalog.map(({id,name})=>({id,name}))
+    expect(preferredCourseInformationAutomation(options,[{role:'user',content:'Malla de farmacia'}])).toBe('malla-farmacia')
+    for (const content of ['Cuando comienza Nutricion?', 'Quiero activar la promo de nutricion, pasame Yape', 'Info de farmacia y nutricion']) {
+      expect(preferredCourseInformationAutomation(options,[{role:'user',content}])).toBeNull()
+    }
+    expect(preferredCourseInformationAutomation([...options,{id:'other',name:'NUTRICION PROMOCION'}],[{role:'user',content:'Info de nutricion'}])).toBeNull()
+  })
   it.each(['Quiero informacion de farmacia', 'Info de farmacia', 'Hola, auxiliar de farmacia'])('prioriza superpromo y excluye malla al iniciar: %s', async (content) => {
     expect(await candidates([{ role: 'user', content }])).toEqual([{ id: 'promo-farmacia', name: 'FARMACIA 19.90' }])
   })

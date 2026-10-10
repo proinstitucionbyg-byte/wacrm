@@ -1,6 +1,7 @@
 import type { supabaseAdmin } from './admin-client'
 import type { AutomationOption } from './defaults'
 import type { ChatMessage } from './types'
+import { courseKey } from '@/lib/matriculas/calendar'
 
 type Db = ReturnType<typeof supabaseAdmin>
 
@@ -47,6 +48,23 @@ interface Doc {
   extraTokens: string[]
   curriculum: boolean
   promotion: boolean
+}
+
+/** Explicit course-information requests run the saved block, without asking an LLM to reproduce it. */
+export function preferredCourseInformationAutomation(options: AutomationOption[], messages: ChatMessage[]): string | null {
+  const latest = normalize(messages.filter(m => m.role === 'user').at(-1)?.content ?? '')
+  const course = courseKey(latest)
+  if (!course) return null
+  const curriculum = /\b(mallas?|mayas?|temario|plan de estudios)\b/.test(latest)
+  if (!curriculum && !/\b(info|informacion|promocion|promo)\b/.test(latest)) return null
+  if (!curriculum && /\b(pagar|pago|yape|plin|cuenta|matricularme|inscribirme|activar)\b|\bactiva (?:la|mi|tu|esta|promo)\b/.test(latest)) return null
+  const matches = options.filter(option => {
+    const name = normalize(option.name ?? '')
+    return courseKey(name) === course && (curriculum
+      ? /\b(mallas?|mayas?|temario|plan de estudios)\b/.test(name)
+      : !/\b(mallas?|mayas?|temario|plan de estudios)\b/.test(name) && /\b(promo|promocion|informacion)\b|19[.,]90/.test(name))
+  })
+  return matches.length === 1 ? matches[0].id : null
 }
 
 /**

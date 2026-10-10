@@ -7,11 +7,12 @@ const h = vi.hoisted(() => ({
   buildConversationContext: vi.fn(),
   retrieveKnowledge: vi.fn(),
   generateReply: vi.fn(),
+  runAutomation: vi.fn(),
   engineSendText: vi.fn(),
   routeArea: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
-    autoResponders: [] as { id: string }[],
+    autoResponders: [] as { id: string; name?: string }[],
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
@@ -22,6 +23,7 @@ vi.mock('./config', () => ({ loadAiConfig: h.loadAiConfig }))
 vi.mock('./context', () => ({ buildConversationContext: h.buildConversationContext }))
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
+vi.mock('@/lib/automations/engine', () => ({ runAutomationById: h.runAutomation }))
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
@@ -100,11 +102,29 @@ beforeEach(() => {
   h.buildConversationContext.mockResolvedValue([{ role: 'user', content: 'hi' }])
   h.retrieveKnowledge.mockResolvedValue([])
   h.generateReply.mockResolvedValue({ text: 'Hello!', handoff: false })
+  h.runAutomation.mockReset().mockResolvedValue(true)
   h.engineSendText.mockResolvedValue({ whatsapp_message_id: 'm1' })
   h.routeArea.mockReset().mockResolvedValue({ agentId: null });
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
+  it('runs the saved course automation without generating or sending replacement text',async()=>{
+    h.state.autoResponders=[{id:'nutricion',name:'NUTRICION 19.90'}]
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'Quiero informacion de nutricion'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.runAutomation).toHaveBeenCalledWith(expect.objectContaining({automationId:'nutricion',conversationId:'conv-1'}))
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.retrieveKnowledge).not.toHaveBeenCalled()
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+  it('does not launch the direct automation when the reply slot is denied',async()=>{
+    h.state.claim=false
+    h.state.autoResponders=[{id:'nutricion',name:'NUTRICION 19.90'}]
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'Info de nutricion'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.runAutomation).not.toHaveBeenCalled()
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
   it('claims a slot and sends on the happy path', async () => {
     await dispatchInboundToAiReply(ARGS)
     expect(h.state.rpcCalls).toEqual([

@@ -4,7 +4,7 @@ import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
-import { findCandidateAutomations } from './automation-match'
+import { findCandidateAutomations, preferredCourseInformationAutomation } from './automation-match'
 import { routeConversationToArea, explicitlyRequestedArea } from './handoff-routing'
 import {
   SCHEDULE_TEXT,
@@ -115,6 +115,18 @@ export async function dispatchInboundToAiReply(
       return
     }
 
+    const candidates = await findCandidateAutomations(db, accountId, messages)
+    const directAutomation = requestedArea ? null : preferredCourseInformationAutomation(candidates, messages)
+    if (directAutomation) {
+      const { data: claimed, error: claimErr } = await db.rpc('claim_ai_reply_slot', {
+        conversation_id: conversationId,
+        max_replies: config.autoReplyMaxPerConversation,
+      })
+      if (claimErr || claimed !== true) return
+      await runAutomationById({ accountId, automationId: directAutomation, contactId, conversationId, messageText: latestUserMessage(messages) })
+      return
+    }
+
     // Ground the reply in the account's knowledge base (best-effort).
     const knowledge = await retrieveKnowledge(
       db,
@@ -126,8 +138,6 @@ export async function dispatchInboundToAiReply(
     knowledge.push('REGISTRO: si la fecha de nacimiento indica que el estudiante es menor de 18 anos, solicita tambien "DNI DEL TUTOR O PADRES". Pide que envie esa foto con la descripcion "DOCUMENTO DEL TUTOR" para identificarla. Si falta la foto del estudiante, solicita NOMBRE COMPLETO, DNI o CARNE DE EXTRANJERIA o PASAPORTE y CORREO ELECTRONICO por escrito; se conservara ese texto como respaldo y se dejara FOTO DEL DOCUMENTO PENDIENTE. Nunca declares verificada una identidad sin foto. Todos los comprobantes requieren validacion humana del CEO.');
 
     // Automations the model may launch (best-effort, never throws).
-    const candidates = await findCandidateAutomations(db, accountId, messages)
-
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',

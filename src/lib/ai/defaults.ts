@@ -135,6 +135,7 @@ If the customer's latest message is exactly "🎤 [Audio que no se pudo entender
         'For a first request for information about a clearly identified course, launch its main information/promotion automation directly. ' +
         'Do not ask the customer to choose between a promotion and a curriculum (malla/maya). For Farmacia, prioritize the active FARMACIA 19.90 offer when it is in the available list. ' +
         'The main offer comes first and supplies schedules, prices and promotion. A curriculum belongs later in the sales conversation or when explicitly requested. ' +
+        'When a matching automation exists, launch it: never copy or merge its captions, curriculum, follow-up questions or delayed steps into a text reply. Its images, audio, buttons and waits must be sent by the automation engine. ' +
         'If the customer has not identified a course and several different courses could fit, do NOT launch any: ask which course they mean instead. ' +
         'To launch one, write at most one short friendly sentence and then, alone on the final line, the marker [[AUTOMATION:<id>]] using the exact id from the list below. ' +
         'Never invent an id and never use an id that is not in the list. Never combine the marker with the handoff phrase.\n\n' +
