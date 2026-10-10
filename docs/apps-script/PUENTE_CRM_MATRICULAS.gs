@@ -28,6 +28,14 @@ function C_FILA_ADMIN_(sheet, numero, values) {
   if(matches.length>1)throw new Error('REGISTRO ADMINISTRATIVO DUPLICADO');
   sheet.getRange(matches[0]||Math.max(2,sheet.getLastRow()+1),1,1,values.length).setValues([values]);
 }
+/** Conserva el desplegable existente y admite el valor ya verificado por el puente. */
+function C_ASESORA_VALIDACION_(celda, nombre) {
+  const regla=celda.getDataValidation();if(!regla)return;
+  if(regla.getCriteriaType()!==SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST)throw new Error('REVISAR VALIDACION DE ASESORA DE VENTAS');
+  const args=regla.getCriteriaValues(), opciones=args[0].slice();
+  if(opciones.indexOf(nombre)!==-1)return;
+  opciones.push(nombre);celda.setDataValidation(regla.copy().requireValueInList(opciones,args[1]!==false).build());
+}
 function C_REGISTRAR_(job) {
   const d=job.data, s=HOJA_('MATRICULAS'), admin=SpreadsheetApp.openById(V2.admin), m=MAPA_(s);
   const cursos=['NUTRICION Y DIETETICA M-J 20-22','AUXILIAR DE FARMACIA M-V 18-20','RECURSOS HUMANOS L-M 20-22','ASISTENTE ADMINISTRATIVO M-V 20-22','EDUCACION INICIAL L-M 18-20'];
@@ -46,14 +54,19 @@ function C_REGISTRAR_(job) {
   ids.forEach(function(r,i){if(CLAVE_(r[0])===CLAVE_(job.id))matches.push(i+2);});
   if(matches.length>1)throw new Error('ID CRM DUPLICADO');
   let fila=matches[0];
-  if(!fila){
-    fila=Math.max(2,s.getLastRow()+1);const row=Array(markerColumn).fill('');
+  {
+    const nueva=!fila;fila=fila||Math.max(2,s.getLastRow()+1);
+    const row=nueva?Array(markerColumn).fill(''):s.getRange(fila,1,1,markerColumn).getValues()[0];
     if(!job.sales_adviser||!String(job.sales_adviser).trim())throw new Error('FALTA CONFIRMAR ATRIBUCION DE VENTA EN CRM');
     const values={'NOMBRE COMPLETO':d.full_name,'TIPO DE DOCUMENTO':d.document_type,'NUMERO DE DOCUMENTO':d.document_number,'F. NACIMIENTO':d.birth_date?new Date(d.birth_date+'T12:00:00-05:00'):'','CELULAR 1':d.phone1,'CELULAR 2':d.phone2||'','DIRECCION':d.address||'','DEPARTAMENTO':d.department||'','DISTRITO':d.district||'','CORREO ELECTRONICO':d.email,'CURSO':curso,'FECHA DE INICIO':new Date(d.start_date+'T12:00:00-05:00'),'PROMO':d.promotion_id,'ID DE INICIO':inicios[0][0]};
     values['ASESORA DE VTAS.']=String(job.sales_adviser).trim().toUpperCase();
+    C_ASESORA_VALIDACION_(s.getRange(fila,m['ASESORA DE VTAS.']),values['ASESORA DE VTAS.']);
+    C_ASESORA_VALIDACION_(s.getRange(fila,m['CURSO']),curso);
     Object.keys(values).forEach(function(k){if(!m[k])throw new Error('FALTA COLUMNA '+k);row[m[k]-1]=values[k];});
     row[markerColumn-1]=CLAVE_(job.id);
     ['NUMERO DE DOCUMENTO','CELULAR 1','CELULAR 2'].forEach(function(k){s.getRange(fila,m[k]).setNumberFormat('@');});
+    // Reserva la misma fila antes de escribir: una validacion no debe duplicar el registro al reintentar.
+    s.getRange(fila,markerColumn).setValue(CLAVE_(job.id));SpreadsheetApp.flush();
     s.getRange(fila,1,1,row.length).setValues([row]);SpreadsheetApp.flush();
   }
   PROCESAR_FILAS_V2_(s,fila,1,1,markerColumn-1,new Date());SpreadsheetApp.flush();

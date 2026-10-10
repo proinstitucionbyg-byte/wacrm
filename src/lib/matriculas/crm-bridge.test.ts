@@ -15,6 +15,18 @@ function setup() {
   return (code: string) => runInContext(code, context);
 }
 describe('puente Google CRM', () => {
+  it('preserves adviser dropdown choices while allowing the verified institutional sale', () => {
+    const run = setup();
+    run("SpreadsheetApp.DataValidationCriteria={VALUE_IN_LIST:'LIST'}; choices=['ASHLY']; saved=null; rule={getCriteriaType:function(){return 'LIST';},getCriteriaValues:function(){return [choices,true];},copy:function(){return {requireValueInList:function(v,show){saved={values:v,show:show};return this;},build:function(){return saved;}};}}; cell={getDataValidation:function(){return rule;},setDataValidation:function(v){saved=v;}}; C_ASESORA_VALIDACION_(cell,'INSTITUCION');");
+    expect(Array.from(run('saved.values'))).toEqual(['ASHLY','INSTITUCION']);
+    expect(Array.from(run('choices'))).toEqual(['ASHLY']);
+    expect(run('saved.show')).toBe(true);
+  });
+  it('does not replace an unrelated adviser validation rule', () => {
+    const run = setup();
+    run("SpreadsheetApp.DataValidationCriteria={VALUE_IN_LIST:'LIST'}; cell={getDataValidation:function(){return {getCriteriaType:function(){return 'RANGE';}};}};");
+    expect(() => run("C_ASESORA_VALIDACION_(cell,'INSTITUCION')")).toThrow('REVISAR VALIDACION');
+  });
   it('refuses missing credentials and insecure addresses', () => {
     const run = setup();
     run(
