@@ -7,7 +7,7 @@ export async function automationAudioEvidence(args: {
   db: Db; accountId: string; automationId: string; name: string;
   stepId: string; config: Record<string, unknown>; url: string
 }): Promise<string | undefined> {
-  if (!/promo|informaci[oó]n/i.test(args.name)) return undefined
+  if (/malla|bienvenida/i.test(args.name) || !/promo|informaci[oó]n|\d+[.,]\d{2}/i.test(args.name)) return undefined
   let text = args.config.audio_transcript_url === args.url && typeof args.config.audio_transcript === 'string'
     ? args.config.audio_transcript : null
   if (!text) {

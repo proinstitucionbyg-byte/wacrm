@@ -11,6 +11,12 @@ function setup(config: Record<string, unknown> = {}) {
 }
 beforeEach(() => vi.clearAllMocks())
 describe('saved promotion audio evidence', () => {
+  it.each(['NUTRICION 19.90','FARMACIA 19.90','RECURSOS 19.90','ASISTENTE 19.90','EDUCACIÓN 19.90'])('recognizes the existing promotion name %s',async name => {
+    h.read.mockResolvedValue('Primer mes 19.90 soles')
+    const {args} = setup()
+    expect(await automationAudioEvidence({...args,name})).toContain('19.90')
+    expect(h.read).toHaveBeenCalledOnce()
+  })
   it('reuses only the transcript bound to this exact audio URL', async () => {
     const { args, db } = setup({ audio_transcript: 'Primer mes 19.90', audio_transcript_url: 'https://example.com/one.ogg' })
     expect(await automationAudioEvidence(args)).toContain('Primer mes 19.90')
