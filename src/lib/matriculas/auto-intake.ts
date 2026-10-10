@@ -31,13 +31,13 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     next.declaration_message_ids = declarationEvidence(next, customer);
   } else next.declaration_message_ids = [];
   if (!next.offer_confirmed && next.course) {
-    const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => key(message.content_text ?? '').replace(/\\N/g, '\n').replace(/[*_~]/g, '')).filter((text) => courseKey(text) === courseKey(next.course!));
+    const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => key(message.content_text ?? '').replace(/\\N/g, '\n').replace(/~[^~]*~/g, '').replace(/[*_]/g, '')).filter((text) => courseKey(text) === courseKey(next.course!));
     const prices = new Map<string, number[]>();
     for (const quote of quotes) {
-      const first = quote.match(/(?:1(?:RA|ERA)?\s*(?:CUOTA|MES)|PRIMER[AO]?\s*(?:MES|CUOTA))[^\n]{0,60}?S\s*\/?\s*(\d+(?:[.,]\d{1,2})?)/);
-      const monthly = quote.match(/(?:MENSUALIDAD|SEGUND[AO]\s*(?:MES|CUOTA))[^\n]{0,60}?S\s*\/?\s*(\d+(?:[.,]\d{1,2})?)/);
+      const first = quote.match(/(?:1(?:RA|ERA)?\s*(?:CUOTA|MES)|PRIMER[AO]?\s*(?:MES|CUOTA))[^\n]{0,60}?(?:S\s*\/?\s*(\d+(?:[.,]\d{1,2})?)|(\d+[.,]\d{1,2})\s*SOLES)/);
+      const monthly = quote.match(/(?:MENSUALIDAD|SEGUND[AO]\s*(?:MES|CUOTA))[^\n]{0,60}?(?:S\s*\/?\s*(\d+(?:[.,]\d{1,2})?)|(\d+[.,]\d{1,2})\s*SOLES)/);
       if (!first || !monthly || !/6\s*MESES|SEIS\s*MESES/.test(quote)) continue;
-      const values = [Number(first[1].replace(',', '.')), ...Array(5).fill(Number(monthly[1].replace(',', '.')))];
+      const values = [Number((first[1] || first[2]).replace(',', '.')), ...Array(5).fill(Number((monthly[1] || monthly[2]).replace(',', '.')))];
       if (values.every((value) => value > 0)) prices.set(JSON.stringify(values), values);
     }
     if (prices.size === 1) {

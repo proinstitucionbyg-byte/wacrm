@@ -5,6 +5,16 @@ const calendar: AcademicModule[] = [{ course: 'NUTRICION Y DIETETICA', module: '
 const evidence: IntakeEvidence[] = [{ id:'text',sender_type:'customer',content_text:'NOMBRE: LUIS PALACIOS\nDNI: 12345678' }, { id:'photo',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'LUIS PALACIOS',document_number:'12345678'}} }, { id:'promo',sender_type:'bot',created_at:'2026-10-08T10:00:00Z',content_text:'NUTRICION Y DIETETICA\\nMensualidad: S/79.90\\n1ra Cuota + Matricula: S/*19.90*\\nDuracion: 6 meses' }];
 const data = {full_name:'LUIS PALACIOS',document_number:'12345678',course:'NUTRICION Y DIETETICA'};
 describe('automatic intake from compared evidence and official dates',()=>{
+  it('uses the saved audio offer and ignores the struck-through list price',()=> {
+    const caption = {...evidence[2],content_text:'NUTRICION Y DIETETICA\n~Mensualidad: S/79.90~\n1ra Cuota: S/19.90\n6 meses'};
+    const audio = {...evidence[2],id:'audio',content_text:'AUDIO ENVIADO: NUTRICION PROMO\nSon seis meses. El primer mes es 19.90 soles y a partir del segundo mes 59.90 soles.'};
+    expect(prepareAutomaticIntake(data,[caption,audio],calendar,'2026-10-09T12:00:00Z')).toMatchObject({offer_confirmed:true,prices:[19.9,59.9,59.9,59.9,59.9,59.9]});
+    expect(prepareAutomaticIntake(data,[caption],calendar,'2026-10-09T12:00:00Z').offer_confirmed).not.toBe(true);
+  });
+  it('preserves an already confirmed student offer when a new promotion is sent',()=> {
+    const confirmed = {...data,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9]};
+    expect(prepareAutomaticIntake(confirmed,[{...evidence[2],content_text:evidence[2].content_text!.replace('79.90','49.90')}],calendar,'2026-10-09T12:00:00Z').prices).toEqual(confirmed.prices);
+  });
   it('ignores an electoral code on the reverse while retaining front ID comparison',()=>{
     const reverse: IntakeEvidence={id:'reverse',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{document_number:'000379',address:'CALLE UNO'}}};
     expect(prepareAutomaticIntake(data,[...evidence,reverse],calendar,'2026-10-09T12:00:00Z').identity_confirmed).toBe(true);

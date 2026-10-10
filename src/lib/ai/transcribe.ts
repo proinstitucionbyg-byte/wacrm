@@ -1,6 +1,7 @@
 import type { supabaseAdmin } from './admin-client'
 import { loadAiConfig } from './config'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
 type Db = ReturnType<typeof supabaseAdmin>
 
@@ -80,4 +81,41 @@ export async function transcribeInboundAudio(args: {
     console.error('[ai audio] transcription error:', err)
     return null
   }
+}
+
+/** Read a saved automation audio. Never follows redirects to private services. */
+export async function transcribeSavedAudio(args: {
+  db: Db; accountId: string; url: string
+}): Promise<string | null> {
+  try {
+    const config = await loadAiConfig(args.db, args.accountId)
+    if (!config?.isActive || !config.autoReplyEnabled || config.provider !== 'openai') return null
+    if (new URL(args.url).protocol !== 'https:' || !await isDeliverableUrl(args.url)) return null
+    const audio = await fetch(args.url, { redirect: 'error', signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) })
+    if (!audio.ok || Number(audio.headers.get('content-length')) > MAX_AUDIO_BYTES) return null
+    const reader = audio.body?.getReader()
+    if (!reader) return null
+    const chunks: Uint8Array[] = []
+    let size = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_AUDIO_BYTES) { await reader.cancel(); return null }
+      chunks.push(value)
+    }
+    if (!size) return null
+    const form = new FormData()
+    form.append('model', transcribeModel())
+    form.append('language', 'es')
+    const contentType = audio.headers.get('content-type') || 'audio/ogg'
+    form.append('file', new Blob(chunks.map(chunk => new Uint8Array(chunk)), { type: contentType }), `audio.${extensionFor(contentType)}`)
+    const result = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form,
+      signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+    })
+    if (!result.ok) return null
+    const payload = await result.json() as { text?: string }
+    return typeof payload.text === 'string' ? payload.text.trim() || null : null
+  } catch { return null }
 }

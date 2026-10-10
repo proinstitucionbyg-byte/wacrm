@@ -91,6 +91,8 @@ interface SendMediaArgs {
   contactId: string
   mediaType: 'image' | 'video' | 'audio' | 'document'
   mediaUrl: string
+  /** Internal evidence only: never sent as an extra WhatsApp caption. */
+  transcript?: string
   caption?: string
   filename?: string
 }
@@ -243,7 +245,7 @@ const content_text =
   input.kind === 'text'
     ? input.text
     : input.kind === 'media'
-      ? input.caption ?? null
+      ? input.transcript ?? input.caption ?? null
       : null
 
 const template_name =

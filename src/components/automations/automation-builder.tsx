@@ -1378,6 +1378,12 @@ function StepEditor({
     />
   </FieldBlock>
 )}
+{cfg.media_type === "audio" && typeof cfg.audio_transcript === "string" && cfg.audio_transcript_url === (cfg.media_url ?? cfg.url) && (
+  <FieldBlock label="LECTURA DEL AUDIO (USO INTERNO)">
+    <Textarea value={cfg.audio_transcript} readOnly className="min-h-24" />
+    <p className="text-xs text-muted-foreground">Se conserva con el audio enviado. Si reemplazas el audio, usa un enlace nuevo para volver a leerlo.</p>
+  </FieldBlock>
+)}
     </>
   )
     case "send_buttons":

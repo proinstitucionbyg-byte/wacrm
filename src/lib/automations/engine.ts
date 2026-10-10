@@ -26,6 +26,7 @@ import {
 } from './meta-send'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
+import { automationAudioEvidence } from './audio-evidence'
 
 // ------------------------------------------------------------
 // Public API
@@ -606,6 +607,11 @@ console.log(JSON.stringify({ mediaType, mediaUrl, caption: rawCfg.caption }, nul
 console.log('======================')
   const conversationId = await resolveConversationId(args)
 
+  const transcript = mediaType === 'audio' ? await automationAudioEvidence({
+    db, accountId: args.automation.account_id, automationId: args.automation.id,
+    name: args.automation.name, stepId: step.id,
+    config: step.step_config as Record<string, unknown>, url: mediaUrl,
+  }) : undefined
   const { whatsapp_message_id } = await engineSendMedia({
     accountId: args.automation.account_id,
     userId: args.automation.user_id,
@@ -615,6 +621,7 @@ console.log('======================')
     mediaUrl,
     caption: rawCfg.caption,
     filename: rawCfg.filename,
+    transcript,
   })
 
   return `media sent via Meta (${whatsapp_message_id})`
