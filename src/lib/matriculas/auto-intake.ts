@@ -10,8 +10,9 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
   if (!next.identity_confirmed && next.full_name && next.document_number) {
     const writtenNames = new Set<string>(), writtenDocs = new Set<string>();
     for (const message of customer) for (const line of (message.content_text ?? '').replace(/\\n/g, '\n').split(/\r?\n/)) {
-      const name = line.match(/^\s*(?:nombre(?: completo)?|nombres(?: y apellidos)?)\s*:\s*(.+)$/i);
-      const doc = line.match(/^\s*(?:dni|documento(?: de identidad)?|carne de extranjeria|pasaporte)\s*:\s*(.+)$/i);
+      const normalizedLine = key(line);
+      const name = normalizedLine.match(/^(?:NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?)\s*:\s*(.+)$/);
+      const doc = normalizedLine.match(/^(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE)\s*:\s*(.+)$/);
       if (name) writtenNames.add(key(name[1]));
       if (doc) writtenDocs.add(key(doc[1]).replace(/[\s()-]/g, ''));
     }

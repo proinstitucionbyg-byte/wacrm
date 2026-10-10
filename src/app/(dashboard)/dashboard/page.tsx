@@ -33,6 +33,7 @@ import { ConversationsChart } from '@/components/dashboard/conversations-chart'
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
+import { TeamOperationReport } from '@/components/dashboard/team-operation-report'
 
 import { useTranslations } from 'next-intl'
 
@@ -221,6 +222,7 @@ export default function DashboardPage() {
 
       {/* Activity feed */}
       <ActivityFeed items={activity} loading={activityLoading} />
+      <TeamOperationReport />
     </div>
   )
 }

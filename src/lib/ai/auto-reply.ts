@@ -20,6 +20,7 @@ import { engineSendText } from '@/lib/flows/meta-send'
 import { runAutomationById } from '@/lib/automations/engine'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { academicContext } from '@/lib/matriculas/calendar'
+import { studentSupportArea } from './student-support'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -98,7 +99,7 @@ export async function dispatchInboundToAiReply(
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
-    const requestedArea = explicitlyRequestedArea(latestUserMessage(messages));
+    const requestedArea = explicitlyRequestedArea(latestUserMessage(messages)) ?? studentSupportArea(latestUserMessage(messages), messages);
     if (requestedArea && requestedArea.toUpperCase() !== conv.ai_handoff_area) handedOff = false;
 
     // Account-wide throttle on the shared BYO key. Over the limit → skip

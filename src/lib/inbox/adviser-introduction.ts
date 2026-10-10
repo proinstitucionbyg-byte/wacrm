@@ -3,6 +3,18 @@ export interface AdviserIntroduction {
   area: string | null;
 }
 
+/** An old interaction must not suppress the presentation after a new transfer. */
+export function hasContactedSinceAssignment(
+  messages: { sender_type: string; sender_id?: string | null; created_at: string }[],
+  userId: string | undefined,
+  assignedAt?: string | null,
+): boolean {
+  if (!userId) return false;
+  const boundary = assignedAt ? Date.parse(assignedAt) : -Infinity;
+  if (Number.isNaN(boundary)) return false;
+  return messages.some((message) => message.sender_type === 'agent' && message.sender_id === userId && Date.parse(message.created_at) >= boundary);
+}
+
 /** Public-facing identity only; metadata must never grant permissions. */
 export function getAdviserNickname(metadata: unknown): string {
   if (!metadata || typeof metadata !== "object") return "";

@@ -27,7 +27,7 @@ export default function NotificationsPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
-
+  const [completing, setCompleting] = useState<string | null>(null);
   const load = useCallback(async () => {
     if (!accountId) return;
     const supabase = createClient();
@@ -43,6 +43,14 @@ export default function NotificationsPage() {
     }
     setNotifications((data ?? []) as Notification[]);
   }, [accountId]);
+
+  async function completeTask(n: Notification) {
+    setCompleting(n.id);
+    const {error} = await createClient().rpc('complete_system_task',{p_notification:n.id,p_completed:!n.completed_at});
+    if(error) toast.error('No se pudo actualizar el cumplimiento de la tarea.');
+    await load();
+    setCompleting(null);
+  }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -118,6 +126,8 @@ export default function NotificationsPage() {
       if (!n.read_at) markRead(n.id);
       if (n.target_url && /^https:\/\/docs\.google\.com\/spreadsheets\/d\//.test(n.target_url)) {
         window.open(n.target_url, '_blank', 'noopener,noreferrer');
+      } else if (n.target_url && /^\/(inbox|team-chat|enrollments)(?:[/?]|$)/.test(n.target_url)) {
+        router.push(n.target_url);
       } else if (n.team_thread_id) {
         router.push(`/team-chat?thread=${n.team_thread_id}`);
       } else if (n.conversation_id) {
@@ -171,9 +181,9 @@ export default function NotificationsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Notifications</h1>
+          <h1 className="text-2xl font-bold text-foreground">NOTIFICACIONES</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Conversations other teammates assign to you show up here.
+            Avisos del sistema, tareas del equipo y conversaciones asignadas. Leer un aviso no significa que la tarea este realizada.
           </p>
         </div>
         <Button
@@ -210,7 +220,7 @@ export default function NotificationsPage() {
             const Icon = TYPE_ICON[n.type] ?? Bell;
             const isUnread = !n.read_at;
             return (
-              <li key={n.id}>
+              <li key={n.id} className={n.type==='system_notice' ? 'rounded-xl border-l-4 border-sky-500' : undefined}>
                 <button
                   type="button"
                   onClick={() => handleClick(n)}
@@ -236,6 +246,7 @@ export default function NotificationsPage() {
                     />
                   </div>
                   <div className="min-w-0 flex-1">
+                    {n.type==='system_notice' && <span className="mb-1 block text-xs font-bold text-sky-500">SISTEMA</span>}
                     <div className="flex items-center gap-2">
                       <span
                         className={cn(
@@ -264,6 +275,10 @@ export default function NotificationsPage() {
                     </p>
                   </div>
                 </button>
+                {n.requires_action && <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3">
+                  <Button size="sm" variant={n.completed_at ? 'secondary' : 'outline'} disabled={completing===n.id} onClick={()=>void completeTask(n)}>{completing===n.id ? 'GUARDANDO…' : n.completed_at ? '✓ REALIZADO · DESMARCAR' : 'MARCAR COMO REALIZADO'}</Button>
+                  {n.completed_at && <span className="text-muted-foreground text-xs">Registrado el {new Date(n.completed_at).toLocaleString('es-PE',{timeZone:'America/Lima'})}. Responsable guardado para el reporte administrativo.</span>}
+                </div>}
               </li>
             );
           })}

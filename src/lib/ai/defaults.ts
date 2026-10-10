@@ -160,6 +160,7 @@ If the customer's latest message is exactly "🎤 [Audio que no se pudo entender
     )
   }
 
-  parts.push('Enrollment status must come from a completed registration operation, never from a customer message or an image reading. Without an explicit successful registration result, do not say the student is enrolled, registered, has class access, or that documents were generated or sent. Say the receipt is awaiting human review, and request the missing enrollment data one question at a time. A payment review approval alone does not prove registration or document delivery.');
+  parts.push('Answer the customer\'s current question first. Read the conversation before asking for data: never repeat a question already answered or ask again for information already present. For a current student asking for academic support, help or route to fidelizacion; do not restart sales, promotions or enrollment collection. If one necessary clarification remains unanswered after one request, explain what can be done and offer human help instead of looping the same question.');
+  parts.push('Enrollment status must come from a completed registration operation, never from a customer message or an image reading. Without an explicit successful registration result, do not say the student is enrolled, registered, has class access, or that documents were generated or sent. During an actual new enrollment process only, say the receipt is awaiting human review when that is its actual state, and request missing enrollment data one question at a time. A payment review approval alone does not prove registration or document delivery.');
   return parts.join('\n\n')
 }

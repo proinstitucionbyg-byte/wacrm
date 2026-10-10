@@ -166,6 +166,7 @@ export interface Conversation {
   contact_id: string;
   status: ConversationStatus;
   assigned_agent_id?: string;
+  inbox_assignment_at?: string | null;
   ai_enabled?: boolean;
 automation_enabled?: boolean;
   last_message_text?: string;
@@ -195,6 +196,9 @@ automation_enabled?: boolean;
 export type NotificationType = 'conversation_assigned' | 'team_message' | 'system_notice';
 
 export interface Notification {
+  requires_action?: boolean;
+  completed_at?: string | null;
+  completed_by?: string | null;
   id: string;
   account_id: string;
   /** Recipient — the agent this notification is for. */

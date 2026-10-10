@@ -110,6 +110,7 @@ interface MessageComposerProps {
   adviserIntroduction?: AdviserIntroduction | null;
   needsAdviserNickname?: boolean;
   alreadyContacted?: boolean;
+  assignmentAt?: string | null;
   conversationId: string;
   sessionExpired: boolean;
   onSend: (text: string, replyToId?: string) => void;
@@ -138,6 +139,7 @@ export function MessageComposer({
   adviserIntroduction,
   needsAdviserNickname,
   alreadyContacted,
+  assignmentAt,
   conversationId,
   sessionExpired,
   onSend,
@@ -602,9 +604,9 @@ export function MessageComposer({
       )}
       {adviserIntroduction && !readOnly && (
         <AdviserIntroductionCard
-          key={`${conversationId}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ''}:${Boolean(alreadyContacted)}`}
+          key={`${conversationId}:${assignmentAt ?? 'initial'}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ''}:${Boolean(alreadyContacted)}`}
           adviser={adviserIntroduction}
-          storageKey={`adviser-intro:${conversationId}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ''}`}
+          storageKey={`adviser-intro:${conversationId}:${assignmentAt ?? 'initial'}:${adviserIntroduction.name}:${adviserIntroduction.area ?? ''}`}
           alreadyContacted={alreadyContacted}
           disabled={inputsDisabled || sending || busy || drafting || recording}
           hasDraft={Boolean(text.trim() || draft || replyTo || interactiveOpen)}

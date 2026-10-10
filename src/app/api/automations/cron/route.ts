@@ -40,6 +40,8 @@ export async function GET(request: Request) {
   if (areaRoutingError) return NextResponse.json({ error: 'No se pudo actualizar la cola de areas' }, { status: 500 });
   const { error: noticesError } = await admin.rpc('publish_operational_notices');
   if (noticesError) return NextResponse.json({ error: 'No se pudieron actualizar los avisos' }, { status: 500 });
+  const { error: birthdaysError } = await admin.rpc('publish_birthday_notices');
+  if (birthdaysError) return NextResponse.json({ error: 'No se pudieron actualizar los avisos de cumpleanos' }, { status: 500 });
   const { data: due, error } = await admin
     .from('automation_pending_executions')
     .select('*')

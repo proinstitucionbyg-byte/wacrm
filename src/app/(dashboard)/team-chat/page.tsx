@@ -1,6 +1,7 @@
 'use client';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { Paperclip, Upload } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { TeamMemberProfile } from '@/components/inbox/team-member-profile';
@@ -38,6 +39,8 @@ function TeamConversation({
     [loadingOlder, setLoadingOlder] = useState(false);
   const [attachment, setAttachment] = useState<{ attachment_path: string; attachment_name: string } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   async function attach(file: File) {
     if (sending || uploading || thread.can_send === false) return;
     setUploading(true);
@@ -158,9 +161,11 @@ function TeamConversation({
     }
   }
   return (
-    <section className="border-border bg-card flex min-h-[32rem] flex-col rounded-lg border"
-      onDragOver={(event) => { if (thread.can_send !== false && event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
-      onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); if (event.dataTransfer.files.length === 1) void attach(event.dataTransfer.files[0]); else setError('Adjunta un archivo por mensaje.'); } }}>
+    <section className={`border-border bg-card relative flex min-h-[32rem] flex-col rounded-lg border ${dragging ? 'ring-2 ring-primary' : ''}`}
+      onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); if (thread.can_send !== false && !sending && !uploading) setDragging(true); } }}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
+      onDrop={(event) => { setDragging(false); if (event.dataTransfer.files.length) { event.preventDefault(); if (event.dataTransfer.files.length === 1) void attach(event.dataTransfer.files[0]); else setError('Adjunta un archivo por mensaje.'); } }}>
+      {dragging && <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/90"><p className="flex items-center gap-2 font-semibold"><Upload className="h-5 w-5" />SUELTA EL ARCHIVO PARA ADJUNTARLO</p></div>}
       <header className="border-border border-b p-4">
         <h2 className="font-semibold">
           {teamThreadTitle(thread, members, userId)}
@@ -240,9 +245,11 @@ function TeamConversation({
         <label htmlFor="team-message" className="text-sm">
           Mensaje al equipo
         </label>
-        <label className="block text-sm">{uploading ? 'SUBIENDO ARCHIVO…' : 'ADJUNTAR ARCHIVO (MAXIMO 16 MB)'}
-          <input type="file" disabled={sending || uploading || thread.can_send === false} onChange={(event) => { const file = event.target.files?.[0]; if (file) void attach(file); event.target.value = ''; }} />
-        </label>
+        <input ref={fileInput} aria-label="Seleccionar archivo para el chat interno" type="file" className="hidden" disabled={sending || uploading || thread.can_send === false} onChange={(event) => { const file = event.target.files?.[0]; if (file) void attach(file); event.target.value = ''; }} />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" variant="outline" disabled={sending || uploading || thread.can_send === false} onClick={() => fileInput.current?.click()}><Paperclip className="h-4 w-4" />{uploading ? 'SUBIENDO ARCHIVO…' : 'ADJUNTAR ARCHIVO'}</Button>
+          <span className="text-muted-foreground text-xs">O arrastra un archivo aqui · Maximo 16 MB · Pulsa Enviar para compartirlo</span>
+        </div>
         {attachment && <p className="text-sm">{attachment.attachment_name} <button type="button" disabled={sending} onClick={() => { setAttachment(null); attempt.current = null; }}>QUITAR</button></p>}
         <textarea
           id="team-message"

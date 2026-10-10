@@ -9,6 +9,12 @@ describe('automatic intake from compared evidence and official dates',()=>{
     expect(prepareAutomaticIntake(data,evidence,calendar,'2026-10-09T12:00:00Z')).toMatchObject({identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9],start_date:'2026-10-06'});
   });
   it('does not confirm identity from a photo alone',()=> expect(prepareAutomaticIntake(data,evidence.slice(1),calendar,'2026-10-09T12:00:00Z').identity_confirmed).not.toBe(true));
+  it('compares accented document labels without discarding document letters',()=>{
+    const written = {...evidence[0],content_text:'Nombres y apellidos: LUIS PALACIOS\nCarné de extranjería: AB 123456'};
+    const photo = {...evidence[1],image_analysis:{category:'identity_document',fields:{full_name:'LUIS PALACIOS',document_number:'AB123456'}}};
+    expect(prepareAutomaticIntake({...data,document_number:'AB123456'},[written,photo],calendar,'2026-10-09T12:00:00Z').identity_confirmed).toBe(true);
+    expect(prepareAutomaticIntake({...data,document_number:'123456'},[written,photo],calendar,'2026-10-09T12:00:00Z').identity_confirmed).not.toBe(true);
+  });
   it('leaves conflicting identity and promotions for review',()=> {
     const wrong = {...evidence[1],image_analysis:{category:'identity_document',fields:{full_name:'OTRA PERSONA',document_number:'12345678'}}};
     expect(prepareAutomaticIntake(data,[evidence[0],wrong],calendar,'2026-10-09T12:00:00Z').identity_confirmed).not.toBe(true);

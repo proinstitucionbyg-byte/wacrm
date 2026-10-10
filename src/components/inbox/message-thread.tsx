@@ -54,6 +54,7 @@ import { toast } from 'sonner';
 import {
   getAdviserIntroduction,
   getAdviserNickname,
+  hasContactedSinceAssignment,
 } from '@/lib/inbox/adviser-introduction';
 import { useCan } from '@/hooks/use-can';
 import {
@@ -202,6 +203,8 @@ export function MessageThread({
     (Profile & { area?: string | null })[]
   >([]);
   const canAssign = useCan('inbox.assign');
+  const [transferPicker, setTransferPicker] = useState(false);
+  const [transferArea, setTransferArea] = useState('');
   const [transfer, setTransfer] = useState<{
       agent: string | null;
       full: boolean;
@@ -1023,6 +1026,7 @@ export function MessageThread({
       if (!res.ok) throw Error(data.error);
       onAssignChange(conversation.id, transfer.agent);
       setTransfer(null);
+      setTransferPicker(false);
       onRefresh?.();
       toast.success(
         'Traspaso realizado. La presentación queda pendiente de Enviar.'
@@ -1248,6 +1252,7 @@ export function MessageThread({
             </DropdownMenu>
 
             {/* Assign dropdown */}
+            {canAssign && <Button variant="outline" onClick={() => { setTransfer(null); setTransferArea(''); setTransferPicker(true); }}>DERIVAR</Button>}
             <DropdownMenu>
               <DropdownMenuTrigger
                 disabled={!canAssign}
@@ -1428,7 +1433,8 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         key={conversation.id}
-        alreadyContacted={messages.some((message) => message.sender_type === 'agent' && message.sender_id === user?.id)}
+        assignmentAt={conversation.inbox_assignment_at}
+        alreadyContacted={hasContactedSinceAssignment(messages, user?.id, conversation.inbox_assignment_at)}
         adviserIntroduction={getAdviserIntroduction(
           user?.id,
           assignedAgentId,
@@ -1456,24 +1462,39 @@ export function MessageThread({
         onSelect={handleSendTemplate}
       />
       <Dialog
-        open={!!transfer}
+        open={!!transfer || transferPicker}
         onOpenChange={(v) => {
-          if (!v) setTransfer(null);
+          if (!v) { setTransfer(null); setTransferPicker(false); }
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {transfer?.agent
+              {transferPicker || transfer?.agent
                 ? 'TRASPASAR CONVERSACION'
                 : 'RETIRAR ASIGNACION'}
             </DialogTitle>
             <DialogDescription>
-              {transfer?.agent
+              {transferPicker || transfer?.agent
                 ? 'Elige qué historial verá la persona receptora. Su presentación usará su apodo y ella pulsará Enviar.'
                 : 'El chat quedará a cargo de la automatización, conservando sus controles actuales.'}
             </DialogDescription>
           </DialogHeader>
+          {transferPicker && <div className="space-y-3">
+            <label className="block text-sm">AREA DESTINO
+              <select className="bg-background border-border mt-1 block w-full rounded border p-2" value={transferArea} onChange={(event) => { setTransferArea(event.target.value); setTransfer(null); }}>
+                <option value="">SELECCIONAR AREA</option>
+                {[...new Set(profiles.map(p => p.area).filter((area): area is string => !!area))].sort().map(area => <option key={area} value={area}>{area}</option>)}
+              </select>
+            </label>
+            <label className="block text-sm">PERSONA QUE RECIBE
+              <select className="bg-background border-border mt-1 block w-full rounded border p-2" disabled={!transferArea} value={transfer?.agent ?? ''} onChange={(event) => { if (event.target.value) void handleAssignChange(event.target.value); else setTransfer(null); }}>
+                <option value="">SELECCIONAR DESTINATARIO</option>
+                {profiles.filter(p => p.area === transferArea).map(p => <option key={p.user_id} value={p.user_id}>{p.full_name}</option>)}
+              </select>
+            </label>
+            <p className="text-muted-foreground text-xs">La derivacion es directa. No requiere aceptacion del destinatario y conserva la automatizacion.</p>
+          </div>}
           {transfer?.agent && (
             <div className="space-y-3">
               <p className="text-sm font-medium">
@@ -1501,11 +1522,11 @@ export function MessageThread({
             <Button
               variant="ghost"
               disabled={transferring}
-              onClick={() => setTransfer(null)}
+              onClick={() => { setTransfer(null); setTransferPicker(false); }}
             >
               CANCELAR
             </Button>
-            <Button disabled={transferring} onClick={confirmTransfer}>
+            <Button disabled={transferring || (transferPicker && !transfer?.agent)} onClick={confirmTransfer}>
               {transferring ? 'TRASPASANDO…' : 'CONFIRMAR'}
             </Button>
           </DialogFooter>

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildAdviserIntroduction, getAdviserIntroduction, getAdviserNickname } from "./adviser-introduction";
+import { buildAdviserIntroduction, getAdviserIntroduction, getAdviserNickname, hasContactedSinceAssignment } from "./adviser-introduction";
 
 describe("presentación manual de la asesora", () => {
+  it('requires a new presentation after a new transfer to the same adviser',()=>{
+    const messages=[{sender_type:'agent',sender_id:'ashley',created_at:'2026-10-09T12:00:00Z'}];
+    expect(hasContactedSinceAssignment(messages,'ashley','2026-10-09T13:00:00Z')).toBe(false);
+    expect(hasContactedSinceAssignment(messages,'ashley','2026-10-09T11:00:00Z')).toBe(true);
+    expect(hasContactedSinceAssignment(messages,'other','2026-10-09T11:00:00Z')).toBe(false);
+  });
   it("prepara ventas con el apodo", () => {
     expect(buildAdviserIntroduction("Ashley", "VENTAS")).toBe(
       "Hola, ¿qué tal? Soy Ashley, tu asesora de ventas. A partir de ahora te acompañaré con tu atención. ¿En qué puedo ayudarte?",
