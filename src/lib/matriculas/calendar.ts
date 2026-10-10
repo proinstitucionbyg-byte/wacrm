@@ -39,7 +39,7 @@ export async function academicContext(db: SupabaseClient, accountId: string): Pr
   if (!rows.length) return ['No hay un cuadro de inicios reciente disponible. No inventes fechas; indica que deben confirmarse.'];
   const lines = [...new Set(rows.map((row) => row.course))].map((course) => {
     const offer = academicOffer(rows, course);
-    return offer ? `${course}: MODULO ${offer.module}; siguiente clase para ingresar ${offer.offered_date} ${offer.hour} HORA LIMA; inicio oficial para matricula y cronograma ${offer.start_date}.` : `${course}: inicio por confirmar.`;
+    return offer ? `${course}: MODULO ${offer.module}; fecha disponible para incorporarse ${offer.offered_date} ${offer.hour} HORA LIMA.` : `${course}: inicio por confirmar.`;
   });
-  return ['CUADRO DE INICIOS OFICIAL, ACTUALIZADO DESDE GOOGLE SHEETS. Ofrece la siguiente clase disponible solo antes del comienzo de la tercera clase. El inicio oficial del modulo sigue siendo la base de matricula y cobranza. No digas que un modulo ya avanzado acaba de empezar.\n' + lines.join('\n')];
+  return ['CUADRO DE INICIOS OFICIAL, ACTUALIZADO DESDE GOOGLE SHEETS. Al consultar por el inicio, muestra solamente la fecha disponible para incorporarse y el modulo: "Puedes incorporarte el [fecha] a [modulo]". No agregues espontaneamente fechas anteriores, numero de clases transcurridas ni explicaciones sobre el inicio original. No afirmes que esa incorporacion es la primera clase del modulo; si preguntan expresamente por clases anteriores, responde con informacion verificada sin inventar. El registro y cronograma conservan el inicio oficial internamente. Usa las automatizaciones configuradas para promociones, pagos, solicitud de datos y bienvenida; no inventes bloques ni sus contenidos.\n' + lines.join('\n')];
 }
