@@ -2,6 +2,7 @@ import type { EnrollmentData } from './enrollment';
 import type { IntakeMessage } from './collect-data';
 import { academicOffer, courseKey, type AcademicModule } from './calendar';
 import { declarationEvidence, isGuardianMessage } from './identity-evidence';
+import { quotedOfferPrices } from './offer-prices';
 export interface IntakeEvidence extends IntakeMessage { sender_type?: string; ai_generated?: boolean; created_at?: string }
 const key = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
 /** Matching written identifiers to the photo is not payment validation. The caller requires the CEO's payment decision first. */
@@ -34,11 +35,8 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => key(message.content_text ?? '').replace(/\\N/g, '\n').replace(/~[^~]*~/g, '').replace(/[*_]/g, '')).filter((text) => courseKey(text) === courseKey(next.course!));
     const prices = new Map<string, number[]>();
     for (const quote of quotes) {
-      const first = quote.match(/(?:1(?:RA|ERA)?\s*(?:CUOTA|MES)|PRIMER[AO]?\s*(?:MES|CUOTA))[^\n]{0,60}?(?:S\s*\/?\s*(\d+(?:[.,]\d{1,2})?)|(\d+[.,]\d{1,2})\s*SOLES)/);
-      const monthly = quote.match(/(?:MENSUALIDAD|SEGUND[AO]\s*(?:MES|CUOTA))[^\n]{0,60}?(?:S\s*\/?\s*(\d+(?:[.,]\d{1,2})?)|(\d+[.,]\d{1,2})\s*SOLES)/);
-      if (!first || !monthly || !/6\s*MESES|SEIS\s*MESES/.test(quote)) continue;
-      const values = [Number((first[1] || first[2]).replace(',', '.')), ...Array(5).fill(Number((monthly[1] || monthly[2]).replace(',', '.')))];
-      if (values.every((value) => value > 0)) prices.set(JSON.stringify(values), values);
+      const values = quotedOfferPrices(quote);
+      if (values) prices.set(JSON.stringify(values), values);
     }
     if (prices.size === 1) {
       next.prices = [...prices.values()][0];

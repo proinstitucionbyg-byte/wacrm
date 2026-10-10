@@ -310,6 +310,14 @@ function VERIFICAR_IDENTIDAD_CARPETA_(nombreCarpeta, nombre, documento) {
   const esperado = CLAVE_(nombre) + '-' + LIMPIAR_IDENTIFICADOR_(documento, false);
   if (CLAVE_(nombreCarpeta) !== esperado) throw new Error('NOMBRE Y DOCUMENTO NO COINCIDEN CON LA CARPETA EXISTENTE');
 }
+/** El puente CRM ya guarda originales en PRIMER PAGO: reutilizarlos, no copiarlos otra vez. */
+function ARCHIVO_EN_PAGO_(archivo, pago, nombre) {
+  const padres = archivo.getParents();
+  while (padres.hasNext()) if (padres.next().getId() === pago.getId()) return archivo;
+  const destino = nombre + '-' + archivo.getId() + '-' + CLAVE_(archivo.getName());
+  const existentes = pago.getFilesByName(destino);
+  return existentes.hasNext() ? existentes.next() : archivo.makeCopy(destino, pago);
+}
 function CARPETAS_Y_ARCHIVOS_(s, opciones) {
   const rootId = ID_DRIVE_(opciones['CARPETA GENERAL ID']); if (!rootId) return;
   const root = DriveApp.getFolderById(rootId), m = MAPA_(s), props = PropertiesService.getScriptProperties();
@@ -338,9 +346,9 @@ function CARPETAS_Y_ARCHIVOS_(s, opciones) {
         const id = ID_DRIVE_(v[0][j + 3]); if (!id) return;
         const fileKey = 'ARCHIVO:' + pago.getId() + ':' + id;
         if (props.getProperty(fileKey)) return;
-        const archivo = DriveApp.getFileById(id), destino = nombre + '-' + id + '-' + CLAVE_(archivo.getName());
-        const existentes = pago.getFilesByName(destino);
-        const copia = existentes.hasNext() ? existentes.next() : archivo.makeCopy(destino, pago);
+        const archivo = DriveApp.getFileById(id);
+        if (['BOLETA', 'CRONOGRAMA', 'FICHA'].indexOf(nombre) !== -1 && archivo.getMimeType() !== 'application/pdf') throw new Error(nombre + ' DEBE ESTAR EN PDF');
+        const copia = ARCHIVO_EN_PAGO_(archivo, pago, nombre);
         props.setProperty(fileKey, copia.getId());
       });
     } catch (error) { s.getRange(i + 2, m['LINK DE CARPETA DEL ESTUDIANTE']).setNote('REVISAR CARPETA: ' + error.message); }

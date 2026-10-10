@@ -21,6 +21,7 @@ import { runAutomationById } from '@/lib/automations/engine'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { academicContext } from '@/lib/matriculas/calendar'
 import { studentSupportArea } from './student-support'
+import { sentOfferPriceReply } from './sent-offer'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -112,6 +113,13 @@ export async function dispatchInboundToAiReply(
       console.warn(
         `[ai auto-reply] account ${accountId} hit the per-account rate limit — skipping this inbound.`,
       )
+      return
+    }
+
+    const offerReply = requestedArea ? null : sentOfferPriceReply(messages)
+    if (offerReply) {
+      const { data: claimed, error } = await db.rpc('claim_ai_reply_slot', { conversation_id: conversationId, max_replies: config.autoReplyMaxPerConversation })
+      if (!error && claimed === true) await engineSendText({ accountId, userId: configOwnerUserId, conversationId, contactId, text: offerReply, aiGenerated: true })
       return
     }
 

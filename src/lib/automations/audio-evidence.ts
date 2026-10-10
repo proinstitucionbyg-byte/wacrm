@@ -14,9 +14,10 @@ export async function automationAudioEvidence(args: {
     text = await transcribeSavedAudio({ db: args.db, accountId: args.accountId, url: args.url })
     if (!text) return undefined
     // Compare original JSON so a simultaneous editor change is never overwritten.
-    await args.db.from('automation_steps').update({ step_config: {
+    const { error } = await args.db.from('automation_steps').update({ step_config: {
       ...args.config, audio_transcript: text, audio_transcript_url: args.url,
-    } }).eq('id', args.stepId).eq('automation_id', args.automationId).eq('step_config', args.config)
+    } }).eq('id', args.stepId).eq('automation_id', args.automationId).eq('step_config', JSON.stringify(args.config))
+    if (error) console.error('[automation audio] transcript cache failed:', error.message)
   }
   return `[AUDIO ENVIADO: ${args.name}. TRANSCRIPCION AUTOMATICA; NO ES VALIDACION DE PAGO]\n${text}`
 }

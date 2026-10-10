@@ -108,6 +108,13 @@ beforeEach(() => {
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
+  it('answers prices from the sent audio without spending another generation call',async()=>{
+    h.buildConversationContext.mockResolvedValue([{role:'assistant',content:'[AUDIO ENVIADO: NUTRICION 19.90]\nMensualidad en 79.90. Primer mes 19.90. Seis meses.'},{role:'user',content:'Cuanto pagare cada mes?'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('S/79.90')}))
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.runAutomation).not.toHaveBeenCalled()
+  })
   it('runs the saved course automation without generating or sending replacement text',async()=>{
     h.state.autoResponders=[{id:'nutricion',name:'NUTRICION 19.90'}]
     h.buildConversationContext.mockResolvedValue([{role:'user',content:'Quiero informacion de nutricion'}])

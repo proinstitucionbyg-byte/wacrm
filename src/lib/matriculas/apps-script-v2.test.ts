@@ -7,6 +7,18 @@ const script = readFileSync(join(process.cwd(), 'docs/apps-script/MATRICULAS_V2.
 const headers = ['N°', 'FECHA DE HOY', 'HORA', 'INSTITUTO', 'ASESORA DE INGRESO', 'ASESORA DE VTAS.', 'NOMBRE COMPLETO', 'TIPO DE DOCUMENTO', 'NUMERO DE DOCUMENTO', 'F. NACIMIENTO', 'EDAD', 'CELULAR 1', 'CELULAR 2', 'DIRECCION', 'DEPARTAMENTO', 'DISTRITO', 'CORREO ELECTRONICO', 'LINK DE CARPETA DEL ESTUDIANTE', 'CURSO', 'FECHA DE INICIO', 'AGREGADOS AL WHATSAPP', 'PRIORIDAD', 'ESTADO', 'PROMO', 'OBSERVACIONES', 'OBSERVACION PARA FIDELIZACION', 'OBSERVACION PARA VENTAS', 'ID DE INICIO'];
 const options = [['PRIORIDAD ALTA DIAS', 1], ['PRIORIDAD MEDIA DIAS', 5], ['FUERA DE HORARIO', '']];
 const rules = [['MAINET', '11:00', '13:00', 3, 'ANTONELLA', 'SI', '', '', ''], ['ANTONELLA', '18:00', '22:00', 3, '', 'SI', '', '', '']];
+describe('archivos del primer pago sin duplicados',()=> {
+  it('reuses a CRM original that already belongs to the payment folder',()=> {
+    const context=createContext({});runInContext(script,context);
+    runInContext("copied=0; parents=[{getId:function(){return 'payment';}}]; file={getParents:function(){return {hasNext:function(){return parents.length>0;},next:function(){return parents.shift();}};},makeCopy:function(){copied++;}}; folder={getId:function(){return 'payment';}}; result=ARCHIVO_EN_PAGO_(file,folder,'VOUCHER');",context);
+    expect(runInContext('result===file && copied===0',context)).toBe(true);
+  });
+  it('reuses a previous manual copy in the target folder',()=> {
+    const context=createContext({});runInContext(script,context);
+    runInContext("file={getParents:function(){return {hasNext:function(){return false;}};},getId:function(){return 'source';},getName:function(){return 'voucher.jpg';},makeCopy:function(){throw Error('DUPLICADO');}}; folder={getId:function(){return 'payment';},getFilesByName:function(name){return {hasNext:function(){return true;},next:function(){return {name:name};}};}}; result=ARCHIVO_EN_PAGO_(file,folder,'VOUCHER');",context);
+    expect(runInContext('result.name',context)).toBe('VOUCHER-source-VOUCHER.JPG');
+  });
+});
 function setup() {
   const rows: unknown[][] = [headers.slice(), Array(headers.length).fill('')];
   const notes = new Map<string, string>(), formulas = new Map<string, string>();

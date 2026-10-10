@@ -58,6 +58,7 @@ import {
   hasContactedSinceAssignment,
 } from '@/lib/inbox/adviser-introduction';
 import { useCan } from '@/hooks/use-can';
+import { loadConversationMessages } from '@/lib/inbox/load-messages';
 import {
   Dialog,
   DialogContent,
@@ -350,18 +351,11 @@ export function MessageThread({
     (async () => {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-
-      if (cancelled) return;
-
-      if (error) {
+      try {
+        const data = await loadConversationMessages(supabase, conversationId, () => cancelled);
+        if (!cancelled) onMessagesLoadedRef.current(data);
+      } catch (error) {
         console.error('Failed to fetch messages:', error);
-      } else {
-        onMessagesLoadedRef.current(data ?? []);
       }
 
       if (!cancelled) setLoading(false);

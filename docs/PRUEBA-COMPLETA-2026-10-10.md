@@ -53,3 +53,35 @@ Este informe sustituye los estados historicos de pruebas pendientes del recorrid
 - output/FICHA-PRUEBA.pdf y .png
 
 Las evidencias con datos personales se conservan localmente y no se incluyen en Git.
+
+## Segunda revision integral — madrugada del 10-10-2026
+
+Esta revision encontro fallos posteriores a la primera prueba. Los resultados anteriores no deben interpretarse como una aprobacion total del producto.
+
+| Punto | Evidencia y alcance |
+| --- | --- |
+| Etiquetas y filtros | En el inbox del CEO se comprobo el filtro PAGO VALIDADO y las etiquetas PAGO VALIDADO / AREA FIDELIZACION en la conversacion de prueba. |
+| Derivacion y visibilidad | Prueba transaccional real con identidades autenticadas de ventas y fidelizacion: el destinatario ve el chat y sus etiquetas; el anterior deja de verlo; historial completo conserva mensajes y restringido limita los anteriores. ROLLBACK restauro todas las asignaciones. |
+| Permiso de pagos | Se denego y concedio payments/view al agente mediante las funciones reales y se comprobo has_member_permission en ambos casos. ROLLBACK, sin cambiar los permisos definitivos. |
+| Reprogramacion | Se simulo un cambio del cuadro mediante sync_academic_calendar: se genero REVISAR CAMBIO EN CUADRO DE INICIOS con accion pendiente y la cuenta de fidelizacion pudo completar el check. ROLLBACK, sin cambiar fechas reales. |
+| Proximo inicio | publish_operational_notices genero PREPARAR INGRESO A GRUPOS para un inicio dentro de dos dias. Una segunda ejecucion no duplico avisos. ROLLBACK. |
+| Adjuntos del inbox | Menu real visible con Photo, Video, Document y Voice note. No equivale a probar cada formato y tamaño posible. |
+| Cumpleanos | Campo Cumpleaños visible en Configuracion / Perfil, junto a Apodo; no se invento ninguna fecha. |
+| Navegacion | ATRAS y ADELANTE conservaron la carpeta PROMO 19.90-79.90 en la interfaz. CARPETA ANTERIOR esta disponible. |
+| Duplicar carpetas | Se encontro que se copiaban automatizaciones sin sus pasos y se mantenia su activacion. Corregido: copiar pasos y referencias padre/hijo, copias inactivas y limpieza de copias incompletas. Cubierto por pruebas automaticas de la ruta. |
+| Historial largo | Se encontro que el inbox podia quedar limitado por la cantidad maxima de filas de la API. Carga paginada explicita con comprobacion de errores y cancelacion al cambiar de chat; prueba con 758 mensajes. |
+| Reenvio | Pruebas automaticas existentes de texto, saltos de linea, imagen, audio, video, documento y bloqueo por falta de acceso aprobadas. El reenvio completo mediante dos sesiones visuales sigue sin acreditarse. |
+| PRIMER PAGO | Se encontraron dos copias adicionales de voucher/DNI creadas por la rutina manual. Solo esas copias fueron a la papelera recuperable; originales y PDF conservados. Se corrigio Codigo.gs para reutilizar originales ya presentes. Lectura de vuelta tras recargar confirmo el guardado. ACTUALIZAR_MATRICULAS_V2 finalizo 02:12:17 Lima; Drive siguio mostrando seis archivos, tres imagenes y tres PDF, sin hojas temporales. |
+| Audio promocional | WhatsApp recibio imagen y audio reales de NUTRICION 19.90 a las 02:05. El mensaje guardado contiene la transcripcion de la mensualidad 79.90 y primer mes 19.90. Se encontro y corrigio el filtro JSON que impedia reutilizar la transcripcion. |
+| Respuesta de precios | La primera prueba del audio aun pidio confirmar el curso. Corregido: responder los importes explicitos del audio enviado, sin otra llamada generativa, usando el mismo lector de importes para preparar la matricula. No confundir precios publicos con saldos privados. |
+
+Los audios se reutilizan cuando su URL no cambia. Si se reemplaza el contenido del archivo, usar una URL nueva para que no se conserve una transcripcion anterior. Una transcripcion automatica puede contener errores: si no identifica los importes y la duracion, no confirma automaticamente la oferta. No se reescriben las promociones ni los documentos ya enviados.
+
+### Limites que requieren completar una prueba real
+
+- Los perfiles, areas, cargos, porcentajes y apodos finales los configura el CEO. No se asignaron valores ficticios al equipo.
+- Las pruebas de servidor con identidades reales comprueban permisos, pero falta abrir dos sesiones de asesoras para acreditar visualmente el traspaso completo y el reparto con los valores definitivos.
+- No se ha acreditado un recorrido completo docente identificado -> cancelacion urgente -> cambio automatico de fechas. El aviso de cambio y su check si se probaron, con rollback.
+- Calendar/Meet y enlaces externos siguen aplazados por indicacion del usuario.
+
+Evidencia adicional local: output/primer-pago-sin-duplicados-2026-10-10.png.

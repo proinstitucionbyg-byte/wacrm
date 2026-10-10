@@ -82,7 +82,12 @@ export async function POST(request: Request) {
       )
     }
 
-    // 4. Duplicar las automatizaciones
+    const createdIds: string[] = []
+    const cleanupCopy = async () => {
+      if (createdIds.length) await admin.from("automations").delete().in("id", createdIds).eq("account_id", ctx.accountId)
+      await admin.from("automation_folders").delete().eq("id", newFolder.id).eq("account_id", ctx.accountId)
+    }
+    // 4. Duplicar las automatizaciones y sus pasos, sin activarlas.
     for (const automation of automations ?? []) {
       const {
         id,
@@ -98,11 +103,13 @@ export async function POST(request: Request) {
           account_id: ctx.accountId,
           folder_id: newFolder.id,
           name: `${automation.name} (Copia)`,
+          is_active: false,
         })
         .select("id")
         .single()
 
       if (automationError || !newAutomation) {
+        await cleanupCopy()
         return NextResponse.json(
           {
             error:
@@ -111,6 +118,24 @@ export async function POST(request: Request) {
           },
           { status: 500 },
         )
+      }
+      createdIds.push(newAutomation.id)
+      const { data: steps, error: stepsError } = await admin.from("automation_steps")
+        .select("id, parent_step_id, branch, step_type, step_config, position")
+        .eq("automation_id", automation.id)
+      if (stepsError) {
+        await cleanupCopy()
+        return NextResponse.json({ error: stepsError.message }, { status: 500 })
+      }
+      if (steps?.length) {
+        const ids = new Map(steps.map(step => [step.id, crypto.randomUUID()]))
+        const rows = steps.map(step => ({ ...step, id: ids.get(step.id), automation_id: newAutomation.id,
+          parent_step_id: step.parent_step_id ? ids.get(step.parent_step_id) : null }))
+        const { error: copyStepsError } = await admin.from("automation_steps").insert(rows)
+        if (copyStepsError) {
+          await cleanupCopy()
+          return NextResponse.json({ error: copyStepsError.message }, { status: 500 })
+        }
       }
     }
 

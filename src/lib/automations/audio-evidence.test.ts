@@ -26,7 +26,7 @@ describe('saved promotion audio evidence', () => {
     h.read.mockResolvedValue('Segundo mes 59.90 soles')
     const { args, chain } = setup({ audio_transcript: '79.90', audio_transcript_url: 'old' })
     expect(await automationAudioEvidence(args)).toContain('59.90')
-    expect(chain.eq).toHaveBeenCalledWith('step_config', args.config)
+    expect(chain.eq).toHaveBeenCalledWith('step_config', JSON.stringify(args.config))
     expect(chain.eq).toHaveBeenCalledWith('automation_id', 'automation')
   })
   it('does not fabricate prices when transcription fails', async () => {
