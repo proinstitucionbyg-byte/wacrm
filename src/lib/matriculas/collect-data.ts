@@ -100,8 +100,11 @@ export function collectEnrollmentData(
       'address',
       'department',
       'district',
-    ] as const)
+    ] as const) {
+      // The reverse may contain electoral/printing codes, not the holder's ID.
+      if ((field === 'document_number' || field === 'document_type') && !message.image_analysis.fields?.full_name) continue;
       add(field, message.image_analysis.fields?.[field]);
+    }
   }
   const next = { ...data };
   // Conflicting OCR/text values remain empty for review; existing edits always win.

@@ -31,6 +31,13 @@ const back: IntakeMessage = {
   },
 };
 describe('deterministic chat intake', () => {
+  it('does not replace the holder document with an electoral code from the reverse',()=>{
+    const reverse={...back,image_analysis:{category:'identity_document',fields:{...back.image_analysis?.fields,document_type:'Constancia de sufragio',document_number:'000379'}}};
+    const value=collectEnrollmentData({},[{...front,content_text:null},reverse]);
+    expect(value.document_number).toBe('12345678');
+    expect(value.document_type).toBe('DNI');
+    expect(value.address).toBe('CALLE UNO 123');
+  });
   it('extracts labelled caption data, both DNI faces, course and promotion without approval', () => {
     const sameName = {
       ...front,

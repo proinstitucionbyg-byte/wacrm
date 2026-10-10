@@ -20,7 +20,7 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     const photos = customer.filter((message) => message.image_analysis?.category === 'identity_document');
     const consistent = photos.every((photo) => {
       const f = photo.image_analysis?.fields;
-      return (!f?.full_name || key(String(f.full_name)) === key(next.full_name!)) && (!f?.document_number || key(String(f.document_number)).replace(/\s/g, '') === next.document_number);
+      return !f?.full_name || (key(String(f.full_name)) === key(next.full_name!) && (!f.document_number || key(String(f.document_number)).replace(/\s/g, '') === next.document_number));
     });
     const front = photos.some((photo) => key(String(photo.image_analysis?.fields?.full_name ?? '')) === key(next.full_name!) && String(photo.image_analysis?.fields?.document_number ?? '').replace(/\s/g, '') === next.document_number);
     if (consistent && front && writtenNames.size === 1 && writtenNames.has(key(next.full_name)) && writtenDocs.size === 1 && writtenDocs.has(next.document_number)) next.identity_confirmed = true;

@@ -5,6 +5,10 @@ const calendar: AcademicModule[] = [{ course: 'NUTRICION Y DIETETICA', module: '
 const evidence: IntakeEvidence[] = [{ id:'text',sender_type:'customer',content_text:'NOMBRE: LUIS PALACIOS\nDNI: 12345678' }, { id:'photo',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'LUIS PALACIOS',document_number:'12345678'}} }, { id:'promo',sender_type:'bot',created_at:'2026-10-08T10:00:00Z',content_text:'NUTRICION Y DIETETICA\\nMensualidad: S/79.90\\n1ra Cuota + Matricula: S/*19.90*\\nDuracion: 6 meses' }];
 const data = {full_name:'LUIS PALACIOS',document_number:'12345678',course:'NUTRICION Y DIETETICA'};
 describe('automatic intake from compared evidence and official dates',()=>{
+  it('ignores an electoral code on the reverse while retaining front ID comparison',()=>{
+    const reverse: IntakeEvidence={id:'reverse',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{document_number:'000379',address:'CALLE UNO'}}};
+    expect(prepareAutomaticIntake(data,[...evidence,reverse],calendar,'2026-10-09T12:00:00Z').identity_confirmed).toBe(true);
+  });
   it('compares written and photographed data and freezes the written offer',()=>{
     expect(prepareAutomaticIntake(data,evidence,calendar,'2026-10-09T12:00:00Z')).toMatchObject({identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9],start_date:'2026-10-06'});
   });
