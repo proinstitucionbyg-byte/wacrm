@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
-import { requireRole, toErrorResponse } from "@/lib/auth/account"
+import { toErrorResponse } from "@/lib/auth/account"
+import { requirePermission } from "@/lib/auth/permissions"
 import { supabaseAdmin } from "@/lib/automations/admin-client"
 
 export async function GET() {
   try {
-    const ctx = await requireRole("agent")
+    const ctx = await requirePermission("automations", "view")
     const admin = supabaseAdmin()
 
     const { data, error } = await admin
@@ -28,7 +29,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole("agent")
+    const ctx = await requirePermission("automations", "create")
     const body = await request.json().catch(() => null)
 
     const name =
@@ -110,7 +111,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const ctx = await requireRole("agent")
+    const ctx = await requirePermission("automations", "edit")
     const body = await request.json().catch(() => null)
 
     const id =
@@ -236,7 +237,7 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const ctx = await requireRole("agent")
+    const ctx = await requirePermission("automations", "delete")
     const body = await request.json().catch(() => null)
 
     const id =

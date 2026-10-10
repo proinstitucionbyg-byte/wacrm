@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
-import { requireRole, toErrorResponse } from "@/lib/auth/account"
+import { toErrorResponse } from "@/lib/auth/account"
+import { requirePermission } from "@/lib/auth/permissions"
 import { supabaseAdmin } from "@/lib/automations/admin-client"
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole("agent")
+    const ctx = await requirePermission("automations", "create")
     const body = await request.json().catch(() => null)
 
     const sourceId =

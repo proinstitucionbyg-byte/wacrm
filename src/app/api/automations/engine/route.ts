@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { toErrorResponse } from '@/lib/auth/account'
+import { requirePermission } from '@/lib/auth/permissions'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import type { AutomationTriggerType } from '@/types'
 
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
   // at least `agent`; a viewer must not be able to trigger sends.
   let accountId: string
   try {
-    const ctx = await requireRole('agent')
+    const ctx = await requirePermission('automations', 'edit')
     accountId = ctx.accountId
   } catch (err) {
     return toErrorResponse(err)

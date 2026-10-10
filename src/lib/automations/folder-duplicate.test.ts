@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({ role:vi.fn(), calls:[] as {table:string;op:string;payload:unknown}[], failSteps:false }));
-vi.mock('@/lib/auth/account', () => ({ requireRole:h.role, toErrorResponse:()=>new Response(null,{status:403}) }));
+vi.mock('@/lib/auth/account', () => ({ toErrorResponse:()=>new Response(null,{status:403}) }));
+vi.mock('@/lib/auth/permissions', () => ({ requirePermission:h.role }));
 vi.mock('@/lib/automations/admin-client', () => ({ supabaseAdmin:()=>({from:(table:string)=>{
   let op='select'; let payload:unknown;
   const result=()=>{

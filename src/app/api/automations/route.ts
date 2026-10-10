@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { toErrorResponse } from '@/lib/auth/account'
+import { requirePermission } from '@/lib/auth/permissions'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { getTemplate } from '@/lib/automations/templates'
 import { insertSteps, type BuilderStepInput } from '@/lib/automations/steps-tree'
@@ -10,6 +11,7 @@ import {
 } from '@/lib/automations/validate'
 
 export async function GET() {
+  try { await requirePermission('automations', 'view') } catch (err) { return toErrorResponse(err) }
   const supabase = await createClient()
   const {
     data: { user },
@@ -29,7 +31,7 @@ export async function POST(request: Request) {
   // requires `agent`, but this route inserts via the service-role client
   // which bypasses RLS, so the role must be enforced here.
   try {
-    await requireRole('agent')
+    await requirePermission('automations', 'create')
   } catch (err) {
     return toErrorResponse(err)
   }

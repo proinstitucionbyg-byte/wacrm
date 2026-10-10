@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { toErrorResponse } from '@/lib/auth/account'
+import { requirePermission } from '@/lib/auth/permissions'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import {
   loadStepsTree,
@@ -24,6 +25,7 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  try { await requirePermission('automations', 'view') } catch (err) { return toErrorResponse(err) }
   const { id } = await params
   const user = await requireUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -53,7 +55,7 @@ export async function PATCH(
   // requires `agent`, but this route mutates via the service-role client
   // which bypasses RLS, so enforce the role here.
   try {
-    await requireRole('agent')
+    await requirePermission('automations', 'edit')
   } catch (err) {
     return toErrorResponse(err)
   }
@@ -141,7 +143,7 @@ export async function DELETE(
   // Deleting an automation is a write — enforce `agent` (the service-role
   // client below bypasses the agent-gated automations_delete RLS).
   try {
-    await requireRole('agent')
+    await requirePermission('automations', 'delete')
   } catch (err) {
     return toErrorResponse(err)
   }

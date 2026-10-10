@@ -63,6 +63,7 @@ Esta revision encontro fallos posteriores a la primera prueba. Los resultados an
 | Etiquetas y filtros | En el inbox del CEO se comprobo el filtro PAGO VALIDADO y las etiquetas PAGO VALIDADO / AREA FIDELIZACION en la conversacion de prueba. |
 | Derivacion y visibilidad | Prueba transaccional real con identidades autenticadas de ventas y fidelizacion: el destinatario ve el chat y sus etiquetas; el anterior deja de verlo; historial completo conserva mensajes y restringido limita los anteriores. ROLLBACK restauro todas las asignaciones. |
 | Permiso de pagos | Se denego y concedio payments/view al agente mediante las funciones reales y se comprobo has_member_permission en ambos casos. ROLLBACK, sin cambiar los permisos definitivos. |
+| Permisos de automatizaciones | Se detectaron rutas que solo exigian rol agente, sin consultar el permiso especifico. Lectura, creacion, edicion, eliminacion, duplicacion y ejecucion manual ahora consultan automations/view, create, edit o delete segun corresponda. Doce pruebas de acceso denegado verifican que se bloquea antes de acceder a los datos. |
 | Reprogramacion | Se simulo un cambio del cuadro mediante sync_academic_calendar: se genero REVISAR CAMBIO EN CUADRO DE INICIOS con accion pendiente y la cuenta de fidelizacion pudo completar el check. ROLLBACK, sin cambiar fechas reales. |
 | Proximo inicio | publish_operational_notices genero PREPARAR INGRESO A GRUPOS para un inicio dentro de dos dias. Una segunda ejecucion no duplico avisos. ROLLBACK. |
 | Adjuntos del inbox | Menu real visible con Photo, Video, Document y Voice note. No equivale a probar cada formato y tamaño posible. |
@@ -80,8 +81,11 @@ Los audios se reutilizan cuando su URL no cambia. Si se reemplaza el contenido d
 ### Limites que requieren completar una prueba real
 
 - Los perfiles, areas, cargos, porcentajes y apodos finales los configura el CEO. No se asignaron valores ficticios al equipo.
+- La pantalla real de miembros mostraba reparto desactivado y total 0%: no corresponde afirmar que ya esta repartiendo nuevos leads. El CEO dispone de los selectores y del boton Guardar areas y reparto.
 - Las pruebas de servidor con identidades reales comprueban permisos, pero falta abrir dos sesiones de asesoras para acreditar visualmente el traspaso completo y el reparto con los valores definitivos.
 - No se ha acreditado un recorrido completo docente identificado -> cancelacion urgente -> cambio automatico de fechas. El aviso de cambio y su check si se probaron, con rollback.
 - Calendar/Meet y enlaces externos siguen aplazados por indicacion del usuario.
 
 Evidencia adicional local: output/primer-pago-sin-duplicados-2026-10-10.png.
+
+Comprobacion local final de este lote: 1018 pruebas en 110 archivos aprobadas; compilacion de produccion y TypeScript aprobados, 74 paginas. El calendario sincronizado se consulto de nuevo: cinco cursos, dos modulos por curso, ocho clases por modulo y actualizacion automatica registrada a las 02:56 Lima. Esto acredita sincronizacion del calendario existente, no una cancelacion urgente nueva por mensaje de docente.
