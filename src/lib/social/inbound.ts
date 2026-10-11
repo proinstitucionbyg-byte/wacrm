@@ -1,9 +1,11 @@
 import type { SocialChannel } from './meta-api'
+import { parseReferral } from '@/lib/inbox/referral'
 
 type RecordValue = Record<string, unknown>
 const record = (value: unknown): RecordValue => value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
 const string = (value: unknown): string => typeof value === 'string' ? value : ''
 export interface SocialInbound {
+  referral?: Record<string, string> | null
   assetId: string
   senderId: string
   messageId: string
@@ -44,7 +46,8 @@ export function parseSocialInbound(channel: SocialChannel, body: unknown, assetI
       const timestamp = typeof event.timestamp === 'number' ? event.timestamp : Date.now()
       const date = new Date(timestamp)
       if (!Number.isFinite(date.getTime())) continue
-      result.push({ assetId, senderId, messageId, text, replyId, replyTo: string(record(message.reply_to).mid) || null, createdAt: date.toISOString(), parts })
+      result.push({ assetId, senderId, messageId, text, replyId, replyTo: string(record(message.reply_to).mid) || null, createdAt: date.toISOString(), parts,
+        referral: parseReferral(message.referral ?? postback.referral ?? event.referral) })
     }
   }
   return result

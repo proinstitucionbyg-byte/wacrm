@@ -4,6 +4,10 @@ import { parseSocialInbound } from './inbound'
 const event = (mid = 'm1') => ({ sender: { id: '456' }, recipient: { id: '123' }, timestamp: 1791691200000, message: { mid, text: 'Información de nutrición' } })
 const body = (events: unknown[] = [event()], id = '123', object = 'instagram') => ({ object, entry: [{ id, messaging: events }] })
 describe('social webhook parser', () => {
+  it('preserves referral evidence from the event without manufacturing a campaign name', () => {
+    const raw = {...event(), referral:{ad_id:'998',source:'ADS',campaign_name:'not supplied by the supported field'}};
+    expect(parseSocialInbound('messenger',body([raw],'123','page'),'123')[0].referral).toEqual({ad_id:'998',source:'ADS'});
+  })
   it('keeps every message in a batch', () => {
     expect(parseSocialInbound('instagram', body([event(), event('m2')]), '123').map(e => e.messageId)).toEqual(['m1', 'm2'])
   })

@@ -48,6 +48,11 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllEnvs())
 describe('social intake', () => {
+  it('stores supplied referral evidence on the original inbound message', async () => {
+    const {db,writes}=database([ok({id:'contact',phone:''}),ok({id:'conv'}),ok(),{count:0},ok({id:'msg'}),ok()]);
+    await storeSocialInbound(db,'messenger',account,{...incoming,referral:{ad_id:'998',source:'ADS'}});
+    expect(writes).toContainEqual(expect.objectContaining({table:'messages',value:expect.objectContaining({source_referral:{ad_id:'998',source:'ADS'}})}));
+  })
   it('stores a social message and collects enrollment data', async () => {
     const { db, writes, filters } = database([ok({ id: 'contact', phone: '' }), ok({ id: 'conv' }), ok(), { count: 0 }, ok({ id: 'msg' }), ok()])
     const context = await storeSocialInbound(db, 'instagram', account, incoming)

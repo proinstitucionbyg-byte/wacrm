@@ -17,6 +17,7 @@ import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
 import { startEnrollmentSequence } from '@/lib/matriculas/sequence'
 import { collectConversationEnrollments } from '@/lib/matriculas/collect'
 import { logAiUsage } from '@/lib/ai/usage'
+import { parseReferral } from '@/lib/inbox/referral'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
@@ -44,6 +45,7 @@ function supabaseAdmin() {
 }
 
 interface WhatsAppMessage {
+  referral?: unknown
     user_id?: string
   from_user_id?: string
   id: string
@@ -756,6 +758,7 @@ async function processMessage(
     // behave identically.
     interactive_reply_id: interactiveReplyId,
     image_analysis: imageAnalysis,
+    source_referral: parseReferral(message.referral),
   })
 
   if (msgError) {

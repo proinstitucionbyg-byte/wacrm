@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { quoteReportCell } from '@/lib/inbox/report-csv';
 import { CaseReports } from '@/components/reports/case-reports';
+import { SourceReports } from '@/components/reports/source-reports';
 type Count={direction:string;quantity:number;phrase?:string;word?:string};
 type Report={period_kind:string;period_start:string;period_end:string;phrases:Count[];words:Count[]};
 
@@ -28,5 +29,6 @@ export default function ReportsPage(){
  <div className="flex flex-wrap gap-2"><Button variant={mode==='phrases'?'default':'outline'} onClick={()=>setMode('phrases')}>FRASES COMPLETAS</Button><Button variant={mode==='words'?'default':'outline'} onClick={()=>setMode('words')}>PRIMERA PALABRA</Button><Input className="max-w-sm" placeholder="Buscar frase o palabra…" value={filter} onChange={e=>setFilter(e.target.value)}/></div>
  {loading?<p>Cargando…</p>:error?<p className="text-destructive">{error}</p>:!rows.length?<p>El primer informe se generará el próximo sábado a las 7:00 a. m.</p>:rows.map(report=><section key={report.period_kind+report.period_start} className="rounded-xl border p-4 space-y-3"><div className="flex justify-between flex-wrap gap-2"><div><h2 className="font-semibold">{report.period_kind==='week'?'SEMANA COMPLETA':'ACUMULADO MENSUAL'}</h2><p className="text-xs text-muted-foreground">{new Date(report.period_start).toLocaleString('es-PE',{timeZone:'America/Lima'})} a {new Date(report.period_end).toLocaleString('es-PE',{timeZone:'America/Lima'})}</p></div><Button size="sm" variant="outline" onClick={()=>exportCsv(report)}>DESCARGAR CSV</Button></div><div className="max-h-[28rem] overflow-auto"><table className="w-full text-sm"><thead className="sticky top-0 bg-card"><tr><th className="text-left p-2">Dirección</th><th className="text-left p-2">{mode==='phrases'?'Primera frase':'Primera palabra'}</th><th className="text-right p-2">Cantidad</th></tr></thead><tbody>{report[mode].filter(r=>(r.phrase??r.word??'').includes(filter.toLowerCase())).map((row,i)=><tr key={i} className="border-t"><td className="p-2 align-top">{row.direction==='ENTRANTE'?'Estudiante':'Institución / asesora'}</td><td className="p-2 whitespace-pre-wrap break-words">{row.phrase??row.word}</td><td className="p-2 text-right align-top">{row.quantity}</td></tr>)}</tbody></table>{!report[mode].length&&<p>No hubo primeras frases en este periodo.</p>}</div></section>)}
  {accountId&&<CaseReports accountId={accountId}/>}
+ <SourceReports/>
  </div>;
 }

@@ -88,6 +88,7 @@ export async function storeSocialInbound(db: SupabaseClient, channel: SocialChan
       content_text: text, media_url: mediaUrl, message_id: metaId, status: 'delivered',
       created_at: inbound.createdAt, interactive_reply_id: index === 0 ? inbound.replyId : null,
       reply_to_message_id: replyToId, image_analysis: imageAnalysis,
+      source_referral: index === 0 ? inbound.referral ?? null : null,
     }).select('id').single()
     if (inserted.error || !inserted.data) throw inserted.error ?? new Error('No se guardó el mensaje social.')
     if (imageAnalysis?.category === 'payment_receipt') {
