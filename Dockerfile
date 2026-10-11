@@ -26,6 +26,9 @@ RUN npm run build
 
 FROM node:20-alpine AS runner
 
+# Instagram Facebook Login accepts AAC/M4A audio, not WhatsApp Ogg/Opus.
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /app
 
 ENV NODE_ENV=production

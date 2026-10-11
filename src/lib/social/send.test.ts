@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 const transport = vi.hoisted(() => vi.fn())
+const convertAudio = vi.hoisted(() => vi.fn())
+vi.mock('./instagram-audio', () => ({ instagramAudioUrl: convertAudio }))
 vi.mock('./meta-api', async importOriginal => ({ ...await importOriginal<typeof import('./meta-api')>(), sendSocialPart: transport }))
 import { sendSocialMessage, type SocialSendInput } from './send'
 
@@ -27,9 +29,22 @@ beforeEach(() => {
   vi.stubEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID', '123')
   vi.stubEnv('INSTAGRAM_ACCESS_TOKEN', 'test-token')
   transport.mockResolvedValue('meta-confirmation')
+  convertAudio.mockResolvedValue('https://example.org/converted.m4a')
 })
 afterEach(() => vi.unstubAllEnvs())
 describe('shared social send', () => {
+  it('sends converted Instagram audio but keeps the original recording in the CRM', async () => {
+    const { db, writes } = database([{ data: { id: 'conv' } }, { data: { id: 'internal' } }, { error: null }])
+    await sendSocialMessage(db, { ...input, messageType: 'audio', text: null, mediaUrl: 'https://example.org/original.ogg' })
+    expect(convertAudio).toHaveBeenCalledWith('account', 'https://example.org/original.ogg')
+    expect(transport.mock.calls[0][3].message.attachment.payload.url).toBe('https://example.org/converted.m4a')
+    expect(writes[0]).toEqual(['messages', expect.objectContaining({ content_type: 'audio', media_url: 'https://example.org/original.ogg' })])
+  })
+  it('does not prepare private media for an inaccessible conversation', async () => {
+    const { db } = database([{ data: null }])
+    await expect(sendSocialMessage(db, { ...input, messageType: 'audio', mediaUrl: 'https://example.org/original.ogg' })).rejects.toThrow('conversación')
+    expect(convertAudio).not.toHaveBeenCalled()
+  })
   it('rejects a conversation outside the selected account before sending', async () => {
     const { db, filters } = database([{ data: null }])
     await expect(sendSocialMessage(db, input)).rejects.toThrow('conversación')

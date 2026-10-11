@@ -46,6 +46,8 @@
 - La documentación oficial de Instagram Messaging con Facebook Login indica POST /PAGE-ID/messages con token de página. El código estaba enviando al identificador de Instagram. Se corrige únicamente el destino del envío usando MESSENGER_PAGE_ID; se conserva INSTAGRAM_ACCESS_TOKEN y el identificador de Instagram para validar eventos entrantes. Fuente: https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/send-message
 - 1118 pruebas aprobadas en 118 archivos y build de producción correcto. Pendiente confirmar la entrega real después de publicar esta corrección; el diagnóstico anterior de permisos no basta para descartar este error de ruta.
 - Messenger ya confirmó una respuesta real con imagen, texto y audio del bloque original de Nutrición después de renovar su clave.
+- Commit 8068f64 publicado: EasyPanel Success 2026-10-11 10:38:20 UTC. Prueba IG-LUIS-1011D: entrega real de la imagen y el texto original de Nutrición en Instagram. El bloqueo de autorización desapareció con la ruta correcta y sin cambiar la clave. El audio del bloque falló con código 100; no considerar todavía el bloque completo aprobado.
+- Se prepara conversión del audio original Ogg/Opus a M4A/AAC para Instagram exclusivamente. El archivo original y WhatsApp se conservan; Meta recibe un enlace privado temporal. Se añade ffmpeg al contenedor, descarga limitada y protección contra listas de reproducción, con limpieza de archivos temporales. 1123 pruebas aprobadas; entrega real del audio pendiente de la siguiente publicación.
 
 ## Nuevos requisitos registrados, pendientes de implementación
 

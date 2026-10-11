@@ -20,7 +20,12 @@ export async function sendSocialMessage(db: SupabaseClient, input: SocialSendInp
   const { data: conversation, error } = await db.from('conversations').select('id')
     .eq('id', input.conversationId).eq('account_id', input.accountId).eq('contact_id', input.contactId).maybeSingle()
   if (error || !conversation) throw new Error('No puedes enviar a esta conversación.')
-  const parts = socialMessageParts(input.channel, input)
+  let prepared = input
+  if (input.channel === 'instagram' && input.messageType === 'audio' && input.mediaUrl) {
+    const { instagramAudioUrl } = await import('./instagram-audio')
+    prepared = { ...input, mediaUrl: await instagramAudioUrl(input.accountId, input.mediaUrl) }
+  }
+  const parts = socialMessageParts(input.channel, prepared)
   let metaId = '', internalId = ''
   for (const part of parts) {
     metaId = await sendSocialPart(input.channel, config, input.externalId, part)
@@ -30,7 +35,7 @@ export async function sendSocialMessage(db: SupabaseClient, input: SocialSendInp
       ...(input.senderId ? { sender_id: input.senderId } : {}),
       content_type: part.contentType,
       content_text: part.contentText ?? (part.contentType === 'audio' ? input.transcript ?? null : null),
-      media_url: part.mediaUrl ?? null,
+      media_url: (part.contentType === 'audio' ? input.mediaUrl : part.mediaUrl) ?? null,
       interactive_payload: part.interactivePayload ?? null,
       message_id: metaId, status: 'sent', ai_generated: input.aiGenerated ?? false,
     }).select('id').single()
