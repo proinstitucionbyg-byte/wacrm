@@ -9,7 +9,7 @@ export function sentOfferPriceReply(messages: ChatMessage[]): string | null {
   const course = [...messages].reverse().map(message => courseKey(message.content)).find(Boolean);
   if (!course) return null;
   for (const message of [...messages].reverse()) {
-    if (message.role !== 'assistant' || !message.content.startsWith('[AUDIO ENVIADO:') || courseKey(message.content) !== course) continue;
+    if (message.role !== 'assistant' || !/^\[(?:AUDIO|OFERTA) ENVIAD[OA]:/.test(message.content) || courseKey(message.content) !== course) continue;
     const prices = quotedOfferPrices(message.content);
     // Never fall back to an older audio if the latest offer is incomplete.
     if (!prices) return null;

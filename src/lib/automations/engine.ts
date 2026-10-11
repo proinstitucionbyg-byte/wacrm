@@ -369,6 +369,7 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
 }
 
 interface ExecuteArgs {
+  writtenOfferText?: string
   automation: Automation
   contactId: string | null
   context: AutomationContext
@@ -521,6 +522,7 @@ console.log(step.step_config)
         contactId: args.contactId,
         text,
       })
+      args.writtenOfferText = [args.writtenOfferText, text].filter(Boolean).join('\n')
       return `sent via Meta (${whatsapp_message_id})`
     }
 
@@ -611,6 +613,7 @@ console.log('======================')
     db, accountId: args.automation.account_id, automationId: args.automation.id,
     name: args.automation.name, stepId: step.id,
     config: step.step_config as Record<string, unknown>, url: mediaUrl,
+    writtenText: args.writtenOfferText,
   }) : undefined
   const { whatsapp_message_id } = await engineSendMedia({
     accountId: args.automation.account_id,
@@ -623,6 +626,10 @@ console.log('======================')
     filename: rawCfg.filename,
     transcript,
   })
+
+  if (mediaType === 'image' && rawCfg.caption) {
+    args.writtenOfferText = [args.writtenOfferText, rawCfg.caption].filter(Boolean).join('\n')
+  }
 
   return `media sent via Meta (${whatsapp_message_id})`
 }

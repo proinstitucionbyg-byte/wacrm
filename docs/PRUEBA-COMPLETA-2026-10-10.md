@@ -89,3 +89,26 @@ Los audios se reutilizan cuando su URL no cambia. Si se reemplaza el contenido d
 Evidencia adicional local: output/primer-pago-sin-duplicados-2026-10-10.png.
 
 Comprobacion local final de este lote: 1018 pruebas en 110 archivos aprobadas; compilacion de produccion y TypeScript aprobados, 74 paginas. El calendario sincronizado se consulto de nuevo: cinco cursos, dos modulos por curso, ocho clases por modulo y actualizacion automatica registrada a las 02:56 Lima. Esto acredita sincronizacion del calendario existente, no una cancelacion urgente nueva por mensaje de docente.
+
+### Cierre de publicacion y prueba real posterior
+
+- EasyPanel confirmo Success para e0fb9c3 a las 03:07:12 Lima (08:07:12 UTC). Incluye los cambios anteriores de precios, historial y duplicacion; no se reinicio otro despliegue mientras construia.
+- WhatsApp personal EDU450: pregunta de mensualidades a las 03:08, respuesta recibida con primer mes S/19.90 y segundo a sexto S/79.90. Datos obtenidos del audio realmente enviado, sin otra llamada generativa.
+- Solicitud de informacion a las 03:09: llegaron imagen y audio originales de NUTRICION 19.90; posteriormente aparecieron los botones de la secuencia. No se sustituyo la automatizacion por texto generado.
+- Se comprobo en automation_steps el cache de audio de NUTRICION: URL exacta y transcripcion de 1673 caracteres guardadas. Se corrigio la causa que antes impedia guardar ese cache.
+- Tras recargar el CRM, el contenido visible del documento incluye los mensajes mas recientes del 10 de octubre a las 03:09. La captura de accesibilidad larga tambien puede truncarse; se verifico el final real del DOM, no solo esa captura.
+- Reenvio real desde el inbox: se seleccionaron dos textos y se reenviaron al propio numero autorizado de Luis. Ambos quedaron delivered y llegaron a WhatsApp en el orden original a las 03:11. No se envio informacion a otros contactos.
+- Segunda seleccion real: imagen y audio promocionales reenviados juntos desde el inbox al mismo numero autorizado; ambos llegaron a WhatsApp a las 03:12, imagen primero y audio despues. Evidencia: output/prueba-reenvio-medios-2026-10-10.png. No se reenviaron los 758 mensajes ni conversaciones privadas de otros estudiantes.
+- Las comprobaciones de permisos y traspasos entre identidades siguen siendo transaccionales con rollback; no se modificaron roles, porcentajes ni accesos definitivos de las asesoras.
+
+### Prueba con las areas elegidas por el CEO, 03:26-03:35 Lima
+
+- Consulta actual: COORDINADORES (insticrece.education@gmail.com) en VENTAS; LUIS PALACIOS (palacios7581@gmail.com) en FIDELIZACION. ASHLY AGENTE sin area. Se conservaron estas elecciones del CEO.
+- Con autorizacion expresa para valores de prueba, configure_sales_routing guardo version 5, reparto activado y 100% COORDINADORES, 0% los demas. Valores temporales; restaurar al terminar la prueba, sin cambiar areas/cargos elegidos por el CEO.
+- Numero de prueba indicado por el usuario: 51933691668, conversacion 6c909993-c22f-4663-a505-da66489532fb. Solicitud real desde CHAT INTERNO al miembro de VENTAS con historial completo; destinatario acepto y el usuario confirmo que ve todo el historial.
+- Consulta posterior: responsable COORDINADORES; etiquetas ASESOR COORDINADORES y AREA VENTAS; ai_enabled y automation_enabled permanecen true. Esto comprueba derivacion aceptada, no el contador de cuatro interacciones en un lead nuevo.
+- Siguiente prueba solicitada: desde VENTAS enviar a LUIS con historial restringido y aceptar en FIDELIZACION. Pendiente de completar por las sesiones del usuario.
+- Promocion: se usa texto/pie de imagen completo de la misma ejecucion antes de transcribir audio. Si mensualidad falta o esta tachada, se conserva el respaldo de audio y su cache por URL. 1021 pruebas aprobadas en 110 archivos. No es lectura OCR de todas las imagenes promocionales.
+- La reprogramacion urgente iniciada por mensaje de docente sigue pendiente; no presentar los avisos de calendario existentes como prueba de ese recorrido.
+
+Evidencia visual: output/reparto-prueba-actual-2026-10-10.png y output/derivacion-ventas-solicitada-2026-10-10.png.

@@ -21,6 +21,13 @@ export function resolveCommand<T extends { id: string; name: string }>(
     (block) => normalizedCommand(block.name) === normalizedCommand(name)
   );
   if (matches.length) return matches.length === 1 ? matches[0] : null;
+  // Public adviser wording and the existing block name refer to the same block.
+  // Do not include bank accounts or post-payment flows in this alias.
+  const paymentAlias = (value: string) => /^(?:MEDIOS? DE PAGOS?|YAPE(?: O| Y)? PLIN|YAPE|PLIN)$/.test(normalizedCommand(value));
+  if (paymentAlias(name)) {
+    const paymentBlocks = blocks.filter((block) => paymentAlias(block.name));
+    return paymentBlocks.length === 1 ? paymentBlocks[0] : null;
+  }
   const query = commandTokens(name);
   // A course alone is not an instruction to send a promotion. Require intent,
   // and reject ambiguous offers instead of choosing a price on the adviser's behalf.

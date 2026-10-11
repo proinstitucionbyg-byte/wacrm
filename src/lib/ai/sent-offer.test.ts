@@ -3,6 +3,10 @@ import { sentOfferPriceReply } from './sent-offer';
 import { quotedOfferPrices } from '@/lib/matriculas/offer-prices';
 const audio = '[AUDIO ENVIADO: NUTRICION 19.90. TRANSCRIPCION AUTOMATICA; NO ES VALIDACION DE PAGO]\nLa mensualidad en 79.90. Tu primer mes solo estarias cancelando 19.90. Nuestra duracion es de seis meses.';
 describe('answers grounded in the audio actually sent', () => {
+  it('answers from the text actually sent when audio transcription was unnecessary', () => {
+    const written = '[OFERTA ENVIADA: NUTRICION 19.90. DATOS DEL TEXTO O PIE DE IMAGEN ENVIADOS]\nPrimer mes S/19.90. Mensualidad S/49.90. Duracion 6 meses.';
+    expect(sentOfferPriceReply([{role:'assistant',content:audio},{role:'assistant',content:written},{role:'user',content:'Cuanto pago?'}])).toContain('S/49.90');
+  });
   it('extracts the real transcription without a spoken currency label', () => {
     expect(quotedOfferPrices(audio)).toEqual([19.9,79.9,79.9,79.9,79.9,79.9]);
     expect(sentOfferPriceReply([{role:'assistant',content:audio},{role:'user',content:'¿Cuanto pago el primer mes y desde el segundo?'}])).toContain('S/79.90');

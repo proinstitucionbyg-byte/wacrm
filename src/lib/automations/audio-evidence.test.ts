@@ -11,6 +11,18 @@ function setup(config: Record<string, unknown> = {}) {
 }
 beforeEach(() => vi.clearAllMocks())
 describe('saved promotion audio evidence', () => {
+  it('uses a complete sent text or image caption without transcribing even a cached audio', async () => {
+    const { args, db } = setup({ audio_transcript: 'Mensualidad 79.90', audio_transcript_url: 'https://example.com/one.ogg' })
+    const writtenText = 'Primer mes S/19.90. Mensualidad S/49.90. Duracion 6 meses.'
+    expect(await automationAudioEvidence({ ...args, writtenText })).toContain('[OFERTA ENVIADA:')
+    expect(h.read).not.toHaveBeenCalled(); expect(db.from).not.toHaveBeenCalled()
+  })
+  it('falls back to audio if the written monthly price is struck out or missing', async () => {
+    h.read.mockResolvedValue('Mensualidad 79.90, primer mes 19.90, seis meses')
+    const { args } = setup()
+    expect(await automationAudioEvidence({ ...args, writtenText: '6 meses. ~Mensualidad S/79.90~ Primer mes S/19.90' })).toContain('[AUDIO ENVIADO:')
+    expect(h.read).toHaveBeenCalledOnce()
+  })
   it.each(['NUTRICION 19.90','FARMACIA 19.90','RECURSOS 19.90','ASISTENTE 19.90','EDUCACIÓN 19.90'])('recognizes the existing promotion name %s',async name => {
     h.read.mockResolvedValue('Primer mes 19.90 soles')
     const {args} = setup()

@@ -30,6 +30,7 @@ import {
   MailX,
   Plus,
   Settings,
+  KeyRound,
   Trash2,
   UsersRound,
 } from 'lucide-react';
@@ -77,6 +78,9 @@ import { InviteMemberDialog } from './invite-member-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
 import { SalesRoutingPanel } from './sales-routing-panel';
+import { MemberPasswordDialog } from './member-password-dialog';
+import { CreateMemberDialog } from './create-member-dialog';
+import { MEMBER_PRESETS, type MemberPreset } from '@/lib/account/member-presets';
 
 interface Member {
   user_id: string;
@@ -129,7 +133,7 @@ function fmtExpiresIn(iso: string, t: (key: string, values?: Record<string, stri
 export function MembersTab() {
   const t = useTranslations('Settings.members');
   const tRoles = useTranslations('Settings.roles');
-  const { user, canManageMembers } = useAuth();
+  const { user, canManageMembers, accountRole } = useAuth();
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -138,6 +142,11 @@ export function MembersTab() {
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
+  const [passwordMember, setPasswordMember] = useState<Member | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<MemberPreset>('ventas');
+  const [confirmPreset, setConfirmPreset] = useState(false);
+  const [applyingPreset, setApplyingPreset] = useState(false);
   const [permissionsMember, setPermissionsMember] = useState<Member | null>(null);
   const [memberPermissions, setMemberPermissions] = useState<
   {
@@ -328,10 +337,10 @@ async function loadMemberPermissions(userId: string) {
         description={t('description')}
         action={
           <RequireRole min="admin">
-            <Button onClick={() => setInviteOpen(true)}>
+            <div className="flex flex-wrap gap-2"><Button onClick={() => setCreateOpen(true)}>CREAR ASESORA</Button><Button variant="outline" onClick={() => setInviteOpen(true)}>
               <Plus className="size-4" />
               {t('inviteMember')}
-            </Button>
+            </Button></div>
           </RequireRole>
         }
       />
@@ -499,10 +508,17 @@ async function loadMemberPermissions(userId: string) {
     }}
     disabled={isBusy}
     title="Permisos"
+    aria-label={`PERMISOS DE ${member.full_name}`}
   >
     <Settings className="size-4" />
   </Button>
 )}
+                    {canManageMembers && !isOwnerRow && !isSelf && (member.role !== 'admin' || accountRole === 'owner') && (
+                      <Button variant="outline" size="sm" onClick={() => setPasswordMember(member)} disabled={isBusy}
+                        title="RESTABLECER CLAVE" aria-label={`RESTABLECER CLAVE DE ${member.full_name}`}>
+                        <KeyRound className="size-4" />
+                      </Button>
+                    )}
                     {/* Remove. Admin+ only; never on the owner row;
                         never on yourself. Pre-polish styling was
                         neutral-default + red-on-hover — the
@@ -515,6 +531,8 @@ async function loadMemberPermissions(userId: string) {
                         variant="outline"
                         size="sm"
                         onClick={() => setRemovingMember(member)}
+                        title="QUITAR ACCESO AL CRM"
+                        aria-label={`QUITAR ACCESO DE ${member.full_name}`}
                         disabled={isBusy}
                         className="border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:border-red-500/60 hover:text-red-200"
                       >
@@ -621,6 +639,8 @@ async function loadMemberPermissions(userId: string) {
         onOpenChange={setInviteOpen}
         onCreated={loadEverything}
       />
+      {passwordMember && <MemberPasswordDialog member={passwordMember} onClose={() => setPasswordMember(null)} />}
+      {createOpen && <CreateMemberDialog onClose={() => setCreateOpen(false)} onCreated={loadEverything} />}
 
       <Dialog
         open={removingMember !== null}
@@ -669,7 +689,7 @@ async function loadMemberPermissions(userId: string) {
       <Dialog
   open={permissionsMember !== null}
   onOpenChange={(open) => {
-    if (!open) setPermissionsMember(null);
+    if (!open) { setPermissionsMember(null); setConfirmPreset(false); }
   }}
 >
   <DialogContent className="bg-popover border-border sm:max-w-2xl">
@@ -686,6 +706,25 @@ async function loadMemberPermissions(userId: string) {
       </DialogDescription>
       <p className="text-xs text-muted-foreground">Los cambios se guardan al marcar cada permiso. Para editar o validar, activa también el acceso de consulta de esa sección. CEO y administradores mantienen acceso completo.</p>
     </DialogHeader>
+
+    {permissionsMember && permissionsMember.user_id !== user?.id && permissionsMember.role !== 'owner' && (permissionsMember.role !== 'admin' || accountRole === 'owner') && (
+      <div className="space-y-2 rounded border border-border p-3">
+        <label className="text-sm font-medium" htmlFor="member-permission-preset">PERMISOS RECOMENDADOS POR CARGO</label>
+        <div className="flex flex-wrap gap-2"><select id="member-permission-preset" className="min-w-0 flex-1 rounded border border-border bg-background p-2 text-sm" value={selectedPreset} disabled={applyingPreset} onChange={e=>{setSelectedPreset(e.target.value as MemberPreset);setConfirmPreset(false);}}>
+          {Object.entries(MEMBER_PRESETS).filter(([key])=>key!=='administrador'||accountRole==='owner').map(([key,value])=><option key={key} value={key}>{value.label}</option>)}
+        </select><Button variant="outline" disabled={applyingPreset||permissionsLoading||savingPermission!==null} onClick={()=>setConfirmPreset(true)}>APLICAR PERFIL</Button></div>
+        {confirmPreset && <div className="space-y-2"><p className="text-xs text-muted-foreground">Esto reemplaza sus permisos actuales por los del cargo seleccionado y actualiza su area y cargo. Podras ajustarlos despues.</p>
+          <Button disabled={applyingPreset} onClick={async()=>{
+            setApplyingPreset(true);
+            try {
+              const res=await fetch(`/api/account/members/${permissionsMember.user_id}/preset`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preset:selectedPreset})});
+              const body=await res.json();if(!res.ok){toast.error(body.error||'No se pudo aplicar el perfil');return;}
+              setPermissionsMember({...permissionsMember,role:MEMBER_PRESETS[selectedPreset].role});
+              toast.success('Perfil aplicado');setConfirmPreset(false);await loadMemberPermissions(permissionsMember.user_id);await loadEverything();
+            }catch{toast.error('No se pudo conectar con el servidor');}finally{setApplyingPreset(false);}
+          }}>{applyingPreset?'GUARDANDO...':'CONFIRMAR CAMBIO DE PERMISOS'}</Button></div>}
+      </div>
+    )}
 
     <div className="max-h-[60vh] overflow-y-auto py-4 pr-2 space-y-3">
   {permissionsLoading ? (
@@ -714,7 +753,7 @@ async function loadMemberPermissions(userId: string) {
           type="checkbox"
           aria-label={permission.label}
           checked={permission.allowed}
-          disabled={savingPermission !== null || ['owner', 'admin'].includes(permission.source)}
+          disabled={applyingPreset || savingPermission !== null || ['owner', 'admin'].includes(permission.source)}
           onChange={async (e) => {
             if (!permissionsMember) return;
 

@@ -1,13 +1,19 @@
 import type { supabaseAdmin } from './admin-client'
 import { transcribeSavedAudio } from '@/lib/ai/transcribe'
+import { quotedOfferPrices } from '@/lib/matriculas/offer-prices'
 
 type Db = ReturnType<typeof supabaseAdmin>
 /** Cache is bound to the URL. Sent messages keep their own immutable transcript. */
 export async function automationAudioEvidence(args: {
   db: Db; accountId: string; automationId: string; name: string;
-  stepId: string; config: Record<string, unknown>; url: string
+  stepId: string; config: Record<string, unknown>; url: string; writtenText?: string
 }): Promise<string | undefined> {
   if (/malla|bienvenida/i.test(args.name) || !/promo|informaci[oó]n|\d+[.,]\d{2}/i.test(args.name)) return undefined
+  // Only successfully sent steps from this execution; never an older promotion.
+  const written = args.writtenText?.trim()
+  if (written && quotedOfferPrices(written)) {
+    return `[OFERTA ENVIADA: ${args.name}. DATOS DEL TEXTO O PIE DE IMAGEN ENVIADOS]\n${written}`
+  }
   let text = args.config.audio_transcript_url === args.url && typeof args.config.audio_transcript === 'string'
     ? args.config.audio_transcript : null
   if (!text) {
