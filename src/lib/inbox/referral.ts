@@ -14,5 +14,8 @@ export function parseReferral(value: unknown): Record<string, string> | null {
         result.source_url = input.source_url;
     } catch { /* Invalid links do not become clickable evidence. */ }
   }
-  return Object.keys(result).length ? result : null;
+  // A malformed/oversized referral must never prevent the student's message from being saved.
+  const bytes = () => new TextEncoder().encode(JSON.stringify(result)).length;
+  if (bytes() > 9000) delete result.body;
+  return Object.keys(result).length && bytes() <= 9000 ? result : null;
 }

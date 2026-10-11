@@ -16,4 +16,10 @@ describe('Meta referral evidence', () => {
     expect(parseReferral({source_url:'javascript:alert(1)',ad_id:{id:'1'}})).toBeNull();
     expect(parseReferral({source_url:'https://www.facebook.com/123',body:'x'.repeat(3000)})).toEqual({source_url:'https://www.facebook.com/123',body:'x'.repeat(2000)});
   });
+  it('drops oversized multibyte metadata so it cannot block an inbound message', () => {
+    const value=Object.fromEntries(['source_id','source_type','ad_id','ref','source','type','headline','ctwa_clid','body'].map(key=>[key,'😀'.repeat(2000)]));
+    expect(parseReferral(value)?.body).toBeUndefined();
+    expect(new TextEncoder().encode(JSON.stringify(parseReferral(value))).length).toBeLessThan(9000);
+    expect(new TextEncoder().encode(JSON.stringify(parseReferral({source_id:'123',body:'😀'.repeat(2000)}))).length).toBeLessThan(9000);
+  });
 });
