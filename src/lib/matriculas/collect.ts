@@ -12,7 +12,8 @@ import { enrollmentIssues } from './enrollment';
 export async function collectConversationEnrollments(
   db: SupabaseClient,
   accountId: string,
-  conversationId: string
+  conversationId: string,
+  selectedDraftId?: string
 ) {
   const { data: drafts, error } = await db
     .from('enrollment_drafts')
@@ -22,8 +23,11 @@ export async function collectConversationEnrollments(
     .eq('status', 'collecting');
   if (error) throw error;
   // Several simultaneous enrollments need an explicit association, not a guess.
-  if (drafts?.length !== 1) return;
-  const draft = drafts[0];
+  if (!selectedDraftId && drafts?.length !== 1) return;
+  const draft = selectedDraftId
+    ? drafts?.find((item) => item.id === selectedDraftId)
+    : drafts?.[0];
+  if (!draft || (selectedDraftId && !draft.data?.course)) return;
   const { data: review, error: reviewError } = await db
     .from('payment_reviews')
     .select('status,created_at,evidence')
@@ -35,7 +39,9 @@ export async function collectConversationEnrollments(
   // Include data sent before the voucher. Contradictory written/photo values stay pending.
   const { data: messages, error: messageError } = await db
     .from('messages')
-    .select('id,content_text,image_analysis,sender_type,ai_generated,created_at')
+    .select(
+      'id,content_text,image_analysis,sender_type,ai_generated,created_at'
+    )
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
     .limit(100);
@@ -43,9 +49,17 @@ export async function collectConversationEnrollments(
   const evidence = (messages ?? []) as IntakeEvidence[];
   let next = collectEnrollmentData(
     collectPaymentData(draft.data, review.evidence?.fields),
-    evidence.filter((message) => message.sender_type === 'customer' || !message.sender_type) as IntakeMessage[]
+    evidence.filter(
+      (message) => message.sender_type === 'customer' || !message.sender_type
+    ) as IntakeMessage[]
   );
-  if (next.course) next = prepareAutomaticIntake(next, evidence, await loadAcademicCalendar(db, accountId), review.created_at);
+  if (next.course)
+    next = prepareAutomaticIntake(
+      next,
+      evidence,
+      await loadAcademicCalendar(db, accountId),
+      review.created_at
+    );
   const ready = enrollmentIssues(next).length === 0;
   if (!ready && JSON.stringify(next) === JSON.stringify(draft.data)) return;
   const { error: saveError } = await db

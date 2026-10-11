@@ -42,6 +42,8 @@ export async function GET(request: Request) {
   if (noticesError) return NextResponse.json({ error: 'No se pudieron actualizar los avisos' }, { status: 500 });
   const { error: reportError } = await admin.rpc('publish_first_text_reports');
   if (reportError) return NextResponse.json({ error: 'No se pudieron actualizar las estadísticas de primeras frases' }, { status: 500 });
+  const { error: casesError } = await admin.rpc('publish_case_reports');
+  if (casesError) return NextResponse.json({ error: 'No se pudieron actualizar los reportes de quejas y soluciones' }, { status: 500 });
   const { error: birthdaysError } = await admin.rpc('publish_birthday_notices');
   if (birthdaysError) return NextResponse.json({ error: 'No se pudieron actualizar los avisos de cumpleanos' }, { status: 500 });
   const { data: due, error } = await admin

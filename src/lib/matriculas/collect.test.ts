@@ -69,6 +69,49 @@ describe('scoped enrollment collection', () => {
     await collectConversationEnrollments(db, 'account', 'conversation');
     expect(update).not.toHaveBeenCalled();
   });
+  it('collects only the explicitly chosen draft and its own payment', async () => {
+    drafts = [
+      {
+        id: 'first',
+        review_id: 'review-first',
+        version: 3,
+        data: { course: 'NUTRICION Y DIETETICA' },
+      },
+      {
+        id: 'second',
+        review_id: 'review-second',
+        version: 7,
+        data: { course: 'AUXILIAR DE FARMACIA' },
+      },
+    ];
+    await collectConversationEnrollments(
+      db,
+      'account',
+      'conversation',
+      'second'
+    );
+    expect(eq).toHaveBeenCalledWith('id', 'review-second');
+    expect(eq).toHaveBeenCalledWith('id', 'second');
+    expect(eq).toHaveBeenCalledWith('version', 7);
+    expect(eq).not.toHaveBeenCalledWith('id', 'first');
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+  it('does not select a foreign draft or an intake with no chosen course', async () => {
+    await collectConversationEnrollments(
+      db,
+      'account',
+      'conversation',
+      'foreign'
+    );
+    expect(update).not.toHaveBeenCalled();
+    await collectConversationEnrollments(
+      db,
+      'account',
+      'conversation',
+      'draft'
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
   it('does not reset a draft when nothing new was extracted', async () => {
     limit.mockResolvedValue({ data: [], error: null });
     await collectConversationEnrollments(db, 'account', 'conversation');

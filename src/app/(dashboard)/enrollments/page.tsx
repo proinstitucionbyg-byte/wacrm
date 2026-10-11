@@ -71,6 +71,20 @@ function EnrollmentEditor({
   const locked =
     !canEdit || ['ready', 'processing', 'registered'].includes(draft.status);
   const dirty = JSON.stringify(data) !== JSON.stringify(draft.data);
+  async function collectSelected() {
+    setSaving(true);setError('');
+    try {
+      const response = await fetch(`/api/enrollments/${draft.id}/collect`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selected:true,version:draft.version})});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      const refreshed = await fetch(`/api/enrollments/${draft.id}`,{cache:'no-store'});
+      const json = await refreshed.json();
+      if (!refreshed.ok) throw new Error(json.error);
+      setDraft(json.draft);setData(json.draft.data);setIssues(json.issues);setImages(json.images);setDocuments(json.documents??[]);
+      toast.success('Datos recogidos para esta ficha y su comprobante.');
+    } catch(error) {setError(error instanceof Error?error.message:'No se pudo recoger la ficha.');}
+    finally {setSaving(false);}
+  }
   async function enqueue() {
     setSaving(true);
     try {
@@ -120,6 +134,8 @@ function EnrollmentEditor({
       <h2 className="font-semibold">
         {data.full_name || 'MATRICULA CON DATOS PENDIENTES'}
       </h2>
+      <p className="text-muted-foreground text-xs">{data.course || 'CURSO PENDIENTE'} · COMPROBANTE {draft.review_id}</p>
+      {!locked && <div className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={saving || dirty || !data.course} onClick={collectSelected}>Recoger datos para esta matrícula</Button><p className="text-muted-foreground text-xs">Si tiene varias matrículas, guarda primero el curso en la ficha correspondiente a este comprobante.</p></div>}
       {!canEdit && (
         <p className="text-muted-foreground text-sm">
           Acceso de consulta. No tienes permiso para modificar esta matrícula.
@@ -150,7 +166,7 @@ function EnrollmentEditor({
       {draft.status === 'registered' && (
         <section className="border-border rounded border p-3">
           <h3 className="mb-2 text-sm font-semibold">
-            DOCUMENTOS POR WHATSAPP
+            DOCUMENTOS EN EL CHAT DEL ESTUDIANTE
           </h3>
           <div className="grid gap-2 sm:grid-cols-3">
             {['BOLETA', 'CRONOGRAMA', 'FICHA'].map((kind) => {
