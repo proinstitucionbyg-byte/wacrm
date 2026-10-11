@@ -38,6 +38,7 @@ export default function NotificationsPage() {
       .from("notifications")
       .select("*")
       .eq("account_id", accountId)
+      .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
       .order("created_at", { ascending: false })
       .limit(100);
     if (fetchErr) {
@@ -58,6 +59,8 @@ export default function NotificationsPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
+    const expiryTimer = window.setInterval(() => void load(), 60_000);
+    return () => window.clearInterval(expiryTimer);
   }, [load]);
 
   // Realtime — new assignments appear without a refresh, and a
@@ -72,6 +75,7 @@ export default function NotificationsPage() {
         (payload) => {
           if (payload.eventType === "INSERT") {
             const row = payload.new as Notification;
+            if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return;
             setNotifications((prev) => {
               if (!prev) return [row];
               if (prev.some((n) => n.id === row.id)) return prev;

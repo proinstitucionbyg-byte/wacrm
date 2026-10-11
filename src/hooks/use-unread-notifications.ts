@@ -19,16 +19,19 @@ export function useUnreadNotifications(): number {
     const supabase = createClient();
     let cancelled = false;
 
-    (async () => {
+    const refreshCount = async () => {
       // head:true skips fetching rows — we only need the `count`
       // supabase-js returns alongside the (empty) response body.
       const { count: unreadCount, error } = await supabase
         .from("notifications")
         .select("*", { count: "exact", head: true })
-        .is("read_at", null);
+        .is("read_at", null)
+        .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`);
       if (cancelled || error) return;
       setCount(unreadCount ?? 0);
-    })();
+    };
+    void refreshCount();
+    const expiryTimer = window.setInterval(() => void refreshCount(),60_000);
 
     const channel = supabase
       .channel("notifications-unread-count")
@@ -38,7 +41,7 @@ export function useUnreadNotifications(): number {
         (payload) => {
           if (payload.eventType === "INSERT") {
             const row = payload.new as Notification;
-            if (!row.read_at) setCount((n) => n + 1);
+            if (!row.read_at && (!row.expires_at || Date.parse(row.expires_at)>Date.now())) setCount((n) => n + 1);
           } else if (payload.eventType === "UPDATE") {
             // Updates here only ever set read_at (marking a notification
             // read). Derive purely from the new row so we don't rely on
@@ -55,6 +58,7 @@ export function useUnreadNotifications(): number {
 
     return () => {
       cancelled = true;
+      window.clearInterval(expiryTimer);
       supabase.removeChannel(channel);
     };
   }, []);

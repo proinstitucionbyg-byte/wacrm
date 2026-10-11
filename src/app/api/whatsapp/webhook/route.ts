@@ -10,6 +10,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { handleTeacherInbound } from '@/lib/matriculas/teachers'
 import { routeInboundSales } from '@/lib/ai/sales-routing'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
 import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
@@ -840,15 +841,20 @@ const followupReplyHandled = interactiveReplyId
     })
   : false
 
+// Academic cancellation notices must not launch the sales funnel.
+let teacherHandled = false
+try {
+  teacherHandled = await handleTeacherInbound(supabaseAdmin(), { accountId, conversationId: conversation.id, contactId: contactRecord.id, userId: configOwnerUserId, messageId: message.id, text: contentText ?? message.text?.body ?? '', humanRecentlyActive })
+} catch (error) { console.error('[teacher] cancellation requires review', error) }
 // Assignment makes the lead available to an adviser. It does not consume the
 // inbound or pause the existing flow/AI; human replies use their own pause.
-if (!humanRecentlyActive && !followupReplyHandled) {
+if (!teacherHandled && !humanRecentlyActive && !followupReplyHandled) {
   await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
 }
 const automationPaused =
-  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled
+  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled || teacherHandled
   let automationMatched = false
-  let flowConsumed = followupReplyHandled
+  let flowConsumed = followupReplyHandled || teacherHandled
 
 if (!automationPaused) {
   const flowResult = await dispatchInboundToFlows({

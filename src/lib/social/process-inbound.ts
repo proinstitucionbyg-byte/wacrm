@@ -15,6 +15,7 @@ import { routeInboundSales } from '@/lib/ai/sales-routing'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import type { AutomationTriggerType } from '@/types'
 import { saveSocialImage } from './storage'
+import { handleTeacherInbound } from '@/lib/matriculas/teachers'
 
 export interface SocialDispatchContext {
   accountId: string; userId: string; contactId: string; conversationId: string
@@ -117,6 +118,7 @@ export async function dispatchSocialInbound(db: SupabaseClient, input: SocialDis
   if (error || !conversation) throw error ?? new Error('Conversación no disponible.')
   const lastHuman = conversation.last_human_message_at ? new Date(conversation.last_human_message_at).getTime() : 0
   const humanRecentlyActive = Date.now() - lastHuman < 5 * 60 * 1000
+  if (await handleTeacherInbound(db, { ...input, humanRecentlyActive })) return
   const common = { accountId: input.accountId, userId: input.userId, contactId: input.contactId, conversationId: input.conversationId }
   const followupHandled = input.replyId ? await handleIdleFollowupReply({ ...common, replyId: input.replyId }) : false
   if (!humanRecentlyActive && !followupHandled) await routeInboundSales({ accountId: input.accountId, conversationId: input.conversationId, messageId: input.messageId })

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { Notification } from '@/types';
-const actions = [['groups','AVISADO A LOS GRUPOS'],['teacher','AVISADO AL DOCENTE'],['students','AVISADO A LOS ESTUDIANTES'],['new_students','AVISADO A LOS NUEVOS INGRESOS']] as const;
+const actions = [['groups','AVISADO A LOS GRUPOS'],['teacher','AVISADO AL DOCENTE'],['students','AVISADO A LOS ESTUDIANTES AFECTADOS'],['new_students','AVISADO A LOS NUEVOS INGRESOS'],['coordinator','AVISADO A LA COORDINADORA DE FIDELIZACIÓN']] as const;
 export function CalendarActions({notice,onChanged}:{notice:Notification;onChanged:()=>Promise<void>}) {
   const [busy,setBusy]=useState(''),[error,setError]=useState('');
   async function mark(action:string,completed:boolean){

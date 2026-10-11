@@ -197,6 +197,7 @@ automation_enabled?: boolean;
 export type NotificationType = 'conversation_assigned' | 'team_message' | 'system_notice';
 
 export interface Notification {
+  expires_at?: string | null;
   requires_action?: boolean;
   dedup_key?: string | null;
   action_checks?: Record<string,{completed:boolean;at:string;by:string}>;

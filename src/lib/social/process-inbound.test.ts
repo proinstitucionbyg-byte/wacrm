@@ -13,6 +13,7 @@ vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: mocks.aut
 vi.mock('@/lib/ai/auto-reply', () => ({ dispatchInboundToAiReply: mocks.ai }))
 vi.mock('@/lib/ai/sales-routing', () => ({ routeInboundSales: mocks.sales }))
 vi.mock('@/lib/ai/followup', () => ({ handleIdleFollowupReply: mocks.followup }))
+vi.mock('@/lib/matriculas/teachers', () => ({ handleTeacherInbound: async () => false }))
 import { storeSocialInbound, dispatchSocialInbound, type SocialDispatchContext } from './process-inbound'
 import type { SocialInbound } from './inbound'
 
