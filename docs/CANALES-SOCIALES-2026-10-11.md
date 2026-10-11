@@ -40,3 +40,16 @@
 - El bloque falló al intentar enviar su imagen: Meta rechazó la autorización de Messenger (código 190). Se pidió al propietario renovar únicamente MESSENGER_PAGE_ACCESS_TOKEN; no declarar este canal operativo hasta confirmar la respuesta en Messenger.
 - En la pantalla de Meta se verificó que Instagram entrega sus eventos a /api/messenger/webhook. Se añadió recepción del objeto Instagram en ese callback compartido, conservando firma y validación del activo; no cambiar la configuración existente de webhooks.
 - Las descripciones de uso de instagram_basic e instagram_manage_messages quedaron guardadas en el borrador. Sin video ni certificaciones marcadas; no enviado.
+
+## Corrección de envío Instagram y siguientes comprobaciones
+
+- La documentación oficial de Instagram Messaging con Facebook Login indica POST /PAGE-ID/messages con token de página. El código estaba enviando al identificador de Instagram. Se corrige únicamente el destino del envío usando MESSENGER_PAGE_ID; se conserva INSTAGRAM_ACCESS_TOKEN y el identificador de Instagram para validar eventos entrantes. Fuente: https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/send-message
+- 1118 pruebas aprobadas en 118 archivos y build de producción correcto. Pendiente confirmar la entrega real después de publicar esta corrección; el diagnóstico anterior de permisos no basta para descartar este error de ruta.
+- Messenger ya confirmó una respuesta real con imagen, texto y audio del bloque original de Nutrición después de renovar su clave.
+
+## Nuevos requisitos registrados, pendientes de implementación
+
+- El CEO puede borrar conversaciones completas y delegar el permiso. Para mensajes recibidos, ocultar localmente; para enviados, verificar primero las capacidades y límites reales de la API de Meta para retirar para todos, sin asumir que coincide con la aplicación de WhatsApp.
+- Estadística de primera frase textual entrante y primera frase textual saliente por conversación, ignorando imágenes iniciales. Informe semanal los sábados temprano, acumulado mensual y alertas solo para CEO.
+- Abrir el detalle completo de las alertas al pulsarlas para que el texto sea legible.
+- Estos requisitos no se consideran implementados; la prioridad actual sigue siendo Instagram y TikTok.

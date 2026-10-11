@@ -88,7 +88,12 @@ export async function sendSocialPart(channel: SocialChannel, config: { assetId: 
   if (!/^\d+$/.test(recipientId) || recipientId === config.assetId) throw new Error('Destinatario de este canal inválido.')
   const version = process.env.META_GRAPH_API_VERSION || 'v23.0'
   if (!/^v\d+\.\d+$/.test(version)) throw new Error('Versión de Meta inválida.')
-  const response = await fetch(`https://graph.facebook.com/${version}/${config.assetId}/messages`, {
+  // Facebook Login uses a Page access token and /PAGE-ID/messages, even for
+  // Instagram recipients. Keep the IG account ID for inbound asset checks.
+  // https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/send-message
+  const sendAssetId = channel === 'instagram' ? process.env.MESSENGER_PAGE_ID : config.assetId
+  if (!sendAssetId || !/^\d+$/.test(sendAssetId)) throw new Error('Falta configurar la página de Facebook vinculada a Instagram.')
+  const response = await fetch(`https://graph.facebook.com/${version}/${sendAssetId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.token}` },
     body: JSON.stringify({ recipient: { id: recipientId }, ...(channel === 'messenger' ? { messaging_type: 'RESPONSE' } : {}), message: part.message }),

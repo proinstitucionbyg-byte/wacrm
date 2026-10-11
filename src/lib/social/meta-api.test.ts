@@ -55,7 +55,25 @@ describe('social Meta transport', () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) })
     await expect(sendSocialPart('messenger', { assetId: '123', token: 'test-secret' }, '456', part)).rejects.toThrow('confirmación')
   })
+  it('addresses the linked Facebook Page when sending to an Instagram recipient', async () => {
+    vi.stubEnv('MESSENGER_PAGE_ID', '987')
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message_id: 'ig-mid' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const part = socialMessageParts('instagram', { messageType: 'text', text: 'prueba' })[0]
+    expect(await sendSocialPart('instagram', { assetId: '123', token: 'test-secret' }, '456', part)).toBe('ig-mid')
+    expect(fetchMock.mock.calls[0][0]).toBe('https://graph.facebook.com/v23.0/987/messages')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ recipient: { id: '456' } })
+  })
+  it('requires the linked Page instead of falling back to the Instagram account ID', async () => {
+    vi.stubEnv('MESSENGER_PAGE_ID', '')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const part = socialMessageParts('instagram', { messageType: 'text', text: 'prueba' })[0]
+    await expect(sendSocialPart('instagram', { assetId: '123', token: 'test-secret' }, '456', part)).rejects.toThrow('página de Facebook')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it.each([3, 10, 200, 190])('reports a failed permission/token result (%i)', async code => {
+    vi.stubEnv('MESSENGER_PAGE_ID', '987')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: { code } }) }))
     const part = socialMessageParts('instagram', { messageType: 'text', text: 'prueba' })[0]
     await expect(sendSocialPart('instagram', { assetId: '123', token: 'test-secret' }, '456', part)).rejects.toThrow(/Meta/)
