@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { runIncompleteIntakes } from '@/lib/matriculas/incomplete-intake';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
 import { resumePendingExecution } from '@/lib/automations/engine';
 import type { AutomationContext } from '@/lib/automations/engine';
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
   await reactivateExpiredManualControls();
   await runIdleFollowups();
   const admin = supabaseAdmin();
+  await runIncompleteIntakes(admin);
   const { error: areaRoutingError } = await admin.rpc('route_waiting_area_conversations');
   if (areaRoutingError) return NextResponse.json({ error: 'No se pudo actualizar la cola de areas' }, { status: 500 });
   const { error: noticesError } = await admin.rpc('publish_operational_notices');

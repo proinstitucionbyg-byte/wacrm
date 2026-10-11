@@ -81,4 +81,8 @@ Conservar solo los mensajes necesarios para el respaldo en la carpeta del estudi
 
 ## Estado técnico honesto
 
-Este documento define el protocolo operativo. No acredita por sí solo que cada paso esté automatizado. La lectura, validación humana, extracción, selección de ficha, documentos y bienvenida tienen componentes existentes. La entrega automática del enlace del día depende de conectar Calendar o configurar una fuente verificada: esa conexión fue aplazada y no se debe presentar como instalada. El ingreso provisional y sus alertas deben comprobarse como un caso independiente antes de declararse automatizados.
+El protocolo de datos pendientes está implementado: cola tras validación del CEO, aviso en CRM a fidelización, check de bienvenida en el chat, bloque de bienvenida a las dos horas, seguimiento cuatro horas después y último aviso antes del cierre de la ventana. Usa la imagen general y el audio existente de requisitos; no selecciona un audio de pagos del 15 o del 30 sin conocer el cronograma. Los datos obligatorios incompletos bloquean los documentos. El check humano o una bienvenida excepcional ya enviada evitan repetir la bienvenida al completar los documentos.
+
+Comprobaciones: 1.196 pruebas y compilación correctas; pruebas transaccionales en la base de datos con reversión de los registros ficticios, incluidos validación obligatoria, permisos, plazos y check humano. La entrega real a un estudiante no se acredita mediante estas simulaciones.
+
+La entrega automática del enlace del día depende de conectar Calendar o configurar una fuente verificada: esa conexión fue aplazada y no está instalada. La observación de datos pendientes está en el CRM; este cambio no crea una nueva fila de datos incompletos en Google Sheets. Cerrada la ventana del canal, se avisa a fidelización y no se envían mensajes libres fuera de plazo.

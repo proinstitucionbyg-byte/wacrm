@@ -14,7 +14,7 @@ import { POST as submit } from '@/app/api/enrollments/[id]/submit/route';
 const id='11111111-1111-4111-8111-111111111111';
 const request=(body:unknown)=>new Request('http://localhost',{method:'POST',headers:{'x-enrollment-lease':'lease'},body:JSON.stringify(body)});
 const context=()=>({params:Promise.resolve({id,messageId:id})});
-const valid={full_name:'LUIS BRAYAN',document_type:'DNI',document_number:'12345678',phone1:'51937467119',email:'x@gmail.com',course:'NUTRICION Y DIETETICA',start_date:'2026-10-06',promotion_id:'PROMO 1',payment_date:'2026-10-05',amount:'19.90',payment_method:'YAPE',identity_message_ids:[id],identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9]};
+const valid={full_name:'LUIS BRAYAN',document_type:'DNI',document_number:'12345678',birth_date:'1990-01-01',address:'DIRECCION DE PRUEBA',department:'LIMA',district:'LIMA',phone1:'51937467119',email:'x@gmail.com',course:'NUTRICION Y DIETETICA',start_date:'2026-10-06',promotion_id:'PROMO 1',payment_date:'2026-10-05',amount:'19.90',payment_method:'YAPE',identity_message_ids:[id],identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9]};
 beforeEach(()=>{
   vi.resetAllMocks();
   const chain={select:mocks.select,eq:mocks.eq,not:mocks.not,or:mocks.or,order:mocks.order,limit:mocks.limit,update:mocks.update,in:mocks.in,maybeSingle:mocks.single};
