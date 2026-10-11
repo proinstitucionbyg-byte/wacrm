@@ -20,7 +20,7 @@
 
 ## Comprobaciones locales
 
-- 1115 pruebas aprobadas en 118 archivos.
+- 1116 pruebas aprobadas en 118 archivos (incluido el callback compartido de Meta).
 - Incluyen firma inválida, rechazo de otro activo, comprobación de cuenta, envío confirmado, fallo real de Meta, OCR sin aprobación automática, prioridades del embudo, captura del primer teléfono y entrega validada de PDF.
 - Un envío con una imagen y un texto son dos mensajes: si falla el segundo, se conserva la evidencia del primero y se informa el error. No se promete atomicidad de la entrega de bloques.
 - La deduplicación actual de webhooks comprueba mensajes guardados; no hay todavía una cola duradera con reservas de procesamiento para reintentos simultáneos.
@@ -32,3 +32,11 @@
 - TikTok VORTEX2.0 7678902717397336084 aparece Approved, pero eso no demuestra acceso a Business Messaging. El formulario de seguridad/privacidad se envió con info.instituto@insticrece.com y se vio la confirmación Enviada. No duplicar la solicitud.
 - TikTok no tiene aún transporte implementado ni prueba de envío en este repositorio. Requiere la habilitación de mensajería y documentación/credenciales correspondientes.
 - La suite local no demuestra entrega real en los clientes nativos. La publicación y las pruebas de cada plataforma se documentarán por separado.
+
+## Primera publicación y prueba real
+
+- Commit 63f6cdd, publicado correctamente por EasyPanel: Success, 11 octubre 2026 05:16:56 UTC.
+- Mensaje PRUEBA MESS-1011 enviado desde el perfil personal a Instituto.insticrece. El CRM recibió el mensaje y lanzó el bloque existente de Nutrición.
+- El bloque falló al intentar enviar su imagen: Meta rechazó la autorización de Messenger (código 190). Se pidió al propietario renovar únicamente MESSENGER_PAGE_ACCESS_TOKEN; no declarar este canal operativo hasta confirmar la respuesta en Messenger.
+- En la pantalla de Meta se verificó que Instagram entrega sus eventos a /api/messenger/webhook. Se añadió recepción del objeto Instagram en ese callback compartido, conservando firma y validación del activo; no cambiar la configuración existente de webhooks.
+- Las descripciones de uso de instagram_basic e instagram_manage_messages quedaron guardadas en el borrador. Sin video ni certificaciones marcadas; no enviado.

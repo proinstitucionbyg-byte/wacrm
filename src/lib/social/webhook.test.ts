@@ -53,4 +53,13 @@ describe('social webhook boundary', () => {
     vi.stubEnv('MESSENGER_VERIFY_TOKEN', '')
     expect(verifySocialSubscription(new Request(url)).status).toBe(403)
   })
+  it('receives Instagram through the existing shared Messenger callback', async () => {
+    const chain = { select: () => chain, eq: () => chain, maybeSingle: async () => ({ data: { id: 'account', owner_user_id: 'owner' }, error: null }) }
+    const db = { from: vi.fn(() => chain) }
+    mocks.admin.mockReturnValue(db)
+    mocks.store.mockResolvedValue(null)
+    expect((await receiveSocialWebhook(request(payload), 'messenger')).status).toBe(200)
+    await mocks.after.mock.calls[0][0]()
+    expect(mocks.store).toHaveBeenCalledWith(db, 'instagram', expect.objectContaining({ id: 'account' }), expect.objectContaining({ assetId: '123' }))
+  })
 })

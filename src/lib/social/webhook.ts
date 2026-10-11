@@ -19,6 +19,10 @@ export async function receiveSocialWebhook(request: Request, channel: SocialChan
   if (!verifyMetaWebhookSignature(raw, request.headers.get('x-hub-signature-256'))) return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   let body: unknown
   try { body = JSON.parse(raw) } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
+  // Meta's Facebook Login setup can deliver the Instagram object to the
+  // configured Messenger callback. Keep that existing callback working;
+  // choose the channel only after verifying the signed raw body.
+  if (channel === 'messenger' && body && typeof body === 'object' && 'object' in body && body.object === 'instagram') channel = 'instagram'
   try {
     const accountId = process.env.META_CHANNEL_ACCOUNT_ID ?? ''
     const { assetId } = socialConfiguration(channel, accountId)
