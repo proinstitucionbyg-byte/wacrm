@@ -12,7 +12,8 @@ import {
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
 
-const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION || 'v23.0'
+import { isSocialChannel } from '@/lib/social/meta-api'
+import { sendSocialMessage } from '@/lib/social/send'
 
 type Channel = 'whatsapp' | 'messenger' | 'instagram'
 
@@ -265,319 +266,27 @@ export async function POST(request: Request) {
     }
 
     // ------------------------------------------------------------
-    // 4. MESSENGER
-    // ------------------------------------------------------------
-
-    if (channel === 'messenger') {
-      if (!externalId) {
-        return NextResponse.json(
-          { error: 'Messenger contact has no external_id' },
-          { status: 400 }
-        )
-      }
-
-      const token = process.env.MESSENGER_PAGE_ACCESS_TOKEN
-
-      if (!token) {
-        return NextResponse.json(
-          { error: 'MESSENGER_PAGE_ACCESS_TOKEN is not configured' },
-          { status: 500 }
-        )
-      }
-
-      const result = await sendMessengerMessage({
-        recipientId: externalId,
-        accessToken: token,
-        messageType: message_type,
-        text: content_text,
-        mediaUrl: media_url,
+    // Messenger and Instagram share the channel-aware sender used by bots.
+    if (isSocialChannel(channel)) {
+      const { data: canSend, error: permissionError } = await supabase.rpc('has_member_permission', {
+        p_user_id: user.id, p_module: 'inbox', p_action: 'send',
       })
-
-      await saveOutboundMessage({
-        supabase,
-        conversationId,
-        senderId: user.id,
-        contentType: message_type,
-        contentText: content_text,
-        mediaUrl: media_url,
-        messageId: result.messageId,
+      if (permissionError || canSend !== true) return NextResponse.json({ error: 'No tienes permiso para enviar mensajes.' }, { status: 403 })
+      const result = await sendSocialMessage(supabase, {
+        accountId, conversationId, contactId: conversation.contact_id,
+        channel, externalId: externalId ?? null, senderId: user.id,
+        messageType: message_type, text: content_text, mediaUrl: media_url,
+        filename, interactivePayload: interactive_payload,
       })
-
-      return NextResponse.json({
-        success: true,
-        channel: 'messenger',
-        message_id: result.messageId,
-      })
+      return NextResponse.json({ success: true, channel, message_id: result.message_id, whatsapp_message_id: result.whatsapp_message_id })
     }
-
-    // ------------------------------------------------------------
-    // 5. INSTAGRAM
-    // ------------------------------------------------------------
-
-    if (channel === 'instagram') {
-      if (!externalId) {
-        return NextResponse.json(
-          { error: 'Instagram contact has no external_id' },
-          { status: 400 }
-        )
-      }
-
-      const token = process.env.INSTAGRAM_ACCESS_TOKEN
-      const instagramAccountId =
-        process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID
-
-      if (!token || !instagramAccountId) {
-        return NextResponse.json(
-          {
-            error:
-              'Instagram credentials are not configured',
-          },
-          { status: 500 }
-        )
-      }
-
-      const result = await sendInstagramMessage({
-        instagramAccountId,
-        recipientId: externalId,
-        accessToken: token,
-        messageType: message_type,
-        text: content_text,
-        mediaUrl: media_url,
-      })
-
-      await saveOutboundMessage({
-        supabase,
-        conversationId,
-        senderId: user.id,
-        contentType: message_type,
-        contentText: content_text,
-        mediaUrl: media_url,
-        messageId: result.messageId,
-      })
-
-      return NextResponse.json({
-        success: true,
-        channel: 'instagram',
-        message_id: result.messageId,
-      })
-    }
-
-    return NextResponse.json(
-      { error: `Unsupported channel: ${channel}` },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: `Unsupported channel: ${channel}` }, { status: 400 })
   } catch (error) {
     console.error('Error in unified Meta send:', error)
 
     return NextResponse.json(
-      { error: 'Failed to send message' },
+      { error: error instanceof Error ? error.message : 'Failed to send message' },
       { status: 500 }
     )
   }
-}
-
-// ============================================================
-// Messenger
-// ============================================================
-
-async function sendMessengerMessage({
-  recipientId,
-  accessToken,
-  messageType,
-  text,
-  mediaUrl,
-}: {
-  recipientId: string
-  accessToken: string
-  messageType: string
-  text?: string
-  mediaUrl?: string
-}) {
-  const url =
-    `https://graph.facebook.com/${GRAPH_VERSION}/me/messages` +
-    `?access_token=${encodeURIComponent(accessToken)}`
-
-  let message: Record<string, unknown>
-
-  if (messageType === 'text') {
-    message = {
-      text: text || '',
-    }
-  } else if (
-    mediaUrl &&
-    ['image', 'video', 'audio', 'file'].includes(messageType)
-  ) {
-    const attachmentType =
-      messageType === 'file' ? 'file' : messageType
-
-    message = {
-      attachment: {
-        type: attachmentType,
-        payload: {
-          url: mediaUrl,
-          is_reusable: false,
-        },
-      },
-    }
-  } else {
-    throw new Error(
-      `Messenger does not support message type "${messageType}" yet`
-    )
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      recipient: {
-        id: recipientId,
-      },
-      message,
-    }),
-  })
-
-  const data = await response.json()
-
-  if (!response.ok || data.error) {
-    console.error('[Messenger Send Error]', data)
-
-    throw new Error(
-      data?.error?.message ||
-        'Messenger rejected the message'
-    )
-  }
-
-  return {
-    messageId: data.message_id as string,
-  }
-}
-
-// ============================================================
-// Instagram
-// ============================================================
-
-async function sendInstagramMessage({
-  instagramAccountId,
-  recipientId,
-  accessToken,
-  messageType,
-  text,
-  mediaUrl,
-}: {
-  instagramAccountId: string
-  recipientId: string
-  accessToken: string
-  messageType: string
-  text?: string
-  mediaUrl?: string
-}) {
-  const url =
-    `https://graph.facebook.com/${GRAPH_VERSION}/${instagramAccountId}/messages` +
-    `?access_token=${encodeURIComponent(accessToken)}`
-
-  let message: Record<string, unknown>
-
-  if (messageType === 'text') {
-    message = {
-      text: text || '',
-    }
-  } else if (
-    mediaUrl &&
-    ['image', 'video', 'audio'].includes(messageType)
-  ) {
-    message = {
-      attachment: {
-        type: messageType,
-        payload: {
-          url: mediaUrl,
-        },
-      },
-    }
-  } else {
-    throw new Error(
-      `Instagram does not support message type "${messageType}" yet`
-    )
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      recipient: {
-        id: recipientId,
-      },
-      message,
-    }),
-  })
-
-  const data = await response.json()
-
-  if (!response.ok || data.error) {
-    console.error('[Instagram Send Error]', data)
-
-    throw new Error(
-      data?.error?.message ||
-        'Instagram rejected the message'
-    )
-  }
-
-  return {
-    messageId: data.message_id as string,
-  }
-}
-
-// ============================================================
-// Save outbound Meta message
-// ============================================================
-
-async function saveOutboundMessage({
-  supabase,
-  conversationId,
-  senderId,
-  contentType,
-  contentText,
-  mediaUrl,
-  messageId,
-}: {
-  supabase: Awaited<ReturnType<typeof createClient>>
-  conversationId: string
-  senderId: string
-  contentType: string
-  contentText?: string
-  mediaUrl?: string
-  messageId: string
-}) {
-  const { error } = await supabase
-    .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      sender_type: 'agent',
-      sender_id: senderId,
-      content_type: contentType,
-      content_text: contentText || null,
-      media_url: mediaUrl || null,
-      message_id: messageId,
-      status: 'sent',
-    })
-
-  if (error) {
-    console.error(
-      '[Meta Send] Error saving outbound message:',
-      error
-    )
-    throw new Error('Message sent but could not save its delivery record')
-  }
-
-  await supabase
-    .from('conversations')
-    .update({
-      last_message_text: contentText || '',
-      last_message_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversationId)
 }

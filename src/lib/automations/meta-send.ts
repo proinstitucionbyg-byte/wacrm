@@ -16,6 +16,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { sendSocialMessage } from '@/lib/social/send'
 
 // ------------------------------------------------------------
 // Automation-side Meta sender.
@@ -100,11 +101,6 @@ interface SendMediaArgs {
 export async function engineSendMedia(
   args: SendMediaArgs,
 ): Promise<{ whatsapp_message_id: string }> {
-  console.log('=================================')
-  console.log('ENGINE SEND MEDIA EJECUTADO')
-  console.log(args)
-  console.log('=================================')
-
   return sendViaMeta({ ...args, kind: 'media' })
 }
 export async function engineSendInteractive(
@@ -149,13 +145,23 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   // new tenancy column.
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone')
+    .select('id, phone, channel, external_id')
     .eq('id', input.contactId)
     .eq('account_id', input.accountId)
     .maybeSingle()
-  if (contactErr || !contact?.phone) {
+  if (contactErr || !contact) {
     throw new Error('contact not found for this account')
   }
+
+  if (contact.channel && contact.channel !== 'whatsapp') {
+    return sendSocialMessage(db, {
+      ...input, channel: contact.channel, externalId: contact.external_id,
+      messageType: input.kind === 'media' ? input.mediaType : input.kind,
+      ...(input.kind === 'text' ? { text: input.text } : {}),
+      ...(input.kind === 'media' ? { text: input.caption, mediaUrl: input.mediaUrl, filename: input.filename, transcript: input.transcript } : {}),
+    })
+  }
+  if (!contact.phone) throw new Error('contact phone missing')
 
   const sanitized = sanitizePhoneForMeta(contact.phone)
   if (!isValidE164(sanitized)) {

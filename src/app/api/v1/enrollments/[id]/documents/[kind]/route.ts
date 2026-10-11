@@ -11,6 +11,8 @@ import { decrypt } from '@/lib/whatsapp/encryption';
 import { engineSendMedia } from '@/lib/automations/meta-send';
 import { UUID_PATTERN } from '@/lib/team-chat';
 import { startEnrollmentSequence } from '@/lib/matriculas/sequence';
+import { isSocialChannel, socialConfiguration } from '@/lib/social/meta-api';
+import { saveSocialDocument } from '@/lib/social/storage';
 
 /** Receives only the three generated PDFs for an already registered and human-validated enrollment. */
 export async function POST(
@@ -116,8 +118,9 @@ export async function POST(
     const contact = Array.isArray(conversation?.contact)
       ? conversation.contact[0]
       : conversation?.contact;
-    if (!conversation || contact?.channel !== 'whatsapp' || !config)
-      throw badRequest('No hay conexión WhatsApp para esta matrícula');
+    if (!conversation || (!isSocialChannel(contact?.channel) && contact?.channel !== 'whatsapp') || (contact?.channel === 'whatsapp' && !config))
+      throw badRequest('No hay conexión para el canal de esta matrícula');
+    if (isSocialChannel(contact?.channel)) socialConfiguration(contact.channel, ctx.accountId);
     const documentName = String(job.data.full_name)
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
@@ -129,13 +132,13 @@ export async function POST(
       .replace(/[^a-zA-Z0-9]/g, '')
       .toUpperCase()}.pdf`;
     // Upload failures occur before the idempotent send reservation and are safe to retry.
-    const uploaded = await uploadMedia({
-      phoneNumberId: config.phone_number_id,
-      accessToken: decrypt(config.access_token),
+    const uploaded: { mediaId: string; url?: string } = contact?.channel === 'whatsapp' ? await uploadMedia({
+      phoneNumberId: config!.phone_number_id,
+      accessToken: decrypt(config!.access_token),
       buffer,
       contentType: 'application/pdf',
       fileName: filename,
-    });
+    }) : await saveSocialDocument(ctx.supabase, ctx.accountId, id, hash, buffer);
     const { error: reservedError } = await ctx.supabase
       .from('enrollment_document_deliveries')
       .insert({
@@ -160,7 +163,7 @@ export async function POST(
         conversationId: conversation.id,
         contactId: conversation.contact_id,
         mediaType: 'document',
-        mediaUrl: uploaded.mediaId,
+        mediaUrl: uploaded.url ?? uploaded.mediaId,
         filename,
       });
       const { error: savedError } = await ctx.supabase

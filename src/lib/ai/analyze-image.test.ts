@@ -21,6 +21,12 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 describe('lectura de comprobantes', () => {
+  it('reads already downloaded social images without using WhatsApp credentials', async () => {
+    const result = await analyzeInboundImage({ db: args.db, accountId: args.accountId, media: { buffer: Buffer.from('test-image'), contentType: 'image/jpeg' } })
+    expect(result.analysis.status).toBe('pending_review')
+    expect(getMediaUrl).not.toHaveBeenCalled()
+    expect(downloadMedia).not.toHaveBeenCalled()
+  })
   it('extracts visible identity dates and address without inventing a district', async () => {
     fetchMock.mockResolvedValue({ok:true,json:async()=>({output:[{content:[{type:'output_text',text:JSON.stringify({category:'identity_document',fields:{full_name:'ESTUDIANTE DE PRUEBA',document_number:'00000000',birth_date:'2000-01-02',address:'DIRECCION VISIBLE',department:'LIMA',district:null}})}]}]})});
     const result=await analyzeInboundImage(args);

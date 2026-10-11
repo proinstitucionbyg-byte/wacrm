@@ -130,6 +130,9 @@ describe('deterministic chat intake', () => {
         ]).phone2
       ).toBeUndefined();
   });
+  it('uses a supplied phone for a social student whose channel has no phone number', () => {
+    expect(collectEnrollmentData({ phone1: '' }, [{ id: 'text', content_text: 'Celular: 933 691 668' }]).phone1).toBe('933691668');
+  });
   it('ambiguous email candidates are left for review', () => {
     expect(
       collectEnrollmentData({}, [

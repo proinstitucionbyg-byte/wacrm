@@ -3,6 +3,9 @@ import { ApiError, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api';
 import { declarationImage } from '@/lib/matriculas/declaration-image';
+import { isSocialChannel } from '@/lib/social/meta-api';
+import { readSocialImage } from '@/lib/social/storage';
+import { downloadSocialMedia } from '@/lib/social/media';
 
 export async function GET(
   request: Request,
@@ -47,7 +50,7 @@ export async function GET(
       throw new ApiError('not_found', 'Archivo no autorizado', 404);
     const { data: message, error: messageError } = await ctx.supabase
       .from('messages')
-      .select('media_url,content_type,content_text,created_at')
+      .select('media_url,content_type,content_text,created_at,message_id')
       .eq('id', messageId)
       .eq('conversation_id', draft.conversation_id)
       .eq('sender_type', 'customer')
@@ -57,6 +60,19 @@ export async function GET(
       return declarationImage(message);
     }
     if (message?.content_type !== 'image') throw new ApiError('not_found', 'Imagen no disponible',404);
+    if (!message.media_url?.startsWith('/api/whatsapp/media/')) {
+      const { data: conversation } = await ctx.supabase.from('conversations').select('contact:contacts(channel)')
+        .eq('id', draft.conversation_id).eq('account_id', ctx.accountId).maybeSingle();
+      const contact = Array.isArray(conversation?.contact) ? conversation.contact[0] : conversation?.contact;
+      if (!isSocialChannel(contact?.channel)) throw new ApiError('not_found', 'Canal de imagen no disponible', 404);
+      const media = message.media_url === `/api/social/media/${messageId}`
+        ? await readSocialImage(ctx.supabase, contact.channel, ctx.accountId, draft.conversation_id, message.message_id)
+        : await downloadSocialMedia(message.media_url ?? '');
+      const mime = media.contentType.split(';')[0].trim().toLowerCase();
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime) || media.buffer.length > 10 * 1024 * 1024)
+        throw new ApiError('bad_request', 'Formato o tamaño de imagen no permitido', 400);
+      return new Response(new Uint8Array(media.buffer), { headers: { 'Content-Type': mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
+    }
     const match = /^\/api\/whatsapp\/media\/(\d+)$/.exec(
       message?.media_url ?? ''
     );

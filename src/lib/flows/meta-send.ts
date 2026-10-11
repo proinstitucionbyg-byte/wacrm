@@ -16,6 +16,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { sendSocialMessage } from '@/lib/social/send'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -69,13 +70,18 @@ export async function engineSendText(
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone')
+    .select('id, phone, channel, external_id')
     .eq('id', args.contactId)
     .eq('account_id', args.accountId)
     .maybeSingle()
-  if (contactErr || !contact?.phone) {
+  if (contactErr || !contact) {
     throw new Error('contact not found for this account')
   }
+
+  if (contact.channel && contact.channel !== 'whatsapp') {
+    return sendSocialMessage(db, { ...args, channel: contact.channel, externalId: contact.external_id, messageType: 'text' })
+  }
+  if (!contact.phone) throw new Error('contact phone missing')
 
   const sanitized = sanitizePhoneForMeta(contact.phone)
   if (!isValidE164(sanitized)) {
@@ -179,13 +185,18 @@ export async function engineSendMedia(
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone')
+    .select('id, phone, channel, external_id')
     .eq('id', args.contactId)
     .eq('account_id', args.accountId)
     .maybeSingle()
-  if (contactErr || !contact?.phone) {
+  if (contactErr || !contact) {
     throw new Error('contact not found for this account')
   }
+
+  if (contact.channel && contact.channel !== 'whatsapp') {
+    return sendSocialMessage(db, { ...args, channel: contact.channel, externalId: contact.external_id, messageType: args.kind, mediaUrl: args.link, text: args.caption })
+  }
+  if (!contact.phone) throw new Error('contact phone missing')
 
   const sanitized = sanitizePhoneForMeta(contact.phone)
   if (!isValidE164(sanitized)) {
@@ -331,13 +342,21 @@ async function sendInteractiveViaMeta(
   // Migration 017 moved both tables to account-scoped tenancy.
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone')
+    .select('id, phone, channel, external_id')
     .eq('id', input.contactId)
     .eq('account_id', input.accountId)
     .maybeSingle()
-  if (contactErr || !contact?.phone) {
+  if (contactErr || !contact) {
     throw new Error('contact not found for this account')
   }
+
+  if (contact.channel && contact.channel !== 'whatsapp') {
+    const interactivePayload: InteractiveMessagePayload = input.kind === 'buttons'
+      ? { kind: 'buttons', body: input.bodyText, header: input.headerText, footer: input.footerText, buttons: input.buttons }
+      : { kind: 'list', body: input.bodyText, header: input.headerText, footer: input.footerText, button_label: input.buttonLabel, sections: input.sections }
+    return sendSocialMessage(db, { ...input, channel: contact.channel, externalId: contact.external_id, messageType: 'interactive', interactivePayload })
+  }
+  if (!contact.phone) throw new Error('contact phone missing')
 
   const sanitized = sanitizePhoneForMeta(contact.phone)
   if (!isValidE164(sanitized)) {

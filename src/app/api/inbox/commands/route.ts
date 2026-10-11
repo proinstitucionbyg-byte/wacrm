@@ -60,9 +60,9 @@ export async function POST(request: Request) {
     const contact = Array.isArray(conversation.contact)
       ? conversation.contact[0]
       : conversation.contact;
-    if (contact?.channel !== 'whatsapp')
+    if (!['whatsapp', 'instagram', 'messenger'].includes(contact?.channel ?? ''))
       return NextResponse.json(
-        { error: 'Los bloques preparados están disponibles para WhatsApp.' },
+        { error: 'Este canal todavía no admite bloques preparados.' },
         { status: 400 }
       );
     // The server resolves an active block in this account, never arbitrary steps from the browser.

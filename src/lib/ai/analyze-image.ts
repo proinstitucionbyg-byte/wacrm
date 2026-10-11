@@ -286,9 +286,7 @@ async function readWithAnthropic(args: {
 export async function analyzeInboundImage(args: {
   db: SupabaseClient
   accountId: string
-  mediaId: string
-  accessToken: string
-}): Promise<AnalyzeInboundImageResult> {
+} & ({ mediaId: string; accessToken: string; media?: never } | { media: { buffer: Buffer; contentType: string }; mediaId?: never; accessToken?: never })): Promise<AnalyzeInboundImageResult> {
   let provider: AiProvider | null = null
   let model: string | null = null
   try {
@@ -297,15 +295,14 @@ export async function analyzeInboundImage(args: {
     provider = config.provider
     model = config.model
 
-    const mediaInfo = await getMediaUrl({
-      mediaId: args.mediaId,
-      accessToken: args.accessToken,
-    })
-    const { buffer, contentType } = await downloadMedia({
-      downloadUrl: mediaInfo.url,
-      accessToken: args.accessToken,
-    })
-    const mimeType = (contentType || mediaInfo.mimeType).split(';')[0].trim().toLowerCase()
+    let media = args.media
+    if (!media) {
+      const mediaInfo = await getMediaUrl({ mediaId: args.mediaId!, accessToken: args.accessToken! })
+      const downloaded = await downloadMedia({ downloadUrl: mediaInfo.url, accessToken: args.accessToken! })
+      media = { buffer: downloaded.buffer, contentType: downloaded.contentType || mediaInfo.mimeType }
+    }
+    const { buffer, contentType } = media
+    const mimeType = contentType.split(';')[0].trim().toLowerCase()
     if (!ALLOWED_IMAGE_TYPES.has(mimeType)) {
       return failed('unsupported_format', provider, model)
     }

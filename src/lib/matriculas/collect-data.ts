@@ -59,7 +59,7 @@ export function collectEnrollmentData(
       else if (/^(CELULAR|TELEFONO)/.test(label)) {
         const phone = value.replace(/[\s()-]/g, '');
         // Unnumbered supplied phone is additional to the WhatsApp contact number.
-        const field = /1$/.test(label) ? 'phone1' : 'phone2';
+        const field = /1$/.test(label) || (!data.phone1 && !/2$/.test(label)) ? 'phone1' : 'phone2';
         if (
           /^\+?\d{7,15}$/.test(phone) &&
           phone.replace(/^\+/, '') !== data.phone1?.replace(/^\+/, '')
