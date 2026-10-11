@@ -1,3 +1,4 @@
+import { resolveWhatsAppRecipient } from './recipient';
 // ============================================================
 // Outbound message send — the core that both the dashboard's
 // `/api/whatsapp/send` route and the public `/api/v1/messages`
@@ -39,9 +40,6 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
-  sanitizePhoneForMeta,
-  isValidE164,
-  phoneVariants,
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
@@ -274,7 +272,7 @@ export async function sendMessageToConversation(
   }
 
   const contact = conversation.contact;
-  if (!contact?.phone) {
+  if (!contact?.phone && !contact?.whatsapp_user_id) {
     throw new SendMessageError(
       'bad_request',
       'Contact phone number not found',
@@ -282,14 +280,17 @@ export async function sendMessageToConversation(
     );
   }
 
-  const sanitizedPhone = sanitizePhoneForMeta(contact.phone);
-  if (!isValidE164(sanitizedPhone)) {
+  let recipient: ReturnType<typeof resolveWhatsAppRecipient>;
+  try {
+    recipient = resolveWhatsAppRecipient(contact);
+  } catch {
     throw new SendMessageError(
       'bad_request',
       'Invalid phone number format',
       400
     );
   }
+  const sanitizedPhone = recipient.address;
 
   // WhatsApp config, account-scoped.
   const { data: config, error: configError } = await db
@@ -452,7 +453,7 @@ export async function sendMessageToConversation(
   let waMessageId = '';
   let workingPhone = sanitizedPhone;
   try {
-    const variants = phoneVariants(sanitizedPhone);
+    const variants = recipient.variants;
     let lastError: unknown = null;
 
     for (const variant of variants) {
@@ -481,7 +482,7 @@ export async function sendMessageToConversation(
     throw new SendMessageError('meta_error', `Meta API error: ${message}`, 502);
   }
 
-  if (workingPhone !== sanitizedPhone) {
+  if (recipient.isPhone && workingPhone !== sanitizedPhone) {
     console.log(
       `[send-message] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`
     );

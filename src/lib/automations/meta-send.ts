@@ -8,11 +8,9 @@ import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
 } from '@/lib/flows/meta-send'
+import { resolveWhatsAppRecipient } from '@/lib/whatsapp/recipient'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
-  sanitizePhoneForMeta,
-  isValidE164,
-  phoneVariants,
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
@@ -145,7 +143,7 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   // new tenancy column.
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone, channel, external_id')
+    .select('id, phone, whatsapp_user_id, channel, external_id')
     .eq('id', input.contactId)
     .eq('account_id', input.accountId)
     .maybeSingle()
@@ -161,12 +159,8 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
       ...(input.kind === 'media' ? { text: input.caption, mediaUrl: input.mediaUrl, filename: input.filename, transcript: input.transcript } : {}),
     })
   }
-  if (!contact.phone) throw new Error('contact phone missing')
-
-  const sanitized = sanitizePhoneForMeta(contact.phone)
-  if (!isValidE164(sanitized)) {
-    throw new Error(`contact phone invalid: ${contact.phone}`)
-  }
+  const recipient = resolveWhatsAppRecipient(contact)
+  const sanitized = recipient.address
 
   const { data: config, error: configErr } = await db
     .from('whatsapp_config')
@@ -215,7 +209,7 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   // Same phone-variant retry as /api/whatsapp/send — Meta sandbox and
   // numbers registered with/without a trunk 0 both require this to
   // reliably land a message.
-  const variants = phoneVariants(sanitized)
+  const variants = recipient.variants
   let workingPhone = sanitized
   let waMessageId = ''
   let lastError: unknown = null
@@ -233,7 +227,7 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   }
   if (lastError) throw lastError
 
-  if (workingPhone !== sanitized) {
+  if (recipient.isPhone && workingPhone !== sanitized) {
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
 

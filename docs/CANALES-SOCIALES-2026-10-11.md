@@ -80,3 +80,10 @@
 - Migraciones aditivas aplicadas. Pruebas transaccionales revertidas: agente no puede cambiar directamente el corte; CEO elimina/lista/recupera; RLS permite al CEO ocultar/restaurar sus mensajes y leer informes, e impide a agentes ver informes. Sin eliminación permanente de datos de clientes.
 - 1.143 pruebas aprobadas en 122 archivos; build de producción aprobado. La compilación detectó una referencia fuera de contexto en el manejador realtime, corregida antes de publicar.
 - Video real actualizado: `output/INSTAGRAM-CRM-Y-ENTREGA-2026-10-11.mp4`, secuencia del CRM y cliente Instagram con reproducción real, con cortes entre tomas y sin sonido grabado. Se recorta la lista de otros contactos personales. No sustituye el requisito de credenciales del revisor ni demuestra acceso público aprobado.
+
+## WhatsApp sin teléfono visible: corrección de respuesta
+
+- Se encontró una conversación con un único «Hola» recibido y ninguna respuesta saliente: el contacto tenía `whatsapp_user_id` válido y teléfono vacío. El envío exigía teléfono y se detenía antes de llamar a Meta. El contador de IA no demostraba un envío exitoso.
+- Flows/IA, automatizaciones y envío manual ahora resuelven el destinatario por teléfono válido o, en su ausencia, por el identificador opaco de WhatsApp. Se conserva la ruta de teléfonos; el identificador nunca se normaliza como teléfono, no genera variantes y no se escribe en la columna teléfono.
+- Se reutiliza el soporte de identificadores ya existente en la capa Meta. No se cambian credenciales, permisos ni los transportes de Instagram/Messenger. TikTok sigue pendiente de habilitación y transporte propios.
+- Regresión: resolución del destinatario y envíos con teléfono oculto de texto, imagen, audio, botones y listas, comprobando persistencia de éxito y ausencia de modificación del teléfono. La entrega real después de publicar debe comprobarse por separado.
