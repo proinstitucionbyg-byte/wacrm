@@ -16,6 +16,7 @@ import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isVisibleInInbox } from '@/lib/inbox/cleanup';
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -140,6 +141,7 @@ export default function InboxPage() {
       }
       if (!data) return;
       const fetched = normalizeConversation(data);
+      if (!isVisibleInInbox(fetched)) return;
 
 setConversations((prev) => {
   const existing = prev.find((c) => c.id === fetched.id);
@@ -294,6 +296,11 @@ if (activeConversation?.id === fetched.id) {
       }
 
       if (event.eventType === "UPDATE") {
+        if (!isVisibleInInbox(conv)) {
+          setConversations(prev => prev.filter(c => c.id !== conv.id));
+          if (activeConversation?.id === conv.id) {setActiveConversation(null);setActiveContact(null);setMessages([]);}
+          return;
+        }
         if (knownConvIdsRef.current.has(conv.id)) {
           // If this UPDATE is for the conv the user is currently viewing,
           // suppress the incoming unread_count — the user is reading it

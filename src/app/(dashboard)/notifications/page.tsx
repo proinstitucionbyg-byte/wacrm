@@ -11,6 +11,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 // Icon per notification type. Only one type exists today
 // (conversation_assigned) but this keeps future types a one-line add.
@@ -29,6 +30,7 @@ export default function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
   const [completing, setCompleting] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Notification | null>(null);
   const load = useCallback(async () => {
     if (!accountId) return;
     const supabase = createClient();
@@ -127,7 +129,7 @@ export default function NotificationsPage() {
       if (!n.read_at) markRead(n.id);
       if (n.target_url && /^https:\/\/docs\.google\.com\/spreadsheets\/d\//.test(n.target_url)) {
         window.open(n.target_url, '_blank', 'noopener,noreferrer');
-      } else if (n.target_url && /^\/(inbox|team-chat|enrollments)(?:[/?]|$)/.test(n.target_url)) {
+      } else if (n.target_url && /^\/(inbox|team-chat|enrollments|reports)(?:[/?]|$)/.test(n.target_url)) {
         router.push(n.target_url);
       } else if (n.team_thread_id) {
         router.push(`/team-chat?thread=${n.team_thread_id}`);
@@ -224,7 +226,7 @@ export default function NotificationsPage() {
               <li key={n.id} className={n.type==='system_notice' ? 'rounded-xl border-l-4 border-sky-500' : undefined}>
                 <button
                   type="button"
-                  onClick={() => handleClick(n)}
+                  onClick={() => { setDetail(n); if (!n.read_at) void markRead(n.id); }}
                   className={cn(
                     "flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors",
                     isUnread
@@ -285,6 +287,17 @@ export default function NotificationsPage() {
           })}
         </ul>
       )}
+      <Dialog open={detail !== null} onOpenChange={(open) => { if (!open) setDetail(null); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="pr-6 break-words">{detail?.title}</DialogTitle>
+            <DialogDescription>Detalle completo del aviso. Leerlo no marca la tarea como realizada.</DialogDescription>
+          </DialogHeader>
+          <div className="whitespace-pre-wrap break-words text-base leading-relaxed">{detail?.body || 'Este aviso no contiene texto adicional.'}</div>
+          {detail && (detail.target_url || detail.team_thread_id || detail.conversation_id) && <Button variant="outline" onClick={() => handleClick(detail)}>ABRIR HOJA O CONVERSACIÓN</Button>}
+          {detail?.requires_action && (detail.dedup_key?.startsWith('calendar:') ? <CalendarActions notice={notifications.find(n => n.id === detail.id) ?? detail} onChanged={load}/> : <Button disabled={completing === detail.id} onClick={() => void completeTask(notifications.find(n => n.id === detail.id) ?? detail)}>{notifications.find(n => n.id === detail.id)?.completed_at ? '✓ REALIZADO · DESMARCAR' : 'MARCAR COMO REALIZADO'}</Button>)}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

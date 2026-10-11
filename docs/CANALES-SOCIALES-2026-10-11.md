@@ -49,9 +49,34 @@
 - Commit 8068f64 publicado: EasyPanel Success 2026-10-11 10:38:20 UTC. Prueba IG-LUIS-1011D: entrega real de la imagen y el texto original de Nutrición en Instagram. El bloqueo de autorización desapareció con la ruta correcta y sin cambiar la clave. El audio del bloque falló con código 100; no considerar todavía el bloque completo aprobado.
 - Se prepara conversión del audio original Ogg/Opus a M4A/AAC para Instagram exclusivamente. El archivo original y WhatsApp se conservan; Meta recibe un enlace privado temporal. Se añade ffmpeg al contenedor, descarga limitada y protección contra listas de reproducción, con limpieza de archivos temporales. 1123 pruebas aprobadas; entrega real del audio pendiente de la siguiente publicación.
 
+## Resultado real posterior: Instagram desbloqueado en pruebas
+
+- Commit c782f76 publicado: EasyPanel Success 2026-10-11 11:56:43 UTC. Ninguna clave rotada. La ruta y la conversión de audio fueron las correcciones aplicadas.
+- Prueba IG-LUIS-1011E desde luistbrayan a instituto.insticrece: llegaron la imagen original, el texto original y el audio de 1:46. Confirmación de envío y registro de audio; reproducción disponible en el cliente nativo. Ejecución e4bf1406-8013-4ce0-87e1-6219574432b2 inicialmente success; luego partial al continuar el usuario con el siguiente bloque (sin error de envío).
+- Continuación real solicitando activar la promoción y medios Yape/Plin: se entregó el bloque original de medios de pago. Ejecución 892961a9-9591-4b04-82a2-e0e99d094aa7 success, sin error.
+- Evidencias locales: output/INSTAGRAM-BLOQUE-COMPLETO-2026-10-11.jpg y output/INSTAGRAM-MEDIOS-PAGO-2026-10-11.jpg. Ambas quedaron adjuntadas al borrador de revisión de Meta (3 archivos en total, incluyendo la grabación antigua).
+- Se corrigieron las instrucciones de revisión: URL anterior mal escrita e instrucciones sin pasos de prueba. Guardado automático confirmado. No se envió la revisión pública: aún hace falta acceso dedicado del revisor y completar los requisitos del permiso, incluido el video vigente. No afirmar habilitación para todos los usuarios a partir de una prueba con el administrador.
+
+## TikTok: bloqueo de habilitación escalado
+
+- Privacidad: formulario original sigue mostrando Enviada; no duplicado.
+- Consulta oficial #4487581 enviada el 2026-10-11 07:00:54 Lima, categoría Allowlisting / Rate Limit / Scope Change. Estado Processing; soporte confirmó recepción y que responderá. Se pidió el estado de la solicitud, requisitos pendientes y enlace del formulario adicional de Accounts API si corresponde.
+- No se solicitó ni introdujo otra clave. No se simuló éxito de una conexión inexistente. Todavía faltan habilitación Business Messaging, autorización de cuenta y transporte TikTok en el CRM; no basta esperar aprobación para que el código aparezca automáticamente.
+- Evidencia: output/TIKTOK-TICKET-4487581-2026-10-11.jpg.
+
 ## Nuevos requisitos registrados, pendientes de implementación
 
 - El CEO puede borrar conversaciones completas y delegar el permiso. Para mensajes recibidos, ocultar localmente; para enviados, verificar primero las capacidades y límites reales de la API de Meta para retirar para todos, sin asumir que coincide con la aplicación de WhatsApp.
 - Estadística de primera frase textual entrante y primera frase textual saliente por conversación, ignorando imágenes iniciales. Informe semanal los sábados temprano, acumulado mensual y alertas solo para CEO.
 - Abrir el detalle completo de las alertas al pulsarlas para que el texto sea legible.
 - Estos requisitos no se consideran implementados; la prioridad actual sigue siendo Instagram y TikTok.
+
+## Implementación posterior: gestión del Inbox, informes y alertas
+
+- Eliminación recuperable del historial del Inbox, lista de recuperación y ocultación de mensajes solo para el usuario. No borra archivos, matrículas, vouchers ni mensajes del teléfono del estudiante. No se implementa retirada para todos sin un endpoint oficial comprobado.
+- Nuevos permisos `inbox_management.conversations` y `inbox_management.messages`: exclusivos del CEO por defecto, delegables explícitamente por él. Administradores y asesoras no los heredan; las rutas antiguas de permisos también están protegidas. No se cambia ningún otro permiso existente.
+- Informes de primera frase y primera palabra, recibida y enviada por conversación; imágenes y audios iniciales se ignoran. Tabla y CSV exclusivos del CEO, acumulación mensual hasta el corte. Generación/aviso semanal sábado 07:00 Lima mediante el programador existente del contenedor, independiente de la laptop.
+- Alertas abren un diálogo amplio y desplazable, conservando sus listas de comprobación y acceso a hoja/conversación.
+- Migraciones aditivas aplicadas. Pruebas transaccionales revertidas: agente no puede cambiar directamente el corte; CEO elimina/lista/recupera; RLS permite al CEO ocultar/restaurar sus mensajes y leer informes, e impide a agentes ver informes. Sin eliminación permanente de datos de clientes.
+- 1.143 pruebas aprobadas en 122 archivos; build de producción aprobado. La compilación detectó una referencia fuera de contexto en el manejador realtime, corregida antes de publicar.
+- Video real actualizado: `output/INSTAGRAM-CRM-Y-ENTREGA-2026-10-11.mp4`, secuencia del CRM y cliente Instagram con reproducción real, con cortes entre tomas y sin sonido grabado. Se recorta la lista de otros contactos personales. No sustituye el requisito de credenciales del revisor ni demuestra acceso público aprobado.

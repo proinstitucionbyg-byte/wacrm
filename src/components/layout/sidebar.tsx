@@ -93,6 +93,7 @@ interface NavItem {
    * Purely informational — doesn't affect routing or access.
    */
   beta?: boolean;
+  ownerOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -111,6 +112,7 @@ const navItems: NavItem[] = [
   { href: "/payments", labelKey: "", label: "Validación de pagos", icon: CheckCheck, permission: ["payments", "view"] },
   { href: "/enrollments", labelKey: "", label: "Registro de matrículas", icon: Users, permission: ["enrollments", "view"] },
   { href: "/team-chat", labelKey: "", label: "Chat interno", icon: UsersRound, permission: ["inbox", "view"] },
+  {href:'/reports',labelKey:'',label:'Estadísticas de primeras frases',icon:LayoutDashboard,ownerOnly:true},
   {
     href: "/notifications",
     labelKey: "notifications",
@@ -283,7 +285,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             {navItems
   .filter(
     (item) =>
-      (item.href !== '/team-chat' || accountRole !== 'viewer') && (!item.permission || can(item.permission[0], item.permission[1])),
+      (!item.ownerOnly || accountRole === 'owner') && (item.href !== '/team-chat' || accountRole !== 'viewer') && (!item.permission || can(item.permission[0], item.permission[1])),
   )
   .map((item) => {
               const isActive =

@@ -33,6 +33,8 @@ import {
 import { TagManager } from '@/components/settings/tag-manager';
 import { useCan } from '@/hooks/use-can';
 import { toast } from 'sonner';
+import { isVisibleInInbox } from '@/lib/inbox/cleanup';
+import { InboxRecovery } from './inbox-recovery';
 
 interface ConversationListProps {
   activeConversationId: string | null;
@@ -161,7 +163,7 @@ export function ConversationList({
         return;
       }
 
-      onConversationsLoadedRef.current(normalizeConversations(data ?? []));
+      onConversationsLoadedRef.current(normalizeConversations(data ?? []).filter(isVisibleInInbox));
       setLoading(false);
     })();
 
@@ -206,7 +208,7 @@ export function ConversationList({
   }, [tags]);
 
   const filtered = useMemo(() => {
-    let result = conversations;
+    let result = conversations.filter(isVisibleInInbox);
 
     if (filter === 'unread') {
       result = result.filter((c) => c.unread_count > 0);
@@ -274,6 +276,7 @@ export function ConversationList({
     <div className="border-border bg-card flex h-full w-full flex-col border-r lg:w-80">
       {/* Search + Filter */}
       <div className="border-border space-y-3 border-b p-4">
+        <InboxRecovery onChanged={() => setLabelsRevision(value => value + 1)}/>
         {canViewPayments && (
           <Link
             href="/payments"

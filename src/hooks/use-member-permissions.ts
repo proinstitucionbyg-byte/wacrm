@@ -39,7 +39,7 @@ export function useMemberPermissions() {
         return;
       }
 
-      if (accountRole === "owner" || accountRole === "admin") {
+      if (accountRole === "owner") {
         setPermissions({});
         setLoading(false);
         return;
@@ -131,7 +131,7 @@ export function useMemberPermissions() {
 
   const can = useCallback(
     (module: string, action: string) => {
-      if (accountRole === "owner" || accountRole === "admin") {
+      if (accountRole === "owner" || (accountRole === "admin" && module !== 'inbox_management')) {
         return true;
       }
 

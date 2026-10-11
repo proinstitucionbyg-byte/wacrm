@@ -59,6 +59,7 @@ import {
 } from '@/lib/inbox/adviser-introduction';
 import { useCan } from '@/hooks/use-can';
 import { loadConversationMessages } from '@/lib/inbox/load-messages';
+import { InboxCleanup } from './inbox-cleanup';
 import {
   Dialog,
   DialogContent,
@@ -205,6 +206,7 @@ export function MessageThread({
     (Profile & { area?: string | null })[]
   >([]);
   const canAssign = useCan('inbox.assign');
+  const canHideMessages = useCan('inbox_management.messages');
   const [transferPicker, setTransferPicker] = useState(false);
   const [transferArea, setTransferArea] = useState('');
   const [transfer, setTransfer] = useState<{
@@ -1218,6 +1220,7 @@ export function MessageThread({
             )}
 
             {/* Status dropdown */}
+            <InboxCleanup conversationId={conversation.id} onCleared={() => onBack?.()} onRefresh={onRefresh}/>
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
@@ -1378,6 +1381,13 @@ export function MessageThread({
                         key={msg.id}
                         message={msg}
                         onReply={() => handleStartReply(msg)}
+                        onHide={canHideMessages && !msg.id.startsWith('temp-') ? async () => {
+                          if (!user) return;
+                          const {error} = await createClient().from('inbox_hidden_messages').insert({user_id:user.id,message_id:msg.id});
+                          if(error) { toast.error('No se pudo ocultar el mensaje.'); return; }
+                          onMessagesLoaded(messages.filter(m => m.id !== msg.id));
+                          toast.success('Mensaje oculto solo para ti.');
+                        } : undefined}
                         onReact={(emoji) => {
                           if (emoji) void postReaction(msg.id, emoji);
                         }}

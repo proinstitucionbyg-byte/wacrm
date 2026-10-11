@@ -734,7 +734,7 @@ async function loadMemberPermissions(userId: string) {
   ) : (
     Array.from(new Set(memberPermissions.map((permission) => permission.module))).map((module) => (
       <section key={module} className="space-y-2">
-      <h3 className="sticky top-0 bg-popover py-2 text-sm font-semibold">{({payments:'FINANZAS · VALIDACION DE PAGOS',enrollments:'REGISTRO DE MATRICULAS',inbox:'ATENCION · CHATS Y ETIQUETAS',contacts:'CONTACTOS',pipelines:'PROCESO DE VENTAS',automations:'AUTOMATIZACIONES',broadcasts:'ENVIOS MASIVOS',catalogs:'CATALOGOS',notifications:'NOTIFICACIONES',ai_agents:'AGENTES DE IA'} as Record<string,string>)[module] ?? module.toUpperCase()}</h3>
+      <h3 className="sticky top-0 bg-popover py-2 text-sm font-semibold">{({inbox_management:'GESTIÓN DEL INBOX · ELIMINACIÓN Y RECUPERACIÓN',payments:'FINANZAS · VALIDACION DE PAGOS',enrollments:'REGISTRO DE MATRICULAS',inbox:'ATENCION · CHATS Y ETIQUETAS',contacts:'CONTACTOS',pipelines:'PROCESO DE VENTAS',automations:'AUTOMATIZACIONES',broadcasts:'ENVIOS MASIVOS',catalogs:'CATALOGOS',notifications:'NOTIFICACIONES',ai_agents:'AGENTES DE IA'} as Record<string,string>)[module] ?? module.toUpperCase()}</h3>
       {memberPermissions.filter((permission) => permission.module === module).map((permission) => (
       <div
         key={permission.permission_id}
@@ -753,7 +753,7 @@ async function loadMemberPermissions(userId: string) {
           type="checkbox"
           aria-label={permission.label}
           checked={permission.allowed}
-          disabled={applyingPreset || savingPermission !== null || ['owner', 'admin'].includes(permission.source)}
+          disabled={applyingPreset || savingPermission !== null || ['owner', 'admin'].includes(permission.source) || (permission.module === 'inbox_management' && accountRole !== 'owner')}
           onChange={async (e) => {
             if (!permissionsMember) return;
 

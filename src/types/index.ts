@@ -161,6 +161,7 @@ export interface ContactNote {
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
 export interface Conversation {
+  inbox_cleared_at?: string | null;
   id: string;
   user_id: string;
   contact_id: string;

@@ -9,7 +9,13 @@ export async function loadConversationMessages(db: SupabaseClient, conversationI
     const { data, error } = await db.from('messages').select('*').eq('conversation_id', conversationId)
       .order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + pageSize - 1);
     if (error) throw error;
-    messages.push(...(data ?? []) as Message[]);
+    const page = (data ?? []) as Message[];
+    if (page.length) {
+      const { data: hidden, error: hiddenError } = await db.from('inbox_hidden_messages').select('message_id').in('message_id', page.map(m => m.id));
+      if (hiddenError) throw hiddenError;
+      const ids = new Set((hidden ?? []).map(row => row.message_id));
+      messages.push(...page.filter(m => !ids.has(m.id)));
+    }
     if (!data || data.length < pageSize) break;
   }
   return messages.reverse();
