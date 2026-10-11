@@ -294,6 +294,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
       contactId: conversation.contact_id,
       conversationId: watch.conversation_id,
       sequenceId: id,
+      requireComplete: true,
       messageText: incompleteIntakeText(phase, draft.data),
     });
     const saved = await db

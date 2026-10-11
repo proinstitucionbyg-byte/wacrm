@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
     ownedCustomField: null as { id: string } | null,
     automations: [] as Record<string, unknown>[],
     steps: [] as Record<string, unknown>[],
+    logStatus: 'success',
     fromCalls: [] as string[],
     updateCalls: [] as { table: string; filters: [string, string, unknown][] }[],
     upsertCalls: [] as { table: string; payload: unknown }[],
@@ -43,11 +44,15 @@ vi.mock("./admin-client", () => {
       }
       return { data: null, error: null };
     }
-    if (table === "automations") return { data: state.automations, error: null };
+    if (table === "automations") return {
+      data: ops.filters.some(([operator, key]) => operator === 'eq' && key === 'id')
+        ? state.automations[0] ?? null : state.automations,
+      error: null,
+    };
     if (table === "automation_logs") {
       if (type === "insert") return { data: { id: "log1" }, error: null };
       if (type === "update") return { data: null, error: null };
-      return { data: { steps_executed: [], status: "success" }, error: null };
+      return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
     if (table === "automation_steps") return { data: state.steps, error: null };
     return { data: null, error: null };
@@ -96,7 +101,7 @@ vi.mock("./meta-send", () => ({
   engineSendInteractive: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
 }));
 
-import { runAutomationsForTrigger, triggerMatches } from "./engine";
+import { runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
 import type { Automation } from "@/types";
 
 const ACCOUNT = "acct-1";
@@ -106,9 +111,39 @@ beforeEach(() => {
   h.state.ownedCustomField = null;
   h.state.automations = [];
   h.state.steps = [];
+  h.state.logStatus = 'success';
   h.state.fromCalls = [];
   h.state.updateCalls = [];
   h.state.upsertCalls = [];
+});
+
+describe('confirmed complete delivery', () => {
+  it.each(['partial', 'failed'])('does not confirm %s as complete', async (status) => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.logStatus = status;
+    expect(await runAutomationById({
+      accountId: ACCOUNT, automationId: 'a1', contactId: 'c1',
+      conversationId: 'chat', sequenceId: 'welcome', requireComplete: true,
+    })).toBe(false);
+  });
+  it('confirms a successful block', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    expect(await runAutomationById({
+      accountId: ACCOUNT, automationId: 'a1', contactId: 'c1',
+      conversationId: 'chat', sequenceId: 'welcome', requireComplete: true,
+    })).toBe(true);
+  });
+  it('preserves existing partial launch behavior without the strict option', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.logStatus = 'partial';
+    expect(await runAutomationById({
+      accountId: ACCOUNT, automationId: 'a1', contactId: 'c1',
+      conversationId: 'chat', sequenceId: 'welcome',
+    })).toBe(true);
+  });
 });
 
 describe("runAutomationsForTrigger — tenant isolation", () => {

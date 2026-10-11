@@ -177,6 +177,7 @@ export async function runAutomationById(input: {
   messageText?: string
   manualAgentId?: string
   sequenceId?: string
+  requireComplete?: boolean
 }): Promise<boolean> {
   try {
     const db = supabaseAdmin()
@@ -218,10 +219,12 @@ export async function runAutomationById(input: {
         ...(input.sequenceId ? { enrollment_sequence_id: input.sequenceId } : {}),
       },
     })
-    if (input.manualAgentId || input.sequenceId) {
+    if (input.manualAgentId || input.sequenceId || input.requireComplete) {
       if (!logId) return false
       const { data: result, error: resultError } = await db.from('automation_logs').select('status').eq('id', logId).single()
-      return !resultError && ['success','partial'].includes(result?.status)
+      return !resultError && (input.requireComplete
+        ? result?.status === 'success'
+        : ['success','partial'].includes(result?.status))
     }
     return true
   } catch (err) {

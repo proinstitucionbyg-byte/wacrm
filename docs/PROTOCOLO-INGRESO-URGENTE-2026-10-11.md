@@ -86,3 +86,5 @@ El protocolo de datos pendientes está implementado: cola tras validación del C
 Comprobaciones: 1.196 pruebas y compilación correctas; pruebas transaccionales en la base de datos con reversión de los registros ficticios, incluidos validación obligatoria, permisos, plazos y check humano. La entrega real a un estudiante no se acredita mediante estas simulaciones.
 
 La entrega automática del enlace del día depende de conectar Calendar o configurar una fuente verificada: esa conexión fue aplazada y no está instalada. La observación de datos pendientes está en el CRM; este cambio no crea una nueva fila de datos incompletos en Google Sheets. Cerrada la ventana del canal, se avisa a fidelización y no se envían mensajes libres fuera de plazo.
+
+La bienvenida excepcional exige que el bloque termine con resultado correcto. Un envío parcial queda para revisión y no se marca como bienvenida enviada ni se reintenta automáticamente. Los bloques existentes conservan su criterio de lanzamiento.

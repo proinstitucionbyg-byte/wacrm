@@ -206,6 +206,7 @@ describe('cola real de registro incompleto', () => {
         contactId: 'student',
         automationId: 'block',
         sequenceId: 'welcome',
+        requireComplete: true,
       })
     );
     expect(
