@@ -27,6 +27,7 @@ import {
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 import { automationAudioEvidence } from './audio-evidence'
+import { greetingAutomationId, isGreetingAutomation, matchesGreeting } from './greeting-continuity'
 
 // ------------------------------------------------------------
 // Public API
@@ -39,6 +40,10 @@ export interface AutomationContext {
   manual_agent_id?: string
   /** Raw message text, for keyword_match + message_content conditions. */
   message_text?: string
+  /** Previous customer message, captured before inserting this inbound. */
+  previous_inbound_at?: string
+  /** Provider timestamp of this inbound, used only for greeting continuity. */
+  inbound_at?: string
   /** Conversation the event belongs to, if any. */
   conversation_id?: string
   /** Arbitrary variables accumulated during execution. */
@@ -123,22 +128,35 @@ export async function runAutomationsForTrigger(
       return false;
     }
 
+    const ordinaryMatches = (automations as Automation[]).filter((automation) =>
+      !isGreetingAutomation(automation.id) && triggerMatches(automation, input.context),
+    );
+    const selectedGreetingId = greetingAutomationId(
+      input.context?.previous_inbound_at,
+      input.context?.inbound_at,
+    );
+    const greetingMatches = input.triggerType === 'keyword_match' && ordinaryMatches.length === 0
+      ? (automations as Automation[]).filter((automation) =>
+          automation.id === selectedGreetingId
+          && matchesGreeting(automation, input.context?.message_text),
+        )
+      : [];
+    const selectedAutomations = [...ordinaryMatches, ...greetingMatches];
+
     let matched = false;
     let cancelledOld = false;
 
-    for (const automation of automations as Automation[]) {
-      if (!triggerMatches(automation, input.context)) {
-        continue;
-      }
-
+    for (const automation of selectedAutomations) {
       matched = true;
-      // Cancela pendientes VIEJOS antes de ejecutar, una sola vez.
-      if (input.contactId && !cancelledOld) {
+      // A greeting is only a menu. Its unanswered buttons must not cancel an
+      // 18-hour sales/fidelity wait already scheduled for this contact.
+      if (input.contactId && !cancelledOld && !isGreetingAutomation(automation.id)) {
         cancelledOld = true;
         await db
           .from("automation_pending_executions")
           .update({ status: "cancelled" })
           .eq("contact_id", input.contactId)
+          .eq("account_id", input.accountId)
           .eq("status", "pending")
           .is('context->>enrollment_sequence_id', null);
       }
@@ -200,13 +218,16 @@ export async function runAutomationById(input: {
     if (error || !automation) return false
     if ((automation.trigger_config as Record<string,unknown>)?.internal_only && !input.sequenceId) return false
 
-    // Same as the normal dispatcher: cancel stale pending waits first.
-    await db
-      .from('automation_pending_executions')
-      .update({ status: 'cancelled' })
-      .eq('contact_id', input.contactId)
-      .eq('status', 'pending')
-      .is('context->>enrollment_sequence_id', null)
+    // The two existing greetings only show a menu; they preserve prior waits.
+    if (!isGreetingAutomation(automation.id)) {
+      await db
+        .from('automation_pending_executions')
+        .update({ status: 'cancelled' })
+        .eq('contact_id', input.contactId)
+        .eq('account_id', input.accountId)
+        .eq('status', 'pending')
+        .is('context->>enrollment_sequence_id', null)
+    }
 
     const logId = await executeAutomation(automation as Automation, {
       accountId: input.accountId,

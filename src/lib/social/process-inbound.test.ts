@@ -24,6 +24,7 @@ function database(results: unknown[]) {
     const chain = {
       select: () => chain,
       eq: (...args: unknown[]) => { filters.push([table, ...args]); return chain },
+      order: () => chain, limit: () => chain,
       is: () => chain,
       insert: (value: unknown) => { writes.push({ table, kind: 'insert', value }); return chain },
       update: (value: unknown) => { writes.push({ table, kind: 'update', value }); return chain },
@@ -60,6 +61,13 @@ describe('social intake', () => {
     expect(writes).toContainEqual(expect.objectContaining({ table: 'messages', value: expect.objectContaining({ sender_type: 'customer', message_id: 'mid1', content_text: 'Hola' }) }))
     expect(filters).toContainEqual(['contacts', 'account_id', 'acct'])
     expect(mocks.collect).toHaveBeenCalledWith(db, 'acct', 'conv')
+  })
+  it('passes the prior inbound time to continuity routing', async () => {
+    const previous = '2026-10-10T22:00:00Z'
+    const { db } = database([ok({ id: 'contact', phone: '' }), ok({ id: 'conv' }), ok(),
+      { data: [{ created_at: previous }], count: 1, error: null }, ok({ id: 'msg' }), ok()])
+    const context = await storeSocialInbound(db, 'instagram', account, incoming)
+    expect(context).toMatchObject({ previousInboundAt: previous, inboundAt: incoming.createdAt })
   })
   it('ignores a previously stored webhook retry', async () => {
     const { db, writes } = database([ok({ id: 'contact', phone: '' }), ok({ id: 'conv' }), ok({ id: 'already' })])

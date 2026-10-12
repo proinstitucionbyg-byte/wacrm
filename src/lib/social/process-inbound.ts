@@ -21,6 +21,7 @@ export interface SocialDispatchContext {
   accountId: string; userId: string; contactId: string; conversationId: string
   messageId: string; text: string; replyId: string | null
   isFirstInboundMessage: boolean; wasCreated: boolean; hasImageEvidence: boolean
+  previousInboundAt?: string; inboundAt?: string
 }
 
 /** Store all attachments before replying. OCR is evidence, never payment approval. */
@@ -53,8 +54,11 @@ export async function storeSocialInbound(db: SupabaseClient, channel: SocialChan
   const prior = await db.from('messages').select('id').eq('conversation_id', conversation.id).eq('message_id', inbound.messageId).maybeSingle()
   if (prior.error) throw prior.error
   if (prior.data) return null
-  const { count, error: countError } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('conversation_id', conversation.id).eq('sender_type', 'customer')
+  const { data: previousRows, count, error: countError } = await db.from('messages')
+    .select('created_at', { count: 'exact' }).eq('conversation_id', conversation.id)
+    .eq('sender_type', 'customer').order('created_at', { ascending: false }).limit(1)
   if (countError) throw countError
+  const previousInboundAt = previousRows?.[0]?.created_at ?? undefined
   let replyToId: string | null = null
   if (inbound.replyTo) {
     const parent = await db.from('messages').select('id').eq('conversation_id', conversation.id).eq('message_id', inbound.replyTo).maybeSingle()
@@ -108,7 +112,8 @@ export async function storeSocialInbound(db: SupabaseClient, channel: SocialChan
   try { await collectConversationEnrollments(db, account.id, conversation.id) }
   catch (error) { console.error('[social] enrollment data needs review', error) }
   return { accountId: account.id, userId: account.owner_user_id, contactId: contact.id, conversationId: conversation.id,
-    messageId: inbound.messageId, text: dispatchText, replyId: inbound.replyId, isFirstInboundMessage: (count ?? 0) === 0, wasCreated, hasImageEvidence }
+    messageId: inbound.messageId, text: dispatchText, replyId: inbound.replyId, isFirstInboundMessage: (count ?? 0) === 0, wasCreated, hasImageEvidence,
+    previousInboundAt, inboundAt: inbound.createdAt }
 }
 
 /** Same precedence as WhatsApp: human pause, sales routing, flows, stored
@@ -135,7 +140,8 @@ export async function dispatchSocialInbound(db: SupabaseClient, input: SocialDis
     if (!consumed) { triggers.push('new_message_received', 'keyword_match'); if (input.replyId) triggers.push('interactive_reply') }
     for (const triggerType of triggers) {
       matched = await runAutomationsForTrigger({ accountId: input.accountId, contactId: input.contactId, triggerType,
-        context: { message_text: input.text, conversation_id: input.conversationId, interactive_reply_id: input.replyId ?? undefined } }) || matched
+        context: { message_text: input.text, conversation_id: input.conversationId, interactive_reply_id: input.replyId ?? undefined,
+          previous_inbound_at: input.previousInboundAt, inbound_at: input.inboundAt } }) || matched
     }
   }
   if (conversation.ai_enabled !== false && !humanRecentlyActive && !consumed && !matched && !input.replyId && (input.text.trim() || input.hasImageEvidence)) {

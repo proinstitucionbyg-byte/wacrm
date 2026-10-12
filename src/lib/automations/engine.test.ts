@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
     fromCalls: [] as string[],
     updateCalls: [] as { table: string; filters: [string, string, unknown][] }[],
     upsertCalls: [] as { table: string; payload: unknown }[],
+    logAutomationIds: [] as string[],
+    pendingCancels: 0,
   },
 }));
 
@@ -50,11 +52,18 @@ vi.mock("./admin-client", () => {
       error: null,
     };
     if (table === "automation_logs") {
-      if (type === "insert") return { data: { id: "log1" }, error: null };
+      if (type === "insert") {
+        state.logAutomationIds.push((ops.payload as { automation_id: string }).automation_id);
+        return { data: { id: "log1" }, error: null };
+      }
       if (type === "update") return { data: null, error: null };
       return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
     if (table === "automation_steps") return { data: state.steps, error: null };
+    if (table === "automation_pending_executions" && type === "update") {
+      state.pendingCancels++;
+      return { data: null, error: null };
+    }
     return { data: null, error: null };
   }
 
@@ -102,6 +111,7 @@ vi.mock("./meta-send", () => ({
 }));
 
 import { runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
+import { INITIAL_GREETING_ID, RETURN_GREETING_ID } from './greeting-continuity';
 import type { Automation } from "@/types";
 
 const ACCOUNT = "acct-1";
@@ -115,6 +125,8 @@ beforeEach(() => {
   h.state.fromCalls = [];
   h.state.updateCalls = [];
   h.state.upsertCalls = [];
+  h.state.logAutomationIds = [];
+  h.state.pendingCancels = 0;
 });
 
 describe('confirmed complete delivery', () => {
@@ -197,6 +209,26 @@ describe("runAutomationsForTrigger — tenant isolation", () => {
     const filters = h.state.updateCalls[0].filters;
     expect(filters).toContainEqual(["eq", "id", "c1"]);
     expect(filters).toContainEqual(["eq", "account_id", ACCOUNT]);
+  });
+});
+
+describe('greeting continuity dispatch', () => {
+  const greetings = [INITIAL_GREETING_ID, RETURN_GREETING_ID].map((id) => ({
+    id, account_id: ACCOUNT, user_id: 'u1', trigger_type: 'keyword_match',
+    trigger_config: { match_type: 'exact', keywords: ['hola'] }, is_active: true,
+  }));
+
+  it.each([
+    ['2026-10-12T12:01:00.000Z', RETURN_GREETING_ID],
+    ['2026-10-12T12:00:00.000Z', INITIAL_GREETING_ID],
+  ])('runs only the right existing greeting and preserves pending waits', async (previous, expected) => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = greetings;
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Hola!', conversation_id: 'chat', previous_inbound_at: previous,
+        inbound_at: '2026-10-12T15:00:00.000Z' } });
+    expect(h.state.logAutomationIds).toEqual([expected]);
+    expect(h.state.pendingCancels).toBe(0);
   });
 });
 

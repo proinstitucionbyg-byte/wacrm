@@ -736,12 +736,16 @@ async function processMessage(
   // BEFORE we insert, so the count is accurate. Covers the case where
   // the contact row already exists (manual add / CSV import) but they've
   // never messaged us before — which new_contact_created wouldn't catch.
-  const { count: priorCustomerMsgCount } = await supabaseAdmin()
+  const { data: previousInboundRows, count: priorCustomerMsgCount, error: previousInboundError } = await supabaseAdmin()
     .from('messages')
-    .select('id', { count: 'exact', head: true })
+    .select('created_at', { count: 'exact' })
     .eq('conversation_id', conversation.id)
     .eq('sender_type', 'customer')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (previousInboundError) console.error('[webhook] previous inbound lookup failed:', previousInboundError)
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
+  const previousInboundAt = previousInboundRows?.[0]?.created_at ?? undefined
 
   const { error: msgError } = await supabaseAdmin().from('messages').insert({
     conversation_id: conversation.id,
@@ -922,6 +926,8 @@ for (const triggerType of automationTriggers) {
       message_text: inboundText,
       conversation_id: conversation.id,
       interactive_reply_id: interactiveReplyId ?? undefined,
+      previous_inbound_at: previousInboundAt,
+      inbound_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
     },
 })
 
