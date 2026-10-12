@@ -89,6 +89,23 @@ function folderUrl(folderId: string | null) {
   return folderId ? `/automations?folder=${encodeURIComponent(folderId)}` : "/automations"
 }
 
+function folderAncestry(folders: AutomationFolder[], folderId: string): (string | null)[] {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]))
+  const ancestors: string[] = []
+  const visited = new Set<string>()
+  let current: string | null = folderId
+
+  while (current && !visited.has(current)) {
+    const folder = byId.get(current)
+    if (!folder) return [folderId]
+    visited.add(current)
+    ancestors.unshift(current)
+    current = folder.parent_id
+  }
+
+  return current ? [folderId] : [null, ...ancestors]
+}
+
 export default function AutomationsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -275,9 +292,13 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
     } catch {
       // Ignore a damaged session entry and start from the current folder.
     }
+    if (folders && selectedFolderId && navigation.entries.length === 1 && navigation.index === 0) {
+      const entries = folderAncestry(folders, selectedFolderId)
+      navigation = { entries, index: entries.length - 1 }
+    }
     sessionStorage.setItem(FOLDER_NAVIGATION_KEY, JSON.stringify(navigation))
     setFolderNavigation(navigation)
-  }, [selectedFolderId])
+  }, [selectedFolderId, folders])
 
   function moveFolderHistory(direction: -1 | 1) {
     if (!folderNavigation) return
