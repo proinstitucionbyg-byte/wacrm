@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/automations/engine', () => ({ runAutomationById: vi.fn() }));
-import { billingDay, startEnrollmentSequence } from './sequence';
+import { billingDay, startEnrollmentSequence, resumeEnrollmentAfterDocuments } from './sequence';
 import { runAutomationById } from '@/lib/automations/engine';
 import type { SupabaseClient } from '@supabase/supabase-js';
 type Result = {
@@ -32,6 +32,10 @@ function database(results: Record<string, Result[]>) {
             return chain;
           },
           update: (payload: Record<string, unknown>) => {
+            writes.push({ table, payload });
+            return chain;
+          },
+          upsert: (payload: Record<string, unknown>) => {
             writes.push({ table, payload });
             return chain;
           },
@@ -93,6 +97,53 @@ describe('automatizacion de cierre segun inicio oficial', () => {
     expect(() => billingDay('2026-02-30')).toThrow());
 });
 describe('secuencia protegida de matricula', () => {
+  it('avisa al CEO, administración y fidelización si la continuación falla sin repetir PDF', async () => {
+    const responses: Record<string, Result[]> = complete();
+    responses.automations = [{ data: [] }];
+    responses.enrollment_drafts.push({ data: { conversation_id: 'chat' } });
+    responses.profiles = [{ data: [
+      { user_id: 'ceo', account_role: 'owner' },
+      { user_id: 'admin', account_role: 'admin' },
+      { user_id: 'fidelity', account_role: 'agent', area: 'fidelizacion' },
+      { user_id: 'sales', account_role: 'agent', area: 'ventas' },
+    ] }];
+    const state = database(responses);
+    await resumeEnrollmentAfterDocuments(state.db, 'account', 'draft');
+    const notices = state.writes.find(row => row.table === 'notifications')?.payload;
+    expect(notices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ user_id: 'ceo', dedup_key: 'enrollment-final-error:draft' }),
+      expect.objectContaining({ user_id: 'admin' }),
+      expect.objectContaining({ user_id: 'fidelity', target_url: '/inbox?c=chat' }),
+    ]));
+    expect(notices).toHaveLength(3);
+    expect(state.writes.some(row => row.table === 'enrollment_document_deliveries')).toBe(false);
+    expect(runAutomationById).not.toHaveBeenCalled();
+  });
+  it('no genera una alerta cuando todavía faltan documentos', async () => {
+    const responses = complete();
+    responses.enrollment_document_deliveries[0].data = [];
+    const state = database(responses);
+    await resumeEnrollmentAfterDocuments(state.db, 'account', 'draft');
+    expect(state.writes).toHaveLength(0);
+  });
+  it('también alerta si el motor devuelve fallo sin lanzar excepción', async () => {
+    vi.mocked(runAutomationById).mockResolvedValue(false);
+    const responses: Record<string, Result[]> = complete();
+    responses.enrollment_drafts.push({ data: { conversation_id: 'chat' } });
+    responses.profiles = [{ data: [{ user_id: 'ceo', account_role: 'owner' }] }];
+    const state = database(responses);
+    await resumeEnrollmentAfterDocuments(state.db, 'account', 'draft');
+    expect(state.writes.some(row => row.table === 'notifications')).toBe(true);
+    expect(state.writes.some(row => row.payload.status === 'review')).toBe(true);
+  });
+  it('un fallo de la alerta no cambia el estado de documentos ya entregados', async () => {
+    const responses: Record<string, Result[]> = complete();
+    responses.automations = [{ error: { message: 'database unavailable' } }];
+    responses.enrollment_drafts.push({ error: { message: 'notification lookup failed' } });
+    const state = database(responses);
+    await expect(resumeEnrollmentAfterDocuments(state.db, 'account', 'draft')).resolves.toBeUndefined();
+    expect(state.writes).toHaveLength(0);
+  });
   it('conserva la confirmación documental pero cancela una segunda bienvenida si la excepcional ya se gestionó', async () => {
     const state = database(complete());
     vi.spyOn(state.db, 'rpc').mockResolvedValue({data:true,error:null} as never);

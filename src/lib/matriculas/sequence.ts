@@ -120,4 +120,48 @@ export async function startEnrollmentSequence(
     .eq('id', run.id)
     .eq('account_id', accountId);
   if (saveError) throw saveError;
+  return launched;
+}
+
+/** PDF delivery is already committed. Report a broken continuation without resending it. */
+export async function resumeEnrollmentAfterDocuments(
+  db: SupabaseClient,
+  accountId: string,
+  sourceId: string
+) {
+  try {
+    const launched = await startEnrollmentSequence(db, accountId, sourceId, 'final');
+    if (launched === false) throw Error('NO SE CONFIRMO LA AUTOMATIZACION FINAL');
+  } catch (error) {
+    console.error('[matriculas] final sequence needs review', error);
+    try {
+      const { data: draft, error: draftError } = await db
+        .from('enrollment_drafts').select('conversation_id')
+        .eq('id', sourceId).eq('account_id', accountId).maybeSingle();
+      if (draftError) throw draftError;
+      if (!draft?.conversation_id) return;
+      const { data: profiles, error: profileError } = await db
+        .from('profiles').select('user_id,account_role,area').eq('account_id', accountId);
+      if (profileError) throw profileError;
+      const recipients = (profiles ?? []).filter(p =>
+        ['owner', 'admin'].includes(p.account_role) ||
+        p.area?.trim().toUpperCase() === 'FIDELIZACION');
+      if (!recipients.length) return;
+      const { error: noticeError } = await db.from('notifications').upsert(
+        recipients.map(p => ({
+          account_id: accountId, user_id: p.user_id, type: 'system_notice',
+          conversation_id: draft.conversation_id,
+          title: 'REVISAR CONTINUACION · DOCUMENTOS ENVIADOS',
+          body: 'LOS PDF YA ENVIADOS NO SE REPETIRAN. NO SE PUDO CONFIRMAR LA AUTOMATIZACION FINAL. REVISA EL CHAT Y LA BIENVENIDA ANTES DE REINTENTAR.',
+          target_url: '/inbox?c=' + draft.conversation_id,
+          dedup_key: 'enrollment-final-error:' + sourceId,
+        })),
+        { onConflict: 'account_id,user_id,dedup_key', ignoreDuplicates: true }
+      );
+      if (noticeError) throw noticeError;
+    } catch (noticeError) {
+      // A notification failure cannot turn a delivered PDF into an uncertain send.
+      console.error('[matriculas] final sequence notification failed', noticeError);
+    }
+  }
 }

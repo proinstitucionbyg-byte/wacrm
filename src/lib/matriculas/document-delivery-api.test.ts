@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   socialDocument: vi.fn(),
   socialConfig: vi.fn(),
+  resume: vi.fn(),
 }));
+vi.mock('@/lib/matriculas/sequence', () => ({ resumeEnrollmentAfterDocuments: mocks.resume }));
 vi.mock('@/lib/auth/api-context', () => ({ requireApiKey: mocks.key }));
 vi.mock('@/lib/whatsapp/meta-api', () => ({ uploadMedia: mocks.upload }));
 vi.mock('@/lib/whatsapp/encryption', () => ({ decrypt: () => 'test-token' }));
@@ -72,18 +74,24 @@ beforeEach(() => {
   mocks.send.mockResolvedValue({ whatsapp_message_id: 'wamid' });
 });
 describe('PDF delivery bridge', () => {
-  it('delivers a social PDF through the same validated enrollment without needing WhatsApp credentials', async () => {
+  it.each([
+    ['instagram', 'BOLETA'],
+    ['messenger', 'BOLETA'],
+    ['messenger', 'CRONOGRAMA'],
+    ['messenger', 'FICHA'],
+  ])('delivers a %s %s PDF through the same validated enrollment without needing WhatsApp credentials', async (channel, kind) => {
     mocks.single.mockReset()
       .mockResolvedValueOnce({ data: { id, status: 'registered', lease_token: 'lease', conversation_id: 'conv', review_id: 'review', data: { full_name: 'LUIS TEST', document_number: '12345678' } } })
       .mockResolvedValueOnce({ data: { status: 'validated' } })
       .mockResolvedValueOnce({ data: null })
-      .mockResolvedValueOnce({ data: { id: 'conv', contact: { channel: 'instagram' }, contact_id: 'contact', user_id: 'owner' } })
+      .mockResolvedValueOnce({ data: { id: 'conv', contact: { channel }, contact_id: 'contact', user_id: 'owner' } })
       .mockResolvedValueOnce({ data: null });
     mocks.socialDocument.mockResolvedValue({ mediaId: 'private/path.pdf', url: 'https://example.org/signed.pdf' });
-    expect((await POST(request(), context())).status).toBe(200);
+    expect((await POST(request(), context(kind))).status).toBe(200);
     expect(mocks.upload).not.toHaveBeenCalled();
-    expect(mocks.socialConfig).toHaveBeenCalledWith('instagram', 'account');
-    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ mediaUrl: 'https://example.org/signed.pdf', filename: 'BOLETA-LUIS TEST-12345678.pdf' }));
+    expect(mocks.socialConfig).toHaveBeenCalledWith(channel, 'account');
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ mediaUrl: 'https://example.org/signed.pdf', filename: `${kind}-LUIS TEST-12345678.pdf` }));
+    expect(mocks.resume).toHaveBeenCalledWith(expect.anything(), 'account', id);
   });
   it('requires the limited integration scope', async () => {
     expect((await POST(request(), context())).status).toBe(200);

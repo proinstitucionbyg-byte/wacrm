@@ -10,7 +10,7 @@ import { uploadMedia } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { engineSendMedia } from '@/lib/automations/meta-send';
 import { UUID_PATTERN } from '@/lib/team-chat';
-import { startEnrollmentSequence } from '@/lib/matriculas/sequence';
+import { resumeEnrollmentAfterDocuments } from '@/lib/matriculas/sequence';
 import { isSocialChannel, socialConfiguration } from '@/lib/social/meta-api';
 import { saveSocialDocument } from '@/lib/social/storage';
 
@@ -95,7 +95,7 @@ export async function POST(
           409
         );
       if (prior.status === 'sent') {
-        try { await startEnrollmentSequence(ctx.supabase,ctx.accountId,id,'final'); } catch(error){console.error('[matriculas] final sequence needs review',error);}
+        await resumeEnrollmentAfterDocuments(ctx.supabase, ctx.accountId, id);
         return ok({ sent: true });
       }
       throw new ApiError(
@@ -177,7 +177,7 @@ export async function POST(
         .eq('account_id', ctx.accountId)
         .eq('kind', kind);
       if (savedError) throw savedError;
-      try { await startEnrollmentSequence(ctx.supabase,ctx.accountId,id,'final'); } catch(error){console.error('[matriculas] final sequence needs review',error);}
+      await resumeEnrollmentAfterDocuments(ctx.supabase, ctx.accountId, id);
       return ok({ sent: true });
     } catch (sendError) {
       // A timeout may occur AFTER Meta accepted the PDF. Freeze for review to avoid duplicate sends.
