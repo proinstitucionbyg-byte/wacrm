@@ -78,10 +78,22 @@ type AutomationWithFolder = Automation & {
   folder_id: string | null
 }
 
+type FolderNavigation = {
+  entries: (string | null)[]
+  index: number
+}
+
+const FOLDER_NAVIGATION_KEY = "automations-folder-navigation"
+
+function folderUrl(folderId: string | null) {
+  return folderId ? `/automations?folder=${encodeURIComponent(folderId)}` : "/automations"
+}
+
 export default function AutomationsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
 const selectedFolderId = searchParams.get("folder")
+  const [folderNavigation, setFolderNavigation] = useState<FolderNavigation | null>(null)
   const canCreate = useCan("send-messages")
   const t = useTranslations("Automations.list")
   const [automations, setAutomations] = useState<AutomationWithFolder[] | null>(null)
@@ -241,6 +253,42 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
   load()
 }, [selectedFolderId])
 
+  useEffect(() => {
+    let navigation: FolderNavigation = { entries: [selectedFolderId], index: 0 }
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(FOLDER_NAVIGATION_KEY) ?? "null")
+      if (
+        saved &&
+        Array.isArray(saved.entries) &&
+        saved.entries.length > 0 &&
+        saved.entries.every((id: unknown) => id === null || typeof id === "string") &&
+        Number.isInteger(saved.index) &&
+        saved.index >= 0 &&
+        saved.index < saved.entries.length
+      ) {
+        navigation = saved as FolderNavigation
+        if (navigation.entries[navigation.index] !== selectedFolderId) {
+          const entries = [...navigation.entries.slice(0, navigation.index + 1), selectedFolderId]
+          navigation = { entries, index: entries.length - 1 }
+        }
+      }
+    } catch {
+      // Ignore a damaged session entry and start from the current folder.
+    }
+    sessionStorage.setItem(FOLDER_NAVIGATION_KEY, JSON.stringify(navigation))
+    setFolderNavigation(navigation)
+  }, [selectedFolderId])
+
+  function moveFolderHistory(direction: -1 | 1) {
+    if (!folderNavigation) return
+    const index = folderNavigation.index + direction
+    if (index < 0 || index >= folderNavigation.entries.length) return
+    const navigation = { ...folderNavigation, index }
+    sessionStorage.setItem(FOLDER_NAVIGATION_KEY, JSON.stringify(navigation))
+    setFolderNavigation(navigation)
+    router.push(folderUrl(navigation.entries[index]))
+  }
+
   async function toggleActive(a: Automation, next: boolean) {
     // Optimistic flip so the switch feels instant.
     setAutomations((prev) =>
@@ -370,8 +418,8 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
       )}
 
       <nav aria-label="Navegacion de carpetas" className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3">
-        <Button variant="outline" size="sm" onClick={() => router.back()}><ArrowLeft className="h-4 w-4" />ATRAS</Button>
-        <Button variant="outline" size="sm" onClick={() => router.forward()}><ArrowRight className="h-4 w-4" />ADELANTE</Button>
+        <Button variant="outline" size="sm" disabled={!folderNavigation || folderNavigation.index === 0} onClick={() => moveFolderHistory(-1)}><ArrowLeft className="h-4 w-4" />ATRAS</Button>
+        <Button variant="outline" size="sm" disabled={!folderNavigation || folderNavigation.index === folderNavigation.entries.length - 1} onClick={() => moveFolderHistory(1)}><ArrowRight className="h-4 w-4" />ADELANTE</Button>
         <Button variant="outline" size="sm" disabled={!selectedFolderId} onClick={() => {
           const parent = folderList.find(f => f.id === selectedFolderId)?.parent_id;
           router.push(parent ? `/automations?folder=${parent}` : '/automations');
