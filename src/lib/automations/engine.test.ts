@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
     updateCalls: [] as { table: string; filters: [string, string, unknown][] }[],
     upsertCalls: [] as { table: string; payload: unknown }[],
     logAutomationIds: [] as string[],
+    latestGreetingAutomationId: null as string | null,
     pendingCancels: 0,
   },
 }));
@@ -57,6 +58,10 @@ vi.mock("./admin-client", () => {
         return { data: { id: "log1" }, error: null };
       }
       if (type === "update") return { data: null, error: null };
+      if (ops.filters.some(([operator, key]) => operator === 'in' && key === 'automation_id')) {
+        return { data: state.latestGreetingAutomationId
+          ? [{ automation_id: state.latestGreetingAutomationId }] : [], error: null };
+      }
       return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
     if (table === "automation_steps") return { data: state.steps, error: null };
@@ -81,6 +86,7 @@ vi.mock("./admin-client", () => {
       delete: () => ((ops.type = "delete"), b),
       upsert: (p: unknown) => ((ops.type = "upsert"), (ops.payload = p), b),
       eq: (k: string, v: unknown) => (ops.filters.push(["eq", k, v]), b),
+      in: (k: string, v: unknown) => (ops.filters.push(["in", k, v]), b),
       gte: () => b,
       is: () => b,
       order: () => b,
@@ -126,6 +132,7 @@ beforeEach(() => {
   h.state.updateCalls = [];
   h.state.upsertCalls = [];
   h.state.logAutomationIds = [];
+  h.state.latestGreetingAutomationId = null;
   h.state.pendingCancels = 0;
 });
 
@@ -229,6 +236,28 @@ describe('greeting continuity dispatch', () => {
         inbound_at: '2026-10-12T15:00:00.000Z' } });
     expect(h.state.logAutomationIds).toEqual([expected]);
     expect(h.state.pendingCancels).toBe(0);
+  });
+
+  it('consumes the third and later generic greetings without repeating the return menu', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = greetings;
+    h.state.latestGreetingAutomationId = RETURN_GREETING_ID;
+    const matched = await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Hola!', conversation_id: 'chat', previous_inbound_at: '2026-10-12T14:00:00.000Z',
+        inbound_at: '2026-10-12T15:00:00.000Z' } });
+    expect(matched).toBe(true);
+    expect(h.state.logAutomationIds).toEqual([]);
+    expect(h.state.pendingCancels).toBe(0);
+  });
+
+  it('starts a new cycle after three hours without a customer message', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = greetings;
+    h.state.latestGreetingAutomationId = RETURN_GREETING_ID;
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Hola!', conversation_id: 'chat', previous_inbound_at: '2026-10-12T12:00:00.000Z',
+        inbound_at: '2026-10-12T15:00:00.000Z' } });
+    expect(h.state.logAutomationIds).toEqual([INITIAL_GREETING_ID]);
   });
 });
 

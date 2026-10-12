@@ -27,7 +27,7 @@ import {
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 import { automationAudioEvidence } from './audio-evidence'
-import { greetingAutomationId, isGreetingAutomation, matchesGreeting } from './greeting-continuity'
+import { greetingAutomationId, INITIAL_GREETING_ID, isGreetingAutomation, matchesGreeting, RETURN_GREETING_ID, shouldShowGreeting } from './greeting-continuity'
 
 // ------------------------------------------------------------
 // Public API
@@ -141,9 +141,28 @@ export async function runAutomationsForTrigger(
           && matchesGreeting(automation, input.context?.message_text),
         )
       : [];
-    const selectedAutomations = [...ordinaryMatches, ...greetingMatches];
+    let suppressReturnGreeting = false;
+    if (greetingMatches.length > 0 && selectedGreetingId === RETURN_GREETING_ID && input.contactId) {
+      const { data: recentGreetings, error: greetingHistoryError } = await db
+        .from('automation_logs')
+        .select('automation_id')
+        .eq('account_id', input.accountId)
+        .eq('contact_id', input.contactId)
+        .in('automation_id', [INITIAL_GREETING_ID, RETURN_GREETING_ID])
+        .eq('status', 'success')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (greetingHistoryError) {
+        console.error('[automations] greeting history lookup failed:', greetingHistoryError);
+      } else {
+        suppressReturnGreeting = !shouldShowGreeting(selectedGreetingId, recentGreetings?.[0]?.automation_id);
+      }
+    }
+    const selectedAutomations = [...ordinaryMatches, ...(suppressReturnGreeting ? [] : greetingMatches)];
 
-    let matched = false;
+    // An already answered generic greeting is consumed. Do not run the AI
+    // fallback or cancel pending follow-up steps just to repeat the same menu.
+    let matched = suppressReturnGreeting;
     let cancelledOld = false;
 
     for (const automation of selectedAutomations) {

@@ -17,6 +17,11 @@ export function greetingAutomationId(previousInboundAt?: string, inboundAt?: str
     : INITIAL_GREETING_ID
 }
 
+/** One return menu per active conversation. A three-hour silence starts a new cycle. */
+export function shouldShowGreeting(selectedId: string, latestGreetingId?: string): boolean {
+  return selectedId === INITIAL_GREETING_ID || latestGreetingId !== RETURN_GREETING_ID
+}
+
 function normalizeGreeting(text: string): string {
   return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .trim().replace(/^[.!?¡¿,;:]+|[.!?¡¿,;:]+$/g, '').trim()
