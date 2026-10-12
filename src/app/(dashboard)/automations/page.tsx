@@ -307,7 +307,7 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
     const navigation = { ...folderNavigation, index }
     sessionStorage.setItem(FOLDER_NAVIGATION_KEY, JSON.stringify(navigation))
     setFolderNavigation(navigation)
-    router.push(folderUrl(navigation.entries[index]))
+    window.location.assign(folderUrl(navigation.entries[index]))
   }
 
   async function toggleActive(a: Automation, next: boolean) {
@@ -443,7 +443,7 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
         <Button variant="outline" size="sm" disabled={!folderNavigation || folderNavigation.index === folderNavigation.entries.length - 1} onClick={() => moveFolderHistory(1)}><ArrowRight className="h-4 w-4" />ADELANTE</Button>
         <Button variant="outline" size="sm" disabled={!selectedFolderId} onClick={() => {
           const parent = folderList.find(f => f.id === selectedFolderId)?.parent_id;
-          router.push(parent ? `/automations?folder=${parent}` : '/automations');
+          window.location.assign(folderUrl(parent ?? null));
         }}><CornerLeftUp className="h-4 w-4" />CARPETA ANTERIOR</Button>
         <span className="min-w-0 break-words text-sm text-muted-foreground">{folderPath(folderList, selectedFolderId)}</span>
       </nav>
@@ -503,7 +503,7 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
     <button
       type="button"
       onClick={() => {
-        router.push(`/automations?folder=${folder.id}`)
+        window.location.assign(folderUrl(folder.id))
       }}
       className="flex min-w-0 flex-1 items-center gap-3 text-left"
     >
