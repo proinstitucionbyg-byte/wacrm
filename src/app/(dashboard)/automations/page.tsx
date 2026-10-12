@@ -522,7 +522,7 @@ setFolders((foldersBody.folders ?? []) as AutomationFolder[])
               key={a.id}
               automation={a}
               onToggle={(next) => toggleActive(a, next)}
-              onEdit={() => router.push(`/automations/${a.id}/edit`)}
+              onEdit={() => router.push(`/automations/${a.id}/edit${selectedFolderId ? `?folder=${encodeURIComponent(selectedFolderId)}` : ''}`)}
               onDuplicate={() => duplicate(a)}
               onMove={() => setMovingAutomation(a)}
               onLogs={() => router.push(`/automations/${a.id}/logs`)}

@@ -79,6 +79,7 @@ export interface BuilderStep {
 
 export interface BuilderInitial {
   id?: string
+  folder_id?: string | null
   name: string
   description: string
   trigger_type: AutomationTriggerType
@@ -659,6 +660,8 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const router = useRouter()
   const searchParams = useSearchParams()
 const folderId = searchParams.get("folder")
+  const returnFolderId = initial.id ? initial.folder_id : folderId
+  const listHref = returnFolderId ? `/automations?folder=${encodeURIComponent(returnFolderId)}` : "/automations"
   const t = useTranslations("Automations.builder")
   const isEditing = !!initial.id
   const [state, setState] = useState<BuilderInitial>(initial)
@@ -703,7 +706,7 @@ const folderId = searchParams.get("folder")
         trigger_type: state.trigger_type,
         trigger_config: state.trigger_config,
         is_active: state.is_active,
-folder_id: folderId || null,
+        ...(!isEditing ? { folder_id: folderId || null } : {}),
 steps: toApiSteps(state.steps),
       }
 
@@ -752,7 +755,7 @@ steps: toApiSteps(state.steps),
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-border bg-card/80 px-3 py-3 sm:gap-3 sm:px-4">
         <button
           type="button"
-          onClick={() => router.push("/automations")}
+          onClick={() => router.push(listHref)}
           className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           aria-label={t("backToAutomations")}
         >
