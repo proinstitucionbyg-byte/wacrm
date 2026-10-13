@@ -34,10 +34,6 @@ export function EnrollmentWelcomeCheck({
   }, [conversationId]);
   useEffect(() => {
     void Promise.resolve().then(load);
-    const timer = setInterval(() => {
-      if (!document.hidden) void load();
-    }, 15000);
-    return () => clearInterval(timer);
   }, [load]);
   async function complete(task: WelcomeTask) {
     setBusy(task.id);
