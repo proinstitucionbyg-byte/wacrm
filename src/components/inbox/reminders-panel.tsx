@@ -95,7 +95,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
           const result = await response.json() as { text?: string; error?: string };
           if (!response.ok || !result.text) throw new Error(result.error || 'No se pudo entender el audio.');
           updateBody(result.text);
-          toast.success('Audio transcrito. Confirma la fecha antes de guardarlo.');
+          toast.success('Audio transcrito. Fecha y repetición detectadas automáticamente; revisa antes de guardar.');
         } catch (error) { toast.error(error instanceof Error ? error.message : 'No se pudo transcribir.'); }
         finally { setTranscribing(false); }
       };
@@ -125,7 +125,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
             {recording ? <Square className="h-4 w-4 text-red-500"/> : <Mic className="h-4 w-4"/>}
             {transcribing ? 'Transcribiendo...' : recording ? 'Detener audio' : 'Dictar por audio'}
           </button>
-          <p className="text-xs text-muted-foreground">Revisa el texto y la fecha sugerida. Si dices «mañana» sin hora, se propone 9:00 a. m.</p>
+          <p className="text-xs text-muted-foreground">Di qué recordar, cuándo y cada cuánto. La fecha y la repetición se completan solas; solo corrígelas si hace falta.</p>
           <label className="block text-sm">Fecha y hora
             <input type="datetime-local" value={dueLocal} onChange={event => setDueLocal(event.target.value)}
               className="mt-1 w-full rounded-md border border-border bg-background p-2" />

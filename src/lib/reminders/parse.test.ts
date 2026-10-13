@@ -16,4 +16,15 @@ describe('suggestReminder', () => {
   it('requests a number for vague repetition', () => {
     expect(suggestReminder('Recuérdame cada unos días', now).needsInterval).toBe(true);
   });
+
+  it('fills an exact date, time and interval from dictation', () => {
+    const result = suggestReminder('Recuérdame el 20 de octubre a las 3 de la tarde cada 2 semanas llamar a Luis', now);
+    expect(result.dueLocal).toBe('2026-10-20T15:00');
+    expect(result.repeatDays).toBe(14);
+  });
+
+  it('recognizes a numeric date and relative timing', () => {
+    expect(suggestReminder('Avisar el 25/10/2026 a las 14:30', now).dueLocal).toBe('2026-10-25T14:30');
+    expect(suggestReminder('Avisar en 2 horas', now).dueLocal).toBe('2026-10-12T12:00');
+  });
 });

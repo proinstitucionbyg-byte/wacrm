@@ -16,9 +16,12 @@ export async function GET(request: Request) {
       .eq('account_id', ctx.accountId)
       .eq('conversation_id', conversation)
       .in('stage', ['final', 'provisional'])
-      .neq('status', 'closed')
+      .eq('status', 'started')
+      .is('completed_at', null)
+      .is('backup_sent_at', null)
+      .gt('welcome_due_at', new Date().toISOString())
       .order('started_at', { ascending: false })
-      .limit(10);
+      .limit(1);
     if (error) throw error;
     return NextResponse.json({ tasks: data ?? [] });
   } catch (error) {
