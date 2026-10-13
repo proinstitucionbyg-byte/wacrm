@@ -13,7 +13,7 @@ export function EnrollmentWelcomeCheck({
 }: {
   conversationId: string;
 }) {
-  const [tasks, setTasks] = useState<WelcomeTask[]>([]),
+  const [task, setTask] = useState<WelcomeTask | null>(null),
     [busy, setBusy] = useState(''),
     [error, setError] = useState('');
   const [now, setNow] = useState(() => Date.now());
@@ -25,7 +25,7 @@ export function EnrollmentWelcomeCheck({
       );
       if (!res.ok) throw Error('No se pudo comprobar la bienvenida.');
       const data = await res.json();
-      setTasks(Array.isArray(data.tasks) ? data.tasks.slice(0, 1) : []);
+      setTask(Array.isArray(data.tasks) ? (data.tasks[0] ?? null) : null);
       setNow(Date.now());
       setError('');
     } catch (e) {
@@ -53,10 +53,10 @@ export function EnrollmentWelcomeCheck({
     }
   }
   return (
-    <>
-      {tasks.map((task) => (
+    <div className="contents" data-enrollment-welcome-slot>
+      {task && (
         <div
-          key={task.id}
+          data-enrollment-welcome-id={task.id}
           className="mx-4 my-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm"
         >
           {task.stage === 'provisional' && (
@@ -100,12 +100,12 @@ export function EnrollmentWelcomeCheck({
             </p>
           )}
         </div>
-      ))}
+      )}
       {error && (
         <p role="alert" className="text-destructive px-4 text-xs">
           {error}
         </p>
       )}
-    </>
+    </div>
   );
 }
