@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
     ownedCustomField: null as { id: string } | null,
     automations: [] as Record<string, unknown>[],
     steps: [] as Record<string, unknown>[],
+    stepsByAutomationId: {} as Record<string, Record<string, unknown>[]>,
     logStatus: 'success',
     fromCalls: [] as string[],
     updateCalls: [] as { table: string; filters: [string, string, unknown][] }[],
@@ -49,7 +50,10 @@ vi.mock("./admin-client", () => {
     }
     if (table === "automations") return {
       data: ops.filters.some(([operator, key]) => operator === 'eq' && key === 'id')
-        ? state.automations[0] ?? null : state.automations,
+        ? state.automations.find((automation) => automation.id === ops.filters.find(
+            ([operator, key]) => operator === 'eq' && key === 'id',
+          )?.[2]) ?? null
+        : state.automations,
       error: null,
     };
     if (table === "automation_logs") {
@@ -64,7 +68,17 @@ vi.mock("./admin-client", () => {
       }
       return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
-    if (table === "automation_steps") return { data: state.steps, error: null };
+    if (table === "automation_steps") {
+      const automationId = ops.filters.find(
+        ([operator, key]) => operator === 'eq' && key === 'automation_id',
+      )?.[2];
+      return {
+        data: typeof automationId === 'string'
+          ? state.stepsByAutomationId[automationId] ?? state.steps
+          : state.steps,
+        error: null,
+      };
+    }
     if (table === "automation_pending_executions" && type === "update") {
       state.pendingCancels++;
       return { data: null, error: null };
@@ -127,6 +141,7 @@ beforeEach(() => {
   h.state.ownedCustomField = null;
   h.state.automations = [];
   h.state.steps = [];
+  h.state.stepsByAutomationId = {};
   h.state.logStatus = 'success';
   h.state.fromCalls = [];
   h.state.updateCalls = [];
@@ -162,6 +177,68 @@ describe('confirmed complete delivery', () => {
       accountId: ACCOUNT, automationId: 'a1', contactId: 'c1',
       conversationId: 'chat', sequenceId: 'welcome',
     })).toBe(true);
+  });
+});
+
+describe('run_automation chaining', () => {
+  it('runs the selected active automation in the same account', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [
+      automationWithUpdateStep(),
+      { ...automationWithUpdateStep(), id: 'a2', name: 'Segundo bloque' },
+    ];
+    h.state.stepsByAutomationId = {
+      a1: [{
+        id: 'link', automation_id: 'a1', step_type: 'run_automation', position: 0,
+        parent_step_id: null, step_config: { automation_id: 'a2' },
+      }],
+      a2: [{
+        id: 'message', automation_id: 'a2', step_type: 'send_message', position: 0,
+        parent_step_id: null, step_config: { text: 'Continuacion segura' },
+      }],
+    };
+
+    expect(await runAutomationById({
+      accountId: ACCOUNT,
+      automationId: 'a1',
+      contactId: 'c1',
+      conversationId: 'chat',
+    })).toBe(true);
+    expect(h.state.logAutomationIds).toEqual(['a1', 'a2']);
+  });
+
+  it('blocks a circular link without starting the same automation twice', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.stepsByAutomationId = {
+      a1: [{
+        id: 'loop', automation_id: 'a1', step_type: 'run_automation', position: 0,
+        parent_step_id: null, step_config: { automation_id: 'a1' },
+      }],
+    };
+
+    await runAutomationById({
+      accountId: ACCOUNT,
+      automationId: 'a1',
+      contactId: 'c1',
+      conversationId: 'chat',
+    });
+    expect(h.state.logAutomationIds).toEqual(['a1']);
+  });
+});
+
+describe('automated inbound guard', () => {
+  it('consumes an explicit bot response before loading automations', async () => {
+    const matched = await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: { message_text: 'Este es un mensaje automatico. No responda a este mensaje.' },
+    });
+
+    expect(matched).toBe(true);
+    expect(h.state.fromCalls).not.toContain('automations');
+    expect(h.state.logAutomationIds).toEqual([]);
   });
 });
 

@@ -116,6 +116,7 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   create_deal: { label: "create_deal", icon: Briefcase, border: "border-l-primary" },
   wait: { label: "wait", icon: Hourglass, border: "border-l-border" },
   condition: { label: "condition", icon: GitBranch, border: "border-l-amber-500" },
+  run_automation: { label: "run_automation", icon: Zap, border: "border-l-violet-500" },
   ai_agent: {
   label: "ai_agent",
   icon: Bot,
@@ -138,6 +139,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "create_deal",
   "wait",
   "condition",
+  "run_automation",
   "ai_agent",
   "send_webhook",
   "close_conversation",
@@ -209,6 +211,9 @@ case "send_list":
     case "condition":
   return { subject: "tag_presence", operand: "", value: "" }
 
+    case "run_automation":
+      return { automation_id: "" }
+
 case "ai_agent":
   return {
     agent_id: "",
@@ -243,6 +248,13 @@ interface AutomationResources {
   customFields: CustomField[]
   pipelines: PipelineOption[]
   stages: PipelineStageOption[]
+  automations: AutomationOption[]
+}
+
+interface AutomationOption {
+  id: string
+  name: string
+  is_active: boolean
 }
 
 interface PipelineOption {
@@ -264,19 +276,27 @@ const ResourcesContext = createContext<AutomationResources>({
   customFields: [],
   pipelines: [],
   stages: [],
+  automations: [],
 })
 
 function useResources(): AutomationResources {
   return useContext(ResourcesContext)
 }
 
-function ResourcesProvider({ children }: { children: ReactNode }) {
+function ResourcesProvider({
+  children,
+  currentAutomationId,
+}: {
+  children: ReactNode
+  currentAutomationId?: string
+}) {
   const [tags, setTags] = useState<TagRecord[]>([])
   const [members, setMembers] = useState<AccountMember[]>([])
   const [templates, setTemplates] = useState<MessageTemplate[]>([])
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [pipelines, setPipelines] = useState<PipelineOption[]>([])
   const [stages, setStages] = useState<PipelineStageOption[]>([])
+  const [automations, setAutomations] = useState<AutomationOption[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -287,7 +307,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
     // actually be sent (anything else 400s at send time), matching the
     // broadcast picker.
     void (async () => {
-      const [tagsRes, templatesRes, customFieldsRes, pipelinesRes, stagesRes] =
+      const [tagsRes, templatesRes, customFieldsRes, pipelinesRes, stagesRes, automationsRes] =
         await Promise.all([
           supabase.from("tags").select("*").order("name"),
           supabase
@@ -301,6 +321,11 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
             .from("pipeline_stages")
             .select("id, name, pipeline_id, position")
             .order("position"),
+          supabase
+            .from("automations")
+            .select("id, name, is_active")
+            .eq("is_active", true)
+            .order("name"),
         ])
       if (cancelled) return
       setTags((tagsRes.data as TagRecord[] | null) ?? [])
@@ -308,6 +333,11 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
       setCustomFields((customFieldsRes.data as CustomField[] | null) ?? [])
       setPipelines((pipelinesRes.data as PipelineOption[] | null) ?? [])
       setStages((stagesRes.data as PipelineStageOption[] | null) ?? [])
+      setAutomations(
+        ((automationsRes.data as AutomationOption[] | null) ?? []).filter(
+          (automation) => automation.id !== currentAutomationId,
+        ),
+      )
     })()
 
     // Members go through the API so we inherit its email-visibility
@@ -327,11 +357,11 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [currentAutomationId])
 
   return (
     <ResourcesContext.Provider
-      value={{ tags, members, templates, customFields, pipelines, stages }}
+      value={{ tags, members, templates, customFields, pipelines, stages, automations }}
     >
       {children}
     </ResourcesContext.Provider>
@@ -789,7 +819,7 @@ steps: toApiSteps(state.steps),
       <div className="relative flex-1 overflow-y-auto">
         <div className="absolute inset-0 bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none" />
         <div className="relative mx-auto flex max-w-2xl flex-col items-center gap-0 px-4 py-10">
-          <ResourcesProvider>
+          <ResourcesProvider currentAutomationId={initial.id}>
             <TriggerCard
               type={state.trigger_type}
               config={state.trigger_config}
@@ -1314,6 +1344,7 @@ function StepEditor({
   onChange: (s: BuilderStep) => void
 }) {
   const t = useTranslations("Automations.builder")
+  const resources = useResources()
   const cfg = step.step_config
   const set = (patch: Record<string, unknown>) =>
     onChange({ ...step, step_config: { ...cfg, ...patch } })
@@ -1516,6 +1547,40 @@ function StepEditor({
           </FieldBlock>
         </div>
       )
+    case "run_automation": {
+      const { automations } = resources
+      const selectedId = (cfg.automation_id as string) ?? ""
+      return (
+        <>
+          <FieldBlock label="Automatización siguiente">
+            {automations.length > 0 ? (
+              <select
+                value={selectedId}
+                onChange={(e) => set({ automation_id: e.target.value })}
+                className={SELECT_CLASS}
+              >
+                <option value="">Selecciona una automatización</option>
+                {automations.map((automation) => (
+                  <option key={automation.id} value={automation.id}>
+                    {automation.name} · {automation.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <Input
+                value={selectedId}
+                onChange={(e) => set({ automation_id: e.target.value })}
+                placeholder="Código de la automatización"
+                className="bg-muted text-foreground"
+              />
+            )}
+          </FieldBlock>
+          <p className="text-xs text-muted-foreground">
+            Ejecuta el bloque seleccionado y luego continúa con el siguiente paso de este flujo.
+          </p>
+        </>
+      )
+    }
     case "condition":
       return (
         <>

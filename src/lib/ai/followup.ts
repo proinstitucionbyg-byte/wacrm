@@ -8,6 +8,7 @@ import { engineSendText } from '@/lib/flows/meta-send'
 import { findConnectedAgentForArea } from './handoff-routing'
 import { buildHandoffSummary } from './handoff'
 import { buildHandoffNotice } from './business-hours'
+import { isLikelyAutomatedInbound } from './automated-inbound'
 
 const IDLE_MS = 10 * 60 * 1000
 const HUMAN_PAUSE_MS = 5 * 60 * 1000
@@ -246,6 +247,11 @@ export async function runIdleFollowups(): Promise<number> {
         .limit(1)
         .maybeSingle()
       if (last?.sender_type !== 'customer') continue
+
+      if (isLikelyAutomatedInbound(last.content_text)) {
+        await claimFollowup(db, c)
+        continue
+      }
 
       if (REFUSAL.test(last.content_text ?? '')) {
         await claimFollowup(db, c)

@@ -16,6 +16,7 @@ import type {
   WaitStepConfig,
   CreateDealStepConfig,
   AssignConversationStepConfig,
+  RunAutomationStepConfig,
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
 import {
@@ -28,6 +29,7 @@ import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 import { automationAudioEvidence } from './audio-evidence'
 import { greetingAutomationId, INITIAL_GREETING_ID, isGreetingAutomation, matchesGreeting, RETURN_GREETING_ID, shouldShowGreeting } from './greeting-continuity'
+import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 
 // ------------------------------------------------------------
 // Public API
@@ -48,6 +50,8 @@ export interface AutomationContext {
   conversation_id?: string
   /** Arbitrary variables accumulated during execution. */
   vars?: Record<string, unknown>
+  /** Server-owned chain history used to stop circular automation links. */
+  automation_chain_ids?: string[]
   /** The tag id that was added, for tag_added trigger. */
   tag_id?: string
   /** Agent the conversation was assigned to, for conversation_assigned. */
@@ -80,6 +84,13 @@ export async function runAutomationsForTrigger(
   input: DispatchInput,
 ): Promise<boolean> {
   try {
+    if (
+      ['new_contact_created', 'first_inbound_message', 'new_message_received', 'keyword_match'].includes(input.triggerType) &&
+      isLikelyAutomatedInbound(input.context?.message_text)
+    ) {
+      console.info('[automations] explicit automated inbound consumed without reply')
+      return true
+    }
     console.log("========== AUTOMATION START ==========");
     console.log("Trigger:", input.triggerType);
     console.log("Contact:", input.contactId);
@@ -361,8 +372,21 @@ export async function resumePendingExecution(pending: {
 // Internal execution
 // ------------------------------------------------------------
 
-async function executeAutomation(automation: Automation, input: DispatchInput) {
+async function executeAutomation(
+  automation: Automation,
+  input: DispatchInput,
+  triggerEventOverride?: string,
+) {
   const db = supabaseAdmin()
+  const priorChain = input.context?.automation_chain_ids ?? []
+  if (priorChain.includes(automation.id)) {
+    console.warn('[automations] circular automation link blocked:', automation.id)
+    return null
+  }
+  const executionContext: AutomationContext = {
+    ...(input.context ?? {}),
+    automation_chain_ids: [...priorChain, automation.id],
+  }
 
   const { data: log, error: logErr } = await db
     .from('automation_logs')
@@ -375,7 +399,7 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
       // after teammates join the account.
       user_id: automation.user_id,
       contact_id: input.contactId ?? null,
-      trigger_event: input.triggerType,
+      trigger_event: triggerEventOverride ?? input.triggerType,
       steps_executed: [],
       status: 'success',
     })
@@ -390,12 +414,12 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
   await executeStepsFrom({
     automation,
     contactId: input.contactId ?? null,
-    context: input.context ?? {},
+    context: executionContext,
     parentStepId: null,
     branch: null,
     startPosition: 0,
     logId: log.id,
-    triggerEvent: input.triggerType,
+    triggerEvent: triggerEventOverride ?? input.triggerType,
   })
 
   // Atomic counter update via the SQL function from migration 007.
@@ -806,6 +830,44 @@ console.log('======================')
         status: 'open',
       })
       return 'deal created'
+    }
+
+    case 'run_automation': {
+      const cfg = step.step_config as RunAutomationStepConfig
+      const targetId = cfg.automation_id?.trim()
+      if (!targetId) throw new Error('run_automation needs automation_id')
+
+      const chain = args.context.automation_chain_ids ?? [args.automation.id]
+      if (chain.includes(targetId)) {
+        throw new Error('run_automation: circular link blocked')
+      }
+      if (chain.length >= 10) {
+        throw new Error('run_automation: maximum chain length reached')
+      }
+
+      const { data: target, error } = await db
+        .from('automations')
+        .select('*')
+        .eq('id', targetId)
+        .eq('account_id', args.automation.account_id)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (error || !target) {
+        throw new Error('run_automation: target is unavailable or inactive')
+      }
+
+      const childLogId = await executeAutomation(
+        target as Automation,
+        {
+          accountId: args.automation.account_id,
+          triggerType: 'new_message_received',
+          contactId: args.contactId,
+          context: args.context,
+        },
+        'automation_link',
+      )
+      if (!childLogId) throw new Error('run_automation: target did not start')
+      return `automation ${targetId} started`
     }
 
     case 'send_webhook': {

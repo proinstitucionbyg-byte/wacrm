@@ -474,6 +474,7 @@ export type AutomationStepType =
   | 'create_deal'
   | 'wait'
   | 'condition'
+  | 'run_automation'
   | 'ai_agent'
   | 'send_webhook'
   | 'close_conversation';
@@ -568,6 +569,11 @@ export interface WaitStepConfig {
   unit: 'minutes' | 'hours' | 'days';
 }
 
+export interface RunAutomationStepConfig {
+  /** Active automation in the same account that should run next. */
+  automation_id: string;
+}
+
 export type ConditionSubject =
   | 'contact_field'
   | 'tag_presence'
@@ -599,6 +605,7 @@ export type AutomationStepConfig =
   | UpdateContactFieldStepConfig
   | CreateDealStepConfig
   | WaitStepConfig
+  | RunAutomationStepConfig
   | ConditionStepConfig
   | SendWebhookStepConfig
   | Record<string, never>

@@ -165,6 +165,18 @@ describe("validateStepsForActivation", () => {
     ]);
   });
 
+  it("requires a target for run_automation", () => {
+    expect(validateStepsForActivation([
+      { step_type: "run_automation", step_config: { automation_id: "next-id" } },
+    ])).toEqual([]);
+
+    expect(validateStepsForActivation([
+      { step_type: "run_automation", step_config: { automation_id: "  " } },
+    ])).toEqual([
+      { path: "steps[0].automation_id", message: "target automation is required" },
+    ]);
+  });
+
   it("recursively walks condition branches with stable dot-paths", () => {
     const issues = validateStepsForActivation([
       {

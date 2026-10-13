@@ -8,6 +8,7 @@ import { findContactByBsuid } from '@/lib/contacts/dedupe'
 import { isBsuid } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
+import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { handleTeacherInbound } from '@/lib/matriculas/teachers'
@@ -837,6 +838,8 @@ const lastHuman = conversation.last_human_message_at
   ? new Date(conversation.last_human_message_at).getTime()
   : 0
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
+const inboundText = contentText ?? message.text?.body ?? ''
+const automatedInbound = isLikelyAutomatedInbound(inboundText)
 
 const followupReplyHandled = interactiveReplyId
   ? await handleIdleFollowupReply({
@@ -855,13 +858,13 @@ try {
 } catch (error) { console.error('[teacher] cancellation requires review', error) }
 // Assignment makes the lead available to an adviser. It does not consume the
 // inbound or pause the existing flow/AI; human replies use their own pause.
-if (!teacherHandled && !humanRecentlyActive && !followupReplyHandled) {
+if (!automatedInbound && !teacherHandled && !humanRecentlyActive && !followupReplyHandled) {
   await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
 }
 const automationPaused =
-  conversation.automation_enabled === false || humanRecentlyActive || followupReplyHandled || teacherHandled
+  conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
   let automationMatched = false
-  let flowConsumed = followupReplyHandled || teacherHandled
+  let flowConsumed = automatedInbound || followupReplyHandled || teacherHandled
 
 if (!automationPaused) {
   const flowResult = await dispatchInboundToFlows({
@@ -890,7 +893,6 @@ if (!automationPaused) {
 
 
     // Fire automations only when they are not paused by a human agent.
-  const inboundText = contentText ?? message.text?.body ?? ''
   const automationTriggers: (
     | 'new_contact_created'
     | 'first_inbound_message'

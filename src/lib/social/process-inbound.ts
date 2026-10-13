@@ -16,6 +16,7 @@ import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import type { AutomationTriggerType } from '@/types'
 import { saveSocialImage } from './storage'
 import { handleTeacherInbound } from '@/lib/matriculas/teachers'
+import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 
 export interface SocialDispatchContext {
   accountId: string; userId: string; contactId: string; conversationId: string
@@ -122,6 +123,7 @@ export async function dispatchSocialInbound(db: SupabaseClient, input: SocialDis
   const { data: conversation, error } = await db.from('conversations').select('id,ai_enabled,automation_enabled,last_human_message_at')
     .eq('id', input.conversationId).eq('account_id', input.accountId).eq('contact_id', input.contactId).maybeSingle()
   if (error || !conversation) throw error ?? new Error('Conversación no disponible.')
+  if (isLikelyAutomatedInbound(input.text)) return
   const lastHuman = conversation.last_human_message_at ? new Date(conversation.last_human_message_at).getTime() : 0
   const humanRecentlyActive = Date.now() - lastHuman < 5 * 60 * 1000
   if (await handleTeacherInbound(db, { ...input, humanRecentlyActive })) return

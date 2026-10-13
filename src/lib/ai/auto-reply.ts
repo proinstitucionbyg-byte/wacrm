@@ -22,6 +22,7 @@ import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { academicContext } from '@/lib/matriculas/calendar'
 import { studentSupportArea } from './student-support'
 import { sentOfferPriceReply } from './sent-offer'
+import { isLikelyAutomatedInbound } from './automated-inbound'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -100,6 +101,7 @@ export async function dispatchInboundToAiReply(
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
+    if (isLikelyAutomatedInbound(latestUserMessage(messages))) return
     const requestedArea = explicitlyRequestedArea(latestUserMessage(messages)) ?? studentSupportArea(latestUserMessage(messages), messages);
     if (requestedArea && requestedArea.toUpperCase() !== conv.ai_handoff_area) handedOff = false;
 

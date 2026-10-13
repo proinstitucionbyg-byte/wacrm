@@ -835,6 +835,7 @@
   "create_deal": "Create Deal",
   "wait": "Wait",
   "condition": "Condition (If/Else)",
+  "run_automation": "Ejecutar otra automatización",
   "send_webhook": "Send Webhook",
   "close_conversation": "Close Conversation",
   "ai_agent": "AI Agent"

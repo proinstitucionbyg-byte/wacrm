@@ -132,6 +132,14 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
         })
       }
       break
+    case 'run_automation':
+      if (!nonEmpty(c.automation_id)) {
+        issues.push({
+          path: `${path}.automation_id`,
+          message: 'target automation is required',
+        })
+      }
+      break
     case 'condition':
       if (!nonEmpty(c.subject)) {
         issues.push({ path: `${path}.subject`, message: 'condition subject is required' })
