@@ -18,7 +18,7 @@ export async function GET(request: Request) {
       .in('stage', ['final', 'provisional'])
       .neq('status', 'closed')
       .order('started_at', { ascending: false })
-      .limit(10);
+      .limit(1);
     if (error) throw error;
     return NextResponse.json({ tasks: data ?? [] });
   } catch (error) {
