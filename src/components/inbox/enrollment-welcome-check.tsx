@@ -20,11 +20,12 @@ export function EnrollmentWelcomeCheck({
   const load = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/enrollments/welcome?conversation=${conversationId}`
+        `/api/enrollments/welcome?conversation=${conversationId}`,
+        { cache: 'no-store' }
       );
       if (!res.ok) throw Error('No se pudo comprobar la bienvenida.');
       const data = await res.json();
-      setTasks(data.tasks);
+      setTasks(Array.isArray(data.tasks) ? data.tasks.slice(0, 1) : []);
       setNow(Date.now());
       setError('');
     } catch (e) {
