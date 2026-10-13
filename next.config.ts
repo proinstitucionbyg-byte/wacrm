@@ -68,6 +68,10 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: "/inbox",
+        headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0" }],
+      },
+      {
         source: "/:path*",
         headers: [...SECURITY_HEADERS],
       },
