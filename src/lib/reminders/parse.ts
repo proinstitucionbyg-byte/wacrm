@@ -7,11 +7,22 @@ export function suggestReminder(text: string, now = new Date()): { dueLocal: str
     : /(?:cada semana|semanalmente|todos los (?:lunes|martes|miercoles|jueves|viernes|sabados|domingos))/.test(value) ? 7 : null;
   const needsInterval = /cada\s+(?:unos|algunos)\s+dias/.test(value) || (repeatDays !== null && repeatDays > 365);
   const target = new Date(now);
-  const relative = value.match(/\ben\s+(\d{1,3})\s+(minutos?|horas?|dias?)\b/);
+  const relative = value.match(/\b(?:en|dentro de)\s+(un|una|\d{1,3})\s+(minutos?|horas?|dias?|semanas?|mes(?:es)?)\b/);
   if (relative) {
-    const amount = Number(relative[1]);
+    const amount = /^(?:un|una)$/.test(relative[1]) ? 1 : Number(relative[1]);
     const unit = relative[2];
-    target.setTime(now.getTime() + amount * (unit.startsWith('minuto') ? 60_000 : unit.startsWith('hora') ? 3_600_000 : 86_400_000));
+    if (unit.startsWith('mes')) {
+      const originalDay = target.getDate();
+      target.setDate(1);
+      target.setMonth(target.getMonth() + amount);
+      const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+      target.setDate(Math.min(originalDay, lastDay));
+    } else {
+      const milliseconds = unit.startsWith('minuto') ? 60_000
+        : unit.startsWith('hora') ? 3_600_000
+          : unit.startsWith('semana') ? 7 * 86_400_000 : 86_400_000;
+      target.setTime(now.getTime() + amount * milliseconds);
+    }
   } else {
     const months = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
     const namedDate = value.match(/\b(?:el\s+)?(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?:\s+(?:de(?:l)?\s+)?(\d{4}))?\b/);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { BellRing, Mic, Square, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -9,6 +10,7 @@ import { suggestReminder } from '@/lib/reminders/parse';
 interface Reminder { id: string; body: string; due_at: string; repeat_days: number | null; conversation_id: string | null; }
 
 export function RemindersPanel({ conversationId }: { conversationId: string | null }) {
+  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Reminder[]>([]);
   const [body, setBody] = useState('');
@@ -20,6 +22,8 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
   const [transcribing, setTranscribing] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -103,7 +107,9 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
     } catch { toast.error('No se pudo activar el micrófono. Puedes escribir el recordatorio.'); }
   }
 
-  return <>
+  if (!mounted) return null;
+
+  return createPortal(<>
     <button type="button" onClick={() => setOpen(true)} title="Mis recordatorios" aria-label="Abrir mis recordatorios"
       className="fixed bottom-5 right-5 z-40 inline-flex h-11 items-center gap-2 rounded-xl border border-sky-500/50 bg-slate-900 px-4 text-slate-100 shadow-xl hover:border-sky-400 hover:bg-slate-800">
       <BellRing className="h-4 w-4"/><span className="hidden xl:inline">Recordatorios</span>
@@ -152,5 +158,5 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
         </div>
       </SheetContent>
     </Sheet>
-  </>;
+  </>, document.body);
 }

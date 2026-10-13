@@ -13,19 +13,18 @@ export function EnrollmentWelcomeCheck({
 }: {
   conversationId: string;
 }) {
-  const [task, setTask] = useState<WelcomeTask | null>(null),
+  const [tasks, setTasks] = useState<WelcomeTask[]>([]),
     [busy, setBusy] = useState(''),
     [error, setError] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const load = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/enrollments/welcome?conversation=${conversationId}`,
-        { cache: 'no-store' }
+        `/api/enrollments/welcome?conversation=${conversationId}`
       );
       if (!res.ok) throw Error('No se pudo comprobar la bienvenida.');
       const data = await res.json();
-      setTask(Array.isArray(data.tasks) ? (data.tasks[0] ?? null) : null);
+      setTasks(data.tasks);
       setNow(Date.now());
       setError('');
     } catch (e) {
@@ -34,6 +33,10 @@ export function EnrollmentWelcomeCheck({
   }, [conversationId]);
   useEffect(() => {
     void Promise.resolve().then(load);
+    const timer = setInterval(() => {
+      if (!document.hidden) void load();
+    }, 15000);
+    return () => clearInterval(timer);
   }, [load]);
   async function complete(task: WelcomeTask) {
     setBusy(task.id);
@@ -53,10 +56,10 @@ export function EnrollmentWelcomeCheck({
     }
   }
   return (
-    <div className="contents" data-enrollment-welcome-slot>
-      {task && (
+    <>
+      {tasks.map((task) => (
         <div
-          data-enrollment-welcome-id={task.id}
+          key={task.id}
           className="mx-4 my-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm"
         >
           {task.stage === 'provisional' && (
@@ -100,12 +103,12 @@ export function EnrollmentWelcomeCheck({
             </p>
           )}
         </div>
-      )}
+      ))}
       {error && (
         <p role="alert" className="text-destructive px-4 text-xs">
           {error}
         </p>
       )}
-    </div>
+    </>
   );
 }

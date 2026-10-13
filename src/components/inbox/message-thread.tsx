@@ -27,7 +27,6 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
-  Pin,
 } from 'lucide-react';
 import { format, isToday, isYesterday, differenceInHours } from 'date-fns';
 import { useTranslations } from 'next-intl';
@@ -198,7 +197,7 @@ export function MessageThread({
   const tTimer = useTranslations('Inbox.sessionTimer');
   const tQuote = useTranslations('Inbox.replyQuote');
 
-  const { user, accountId } = useAuth();
+  const { user } = useAuth();
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -339,38 +338,6 @@ export function MessageThread({
   });
 
   const conversationId = conversation?.id;
-  const [pinnedMessageIds, setPinnedMessageIds] = useState<string[]>([]);
-  useEffect(() => {
-    if (!conversationId || !user) return;
-    let cancelled = false;
-    setPinnedMessageIds([]);
-    createClient().from('message_pins').select('message_id').eq('user_id', user.id)
-      .eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(30)
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) { console.error('Failed to load message pins:', error); return; }
-        setPinnedMessageIds((data ?? []).map(pin => pin.message_id));
-      });
-    return () => { cancelled = true; };
-  }, [conversationId, user]);
-
-  async function togglePin(messageId: string) {
-    if (!conversationId || !user || !accountId) return;
-    const db = createClient();
-    const pinned = pinnedMessageIds.includes(messageId);
-    const { error } = pinned
-      ? await db.from('message_pins').delete().eq('user_id', user.id).eq('message_id', messageId)
-      : await db.from('message_pins').insert({ account_id: accountId, user_id: user.id,
-          conversation_id: conversationId, message_id: messageId });
-    if (error) { toast.error('No se pudo actualizar el mensaje anclado.'); return; }
-    setPinnedMessageIds(current => pinned ? current.filter(id => id !== messageId) : [messageId, ...current]);
-  }
-
-  function jumpToPin(messageId: string) {
-    const message = document.getElementById(`message-${messageId}`);
-    if (!message) { toast.error('Ese mensaje ya no está visible en este chat.'); return; }
-    message.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
 
   // Fetch messages whenever the selected conversation changes. Kept
@@ -1357,19 +1324,6 @@ export function MessageThread({
         </div>
       )}
 
-      {pinnedMessageIds.length > 0 && <div className="border-b border-border bg-card/95 px-4 py-2">
-        <div className="flex max-h-20 flex-wrap gap-2 overflow-y-auto" aria-label="Mensajes anclados">
-          {pinnedMessageIds.map(id => {
-            const pinned = messagesById.get(id);
-            return <button key={id} type="button" onClick={() => jumpToPin(id)}
-              className="inline-flex max-w-64 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
-              title="Ir al mensaje anclado"><Pin className="h-3 w-3 shrink-0"/>
-              <span className="truncate">{pinned?.content_text || (pinned ? `${pinned.content_type} · ${new Date(pinned.created_at).toLocaleString('es-PE')}` : 'Mensaje no visible')}</span>
-            </button>;
-          })}
-        </div>
-      </div>}
-
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
@@ -1427,8 +1381,6 @@ export function MessageThread({
                         key={msg.id}
                         message={msg}
                         onReply={() => handleStartReply(msg)}
-                        pinned={pinnedMessageIds.includes(msg.id)}
-                        onPin={!msg.id.startsWith('temp-') ? () => { void togglePin(msg.id); } : undefined}
                         onHide={canHideMessages && !msg.id.startsWith('temp-') ? async () => {
                           if (!user) return;
                           const {error} = await createClient().from('inbox_hidden_messages').insert({user_id:user.id,message_id:msg.id});

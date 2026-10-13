@@ -27,4 +27,11 @@ describe('suggestReminder', () => {
     expect(suggestReminder('Avisar el 25/10/2026 a las 14:30', now).dueLocal).toBe('2026-10-25T14:30');
     expect(suggestReminder('Avisar en 2 horas', now).dueLocal).toBe('2026-10-12T12:00');
   });
+
+  it('recognizes pasado manana and a month from now', () => {
+    expect(suggestReminder('Recuérdame pasado mañana a las 2 de la tarde', now).dueLocal)
+      .toBe('2026-10-14T14:00');
+    expect(suggestReminder('Recuérdame dentro de un mes', now).dueLocal)
+      .toBe('2026-11-12T10:00');
+  });
 });
