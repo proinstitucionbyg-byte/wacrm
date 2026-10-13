@@ -32,11 +32,13 @@ export async function GET(request: Request) {
   if (supplied !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  const admin = supabaseAdmin();
+  const { error: reminderError } = await admin.rpc('publish_due_adviser_reminders');
+  if (reminderError) console.error('No se pudieron entregar los recordatorios personales', reminderError);
   await expireSalesAssignments();
   await routeWaitingSalesConversations();
   await reactivateExpiredManualControls();
   await runIdleFollowups();
-  const admin = supabaseAdmin();
   await runIncompleteIntakes(admin);
   const { error: areaRoutingError } = await admin.rpc('route_waiting_area_conversations');
   if (areaRoutingError) return NextResponse.json({ error: 'No se pudo actualizar la cola de areas' }, { status: 500 });

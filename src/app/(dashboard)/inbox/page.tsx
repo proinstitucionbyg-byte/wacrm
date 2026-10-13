@@ -12,6 +12,7 @@ import type { Conversation, Message, Contact, ConversationStatus } from "@/types
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
+import { RemindersPanel } from "@/components/inbox/reminders-panel";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
@@ -616,6 +617,7 @@ if (activeConversation?.id === fetched.id) {
           </div>
         )}
       </div>
+      <RemindersPanel conversationId={activeConversation?.id ?? null} />
     </div>
   );
 }

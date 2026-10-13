@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { CornerUpLeft, Copy, SmilePlus, EyeOff } from "lucide-react";
+import { CornerUpLeft, Copy, SmilePlus, EyeOff, Pin } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +21,8 @@ interface MessageActionsProps {
   onReply: () => void;
   onReact: (emoji: string) => void;
   onHide?: () => Promise<void>;
+  onPin?: () => void;
+  pinned?: boolean;
   children: ReactNode;
 }
 
@@ -34,6 +36,8 @@ export function MessageActions({
   onReply,
   onReact,
   onHide,
+  onPin,
+  pinned = false,
   children,
 }: MessageActionsProps) {
   const t = useTranslations("Inbox.actions");
@@ -84,6 +88,7 @@ export function MessageActions({
   // in the row no longer reveals the toolbar.
   return (
     <div
+      id={`message-${message.id}`}
       className={cn(
         "flex w-full",
         isAgent ? "justify-end" : "justify-start",
@@ -147,6 +152,11 @@ export function MessageActions({
         >
           <Copy className="h-3.5 w-3.5" />
         </button>
+        {onPin && <button type="button" onClick={() => { onPin(); setTouchOpen(false); }}
+          title={pinned ? 'Desanclar mensaje' : 'Anclar mensaje'} aria-label={pinned ? 'Desanclar mensaje' : 'Anclar mensaje'}
+          className="flex h-5 w-5 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground">
+          <Pin className="h-3.5 w-3.5" fill={pinned ? 'currentColor' : 'none'} />
+        </button>}
         {onHide && <button type="button" aria-label="Ocultar mensaje solo para mí" title="Ocultar solo para mí; no elimina para el destinatario" onClick={() => { void onHide(); setTouchOpen(false); }} className="flex h-5 w-5 items-center justify-center rounded-full text-popover-foreground hover:bg-muted"><EyeOff className="h-3.5 w-3.5"/></button>}
       </div>
       </div>
