@@ -133,7 +133,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
       if (!response.ok) throw new Error((await response.json()).error || 'No se pudo guardar.');
       setBody(''); setDueLocal(''); setRepeatDays(''); setNeedsInterval(false);
       await refresh();
-      toast.success('Recordatorio guardado. Recibirás una notificación a la hora indicada.');
+      toast.success(`Recordatorio guardado para ${due.toLocaleString('es-PE', { timeZone: 'America/Lima' })}. Aparecerá en Notificaciones.`);
     } catch (error) { toast.error(error instanceof Error ? error.message : 'No se pudo guardar.'); }
     finally { setSaveBusy(false); }
   }
@@ -213,9 +213,9 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
             {recording ? <Square className="h-4 w-4 text-red-500"/> : <Mic className="h-4 w-4"/>}
             {transcribing ? 'Transcribiendo...' : recording ? 'Detener audio' : 'Dictar por audio'}
           </button>
-          <p className="text-xs text-muted-foreground">Di qué recordar, cuándo y cada cuánto. La fecha y la repetición se completan solas; solo corrígelas si hace falta.</p>
+          <p className="text-xs text-muted-foreground">Di en un solo audio qué recordar, cuándo y cada cuánto. La fecha y la repetición se completan solas; solo corrígelas si hace falta. El aviso aparece en Notificaciones del CRM.</p>
           <label className="block text-sm">Fecha y hora
-            <input type="datetime-local" value={dueLocal} onChange={event => setDueLocal(event.target.value)}
+            <input type="datetime-local" step="1" value={dueLocal} onChange={event => setDueLocal(event.target.value)}
               className="mt-1 w-full rounded-md border border-border bg-background p-2" />
           </label>
           <label className="block text-sm">Repetir cada cuántos días (opcional)

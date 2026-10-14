@@ -7,9 +7,16 @@ export function suggestReminder(text: string, now = new Date()): { dueLocal: str
     : /(?:cada semana|semanalmente|todos los (?:lunes|martes|miercoles|jueves|viernes|sabados|domingos))/.test(value) ? 7 : null;
   const needsInterval = /cada\s+(?:unos|algunos)\s+dias/.test(value) || (repeatDays !== null && repeatDays > 365);
   const target = new Date(now);
-  const relative = value.match(/\b(?:en|dentro de)\s+(un|una|\d{1,3})\s+(minutos?|horas?|dias?|semanas?|mes(?:es)?)\b/);
+  const relative = value.match(/\b(?:en|dentro de)\s+(\d{1,3}|[a-z]+(?:\s+y\s+[a-z]+)?)\s+(minutos?|horas?|dias?|semanas?|mes(?:es)?)\b/);
   if (relative) {
-    const amount = /^(?:un|una)$/.test(relative[1]) ? 1 : Number(relative[1]);
+    const units: Record<string, number> = { un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9 };
+    const teens: Record<string, number> = { diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19 };
+    const tens: Record<string, number> = { veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90 };
+    const words = relative[1].split(' y ');
+    const amount = /^\d+$/.test(relative[1]) ? Number(relative[1])
+      : units[relative[1]] ?? teens[relative[1]] ?? (relative[1].startsWith('veinti') ? 20 + (units[relative[1].slice(6)] ?? NaN)
+        : words.length === 2 ? (tens[words[0]] ?? NaN) + (units[words[1]] ?? NaN) : tens[relative[1]]);
+    if (!Number.isFinite(amount) || amount < 1) return { dueLocal: '', repeatDays, needsInterval };
     const unit = relative[2];
     if (unit.startsWith('mes')) {
       const originalDay = target.getDate();
@@ -49,6 +56,8 @@ export function suggestReminder(text: string, now = new Date()): { dueLocal: str
     const clock = value.match(/(?:a\s+las?\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:de\s+la\s+)?(tarde|manana|noche|am|pm|a\.m\.|p\.m\.)/)
       ?? value.match(/(?:a\s+las?\s+)(\d{1,2})(?::(\d{2}))?/)
       ?? value.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (!clock && !explicitDate && !/\b(?:manana|pasado manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/.test(value))
+      return { dueLocal: '', repeatDays, needsInterval };
     let hour = clock ? Number(clock[1]) : 9;
     const minute = clock?.[2] ? Number(clock[2]) : 0;
     const period = clock?.[3];
@@ -65,6 +74,6 @@ export function suggestReminder(text: string, now = new Date()): { dueLocal: str
     }
   }
   const pad = (n: number) => String(n).padStart(2, '0');
-  return { dueLocal: `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T${pad(target.getHours())}:${pad(target.getMinutes())}`,
+  return { dueLocal: `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T${pad(target.getHours())}:${pad(target.getMinutes())}${relative ? `:${pad(target.getSeconds())}` : ''}`,
     repeatDays: repeatDays && repeatDays <= 365 ? repeatDays : null, needsInterval };
 }

@@ -25,13 +25,27 @@ describe('suggestReminder', () => {
 
   it('recognizes a numeric date and relative timing', () => {
     expect(suggestReminder('Avisar el 25/10/2026 a las 14:30', now).dueLocal).toBe('2026-10-25T14:30');
-    expect(suggestReminder('Avisar en 2 horas', now).dueLocal).toBe('2026-10-12T12:00');
+    expect(suggestReminder('Avisar en 2 horas', now).dueLocal).toBe('2026-10-12T12:00:00');
   });
 
   it('recognizes pasado manana and a month from now', () => {
     expect(suggestReminder('Recuérdame pasado mañana a las 2 de la tarde', now).dueLocal)
       .toBe('2026-10-14T14:00');
     expect(suggestReminder('Recuérdame dentro de un mes', now).dueLocal)
-      .toBe('2026-11-12T10:00');
+      .toBe('2026-11-12T10:00:00');
+  });
+
+  it('schedules spoken relative minutes at the exact second', () => {
+    const nowWithSeconds = new Date(2026, 9, 14, 1, 21, 48);
+    expect(suggestReminder('Quiero que me recuerdes en dos minutos que tengo que tomar agua.', nowWithSeconds).dueLocal)
+      .toBe('2026-10-14T01:23:48');
+    expect(suggestReminder('Recordar en 25 minutos llamar', nowWithSeconds).dueLocal)
+      .toBe('2026-10-14T01:46:48');
+    expect(suggestReminder('En veinticinco minutos tomar agua', nowWithSeconds).dueLocal)
+      .toBe('2026-10-14T01:46:48');
+  });
+
+  it('does not silently set 9 am when no time was dictated', () => {
+    expect(suggestReminder('Tomar agua', now).dueLocal).toBe('');
   });
 });

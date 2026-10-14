@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Notification } from "@/types";
+import { toast } from "sonner";
 
 /**
  * Count of unread notifications for the current user. Used by the
@@ -42,6 +43,13 @@ export function useUnreadNotifications(): number {
           if (payload.eventType === "INSERT") {
             const row = payload.new as Notification;
             if (!row.read_at && (!row.expires_at || Date.parse(row.expires_at)>Date.now())) setCount((n) => n + 1);
+            if (row.dedup_key?.startsWith("adviser-reminder:")) {
+              toast.info("Recordatorio: " + (row.body || "Tienes una tarea pendiente"), {
+                id: row.id,
+                duration: 20_000,
+                action: { label: "Ver", onClick: () => { window.location.assign("/notifications"); } },
+              });
+            }
           } else if (payload.eventType === "UPDATE") {
             // Updates here only ever set read_at (marking a notification
             // read). Derive purely from the new row so we don't rely on
