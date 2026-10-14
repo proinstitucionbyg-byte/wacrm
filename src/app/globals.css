@@ -269,4 +269,10 @@ html[data-theme="neo"] {
   .mobile-message-scroll::-webkit-scrollbar {
     display: none;
   }
+  .mobile-compose-input {
+    scrollbar-width: none;
+  }
+  .mobile-compose-input::-webkit-scrollbar {
+    display: none;
+  }
 }

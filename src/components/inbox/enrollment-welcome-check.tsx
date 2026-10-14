@@ -60,7 +60,7 @@ export function EnrollmentWelcomeCheck({
       {task && (
         <div
           data-enrollment-welcome-id={task.id}
-          className="mx-4 my-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm"
+          className="mx-2 my-1 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2 text-xs leading-tight sm:mx-4 sm:my-2 sm:p-3 sm:text-sm"
         >
           {task.stage === 'provisional' && (
             <div className="mb-3 rounded-lg border border-amber-500 bg-amber-500/15 p-3">
@@ -87,14 +87,20 @@ export function EnrollmentWelcomeCheck({
               }
               onChange={() => void complete(task)}
             />
-            <span>
+            <span className="min-w-0">
               <strong>BIENVENIDA GESTIONADA</strong>
-              <br />
-              {task.completed_at
+              <br className="sm:hidden" />
+              <span className="hidden sm:inline"> · </span>
+              <span className="sm:hidden">{task.completed_at
+                ? 'RESPALDO CANCELADO.'
+                : task.backup_sent_at
+                  ? 'BIENVENIDA AUTOMÁTICA ENVIADA.'
+                  : `Vence: ${new Date(task.welcome_due_at).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' })}. Marca para cancelar el respaldo.`}</span>
+              <span className="hidden sm:inline">{task.completed_at
                 ? 'MARCADA: SE CANCELO LA BIENVENIDA AUTOMATICA DE RESPALDO.'
                 : task.backup_sent_at
                   ? 'BIENVENIDA AUTOMATICA ENVIADA.'
-                  : `Plazo: ${new Date(task.welcome_due_at).toLocaleString('es-PE', { timeZone: 'America/Lima' })}. Marcar basta para cancelar el respaldo de imagen y audio.`}
+                  : `Plazo: ${new Date(task.welcome_due_at).toLocaleString('es-PE', { timeZone: 'America/Lima' })}. Marcar basta para cancelar el respaldo de imagen y audio.`}</span>
             </span>
           </label>
           {task.status === 'review' && (

@@ -605,7 +605,7 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className={cn('border-border bg-card relative shrink-0 overflow-y-auto border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:p-3', draft ? 'max-h-[45dvh]' : 'max-h-[30dvh]')}>
+    <div className={cn('border-border bg-card relative min-h-16 shrink-0 overflow-y-auto border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:p-3', draft ? 'max-h-[45dvh]' : 'max-h-[30dvh]')}>
       {needsAdviserNickname && !readOnly && (
         <p className="text-muted-foreground mb-2 text-sm">
           Completa y guarda tu apodo en{' '}
@@ -872,7 +872,7 @@ export function MessageComposer({
             // The placeholder text also surfaces the read-only state.
             title={readOnly ? t('readOnlyTitle') : undefined}
             className={cn(
-              'min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900/70 px-3 py-2.5 text-base text-white transition-all duration-200 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-card light:text-foreground light:placeholder:text-muted-foreground lg:px-5 lg:py-3 lg:text-sm',
+              'mobile-compose-input min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900/70 px-3 py-2.5 text-base text-white transition-all duration-200 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-card light:text-foreground light:placeholder:text-muted-foreground lg:px-5 lg:py-3 lg:text-sm',
               (sessionExpired || readOnly) && 'cursor-not-allowed opacity-50'
             )}
           />
