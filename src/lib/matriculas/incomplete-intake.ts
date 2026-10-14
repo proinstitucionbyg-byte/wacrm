@@ -41,13 +41,21 @@ export function missingWrittenFields(data: EnrollmentData): string[] {
   )
     .filter((key) => !data[key]?.trim())
     .map((key) => ENROLLMENT_FIELDS[key]);
-  if (!data.identity_confirmed && !data.declaration_message_ids?.length)
+  if (!data.identity_message_ids?.length && !data.declaration_message_ids?.length)
     result.push(
       'FOTO DEL DOCUMENTO O DATOS COMPLETOS POR ESCRITO PARA CONSERVAR SU PANTALLAZO'
     );
   if (isMinor(data.birth_date) && !data.guardian_message_ids?.length)
     result.push('DNI DEL TUTOR O PADRES');
   return result;
+}
+export function fidelityReviewTasks(data: EnrollmentData): string[] {
+  const tasks = missingWrittenFields(data);
+  if (data.identity_message_ids?.length && !data.identity_confirmed)
+    tasks.push('VERIFICAR DNI YA RECIBIDO; NO PEDIR OTRA FOTO SI ES LEGIBLE');
+  if (!data.offer_confirmed || data.prices?.length !== 6)
+    tasks.push('CONFIRMAR PROMOCION Y SEIS CUOTAS SEGUN EL BLOQUE ENVIADO');
+  return tasks;
 }
 export function incompleteIntakeText(
   phase: IncompletePhase,
@@ -153,7 +161,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
     if (!owner) continue;
     const body =
       'PAGO VALIDADO · DATOS PENDIENTES · DOCUMENTOS NO EMITIDOS\n' +
-      missingWrittenFields(draft.data).join('\n') +
+      fidelityReviewTasks(draft.data).join('\n') +
       '\nFIDELIZACION DEBE COMPLETAR EL REGISTRO Y GESTIONAR EL ACCESO A CLASE CON UN ENLACE VERIFICADO. NO INVENTAR EL ENLACE.\nPLAZO DE BIENVENIDA: ' +
       new Date(watch.welcome_due_at).toLocaleString('es-PE', {
         timeZone: 'America/Lima',

@@ -124,6 +124,14 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.retrieveKnowledge).not.toHaveBeenCalled()
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
+  it('runs the saved enrollment steps when the student asks how to sign up',async()=>{
+    h.state.autoResponders=[{id:'payment',name:'YAPE O PLIN'}]
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'¿Cómo hago para inscribirme en el curso?'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.runAutomation).toHaveBeenCalledWith(expect.objectContaining({automationId:'payment',conversationId:'conv-1'}))
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
   it('does not launch the direct automation when the reply slot is denied',async()=>{
     h.state.claim=false
     h.state.autoResponders=[{id:'nutricion',name:'NUTRICION 19.90'}]

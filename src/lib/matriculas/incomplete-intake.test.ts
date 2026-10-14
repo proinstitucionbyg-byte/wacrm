@@ -94,6 +94,12 @@ describe('protocolo excepcional de bienvenida', () => {
     expect(fields).not.toContain('NUMERO DE DOCUMENTO');
     expect(fields).toContain('DNI DEL TUTOR O PADRES');
   });
+  it('no vuelve a pedir el DNI recibido cuando solo falta la revisión interna', () => {
+    const text = incompleteIntakeText('intake_followup', {
+      identity_message_ids: ['foto-recibida'],
+    });
+    expect(text).not.toContain('FOTO DEL DOCUMENTO O DATOS COMPLETOS');
+  });
 });
 
 type Result = { data?: unknown; error?: { code?: string } | null };

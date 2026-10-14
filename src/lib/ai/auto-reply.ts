@@ -4,7 +4,7 @@ import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
-import { findCandidateAutomations, preferredCourseInformationAutomation } from './automation-match'
+import { findCandidateAutomations, preferredCourseInformationAutomation, preferredEnrollmentAutomation } from './automation-match'
 import { routeConversationToArea, explicitlyRequestedArea } from './handoff-routing'
 import {
   SCHEDULE_TEXT,
@@ -126,7 +126,8 @@ export async function dispatchInboundToAiReply(
     }
 
     const candidates = await findCandidateAutomations(db, accountId, messages)
-    const directAutomation = requestedArea ? null : preferredCourseInformationAutomation(candidates, messages)
+    const directAutomation = requestedArea ? null :
+      preferredEnrollmentAutomation(candidates, messages) ?? preferredCourseInformationAutomation(candidates, messages)
     if (directAutomation) {
       const { data: claimed, error: claimErr } = await db.rpc('claim_ai_reply_slot', {
         conversation_id: conversationId,

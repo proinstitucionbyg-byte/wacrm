@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findCandidateAutomations, preferredCourseInformationAutomation } from './automation-match'
+import { findCandidateAutomations, preferredCourseInformationAutomation, preferredEnrollmentAutomation } from './automation-match'
 import { buildSystemPrompt } from './defaults'
 import type { ChatMessage } from './types'
 
@@ -7,6 +7,7 @@ const catalog = [
   { id: 'malla-farmacia', name: 'MALLAS DE FARMACIA', description: null, trigger_config: { keywords: ['Malla de farmacia'] } },
   { id: 'promo-farmacia', name: 'FARMACIA 19.90', description: null, trigger_config: { keywords: ['Hola Deseo informacion sobre la Super Promo 19.90', 'en Auxiliar de Farmacia'] } },
   { id: 'promo-nutricion', name: 'NUTRICION 19.90', description: null, trigger_config: { keywords: ['nutricion'] } },
+  { id: 'payment', name: 'YAPE O PLIN', description: null, trigger_config: { keywords: [] } },
 ]
 function db() {
   const chain = { select: () => chain, eq: () => chain, limit: async () => ({ data: catalog, error: null }) }
@@ -15,6 +16,12 @@ function db() {
 async function candidates(messages: ChatMessage[]) { return findCandidateAutomations(db(), 'account-test', messages) }
 
 describe('prioridad de informacion inicial del curso', () => {
+  it('lanza el bloque guardado de pago al pedir inscripción', async () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: '¿Cómo hago para inscribirme en el curso?' }]
+    expect(preferredEnrollmentAutomation(await candidates(messages), messages)).toBe('payment')
+    expect(await findCandidateAutomations(db(), 'account-test', messages, 1)).toEqual([{ id: 'payment', name: 'YAPE O PLIN' }])
+    expect(preferredEnrollmentAutomation(await candidates([{ role: 'user', content: 'Info de nutrición' }]), [{ role: 'user', content: 'Info de nutrición' }])).toBeNull()
+  })
   it('selects the actual Nutricion block instead of rewriting its steps', async () => {
     const messages: ChatMessage[]=[{role:'user',content:'Hola, quiero informacion de la promocion activa de NUTRICION Y DIETETICA.'}]
     expect(preferredCourseInformationAutomation(await candidates(messages),messages)).toBe('promo-nutricion')

@@ -3,7 +3,7 @@ import { academicContext, academicOffer, parseAcademicModules } from './calendar
 const courses=['NUTRICION Y DIETETICA','AUXILIAR DE FARMACIA','RECURSOS HUMANOS','ASISTENTE ADMINISTRATIVO','AUXILIAR DE EDUCACION INICIAL'];
 const input=()=>courses.flatMap(course=>[10,11].map(month=>({course,module:'MODULO',start_date:`2026-${month}-01`,class_dates:Array.from({length:8},(_,i)=>`2026-${month}-${String(i*2+1).padStart(2,'0')}`),hour:'20:00'})));
 describe('academic calendar snapshot',()=>{
-  it('offers only the incorporation date to the AI while retaining the official start internally',async()=>{
+  it('states the class date to the student while retaining the official start internally',async()=>{
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2026-10-09T12:00:00-05:00'));
@@ -14,7 +14,7 @@ describe('academic calendar snapshot',()=>{
       const chain={select:()=>chain,eq:()=>chain,maybeSingle:async()=>({data:{modules,updated_at:new Date().toISOString()},error:null})};
       const db={from:()=>chain} as unknown as Parameters<typeof academicContext>[0];
       const context=(await academicContext(db,'account')).join('\n');
-      expect(context).toContain('fecha disponible para incorporarse 2026-10-13');
+      expect(context).toContain('SU CLASE ES EL 2026-10-13 A LAS 20:00 HORA LIMA');
       expect(context).not.toContain('2026-10-06');
       expect(context).toContain('Usa las automatizaciones configuradas');
       expect(academicOffer(modules,courses[0])?.start_date).toBe('2026-10-06');

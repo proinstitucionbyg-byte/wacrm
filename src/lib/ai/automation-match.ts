@@ -67,6 +67,14 @@ export function preferredCourseInformationAutomation(options: AutomationOption[]
   return matches.length === 1 ? matches[0].id : null
 }
 
+/** Explicit enrollment questions should use the saved payment steps. */
+export function preferredEnrollmentAutomation(options: AutomationOption[], messages: ChatMessage[]): string | null {
+  const latest = normalize(messages.filter(m => m.role === 'user').at(-1)?.content ?? '')
+  if (!/\b(inscribirme|matricularme|inscripcion|matricula|activar (?:la|mi|tu|esta) promo|medios? de pago|como (?:hago|puedo|seria).{0,30}(?:inscrib|matricul))\b/.test(latest)) return null
+  const matches = options.filter(option => normalize(option.name ?? '').trim() === 'yape o plin')
+  return matches.length === 1 ? matches[0].id : null
+}
+
 /**
  * Pick the automations most similar to what the customer just said.
  * Reads ALL active keyword automations of the account (so new ones are
@@ -166,6 +174,17 @@ export async function findCandidateAutomations(
         return b.score - a.score || Number(b.d.promotion) - Number(a.d.promotion)
       })
       .slice(0, limit)
+
+    // The payment block must remain available even when other course blocks
+    // outrank it in the small candidate list.
+    const enrollmentRequested = /\b(inscribirme|matricularme|inscripcion|matricula|medios? de pago)\b/.test(latest)
+    if (enrollmentRequested) {
+      const paymentBlocks = docs.filter(d => normalize(d.label).trim() === 'yape o plin')
+      if (paymentBlocks.length === 1 && !scored.some(x => x.d.id === paymentBlocks[0].id)) {
+        scored.unshift({ d: paymentBlocks[0], score: Number.POSITIVE_INFINITY })
+        scored.length = Math.min(scored.length, limit)
+      }
+    }
 
     return scored.map((x) => ({ id: x.d.id, name: x.d.label }))
   } catch (err) {
