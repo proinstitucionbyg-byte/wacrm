@@ -1,14 +1,28 @@
 import { NextResponse } from 'next/server';
 import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const ctx = await getCurrentAccount();
-    const { data, error } = await ctx.supabase.from('adviser_reminders').select('id,body,due_at,repeat_days,conversation_id,status')
-      .eq('account_id', ctx.accountId).eq('user_id', ctx.userId).eq('status', 'active')
-      .order('due_at', { ascending: true }).limit(100);
+    const teamView = new URL(request.url).searchParams.get('scope') === 'team';
+    if (teamView && ctx.role !== 'owner') {
+      return NextResponse.json({ error: 'Solo el CEO puede ver los recordatorios del equipo.' }, { status: 403 });
+    }
+    let query = ctx.supabase.from('adviser_reminders').select('id,user_id,body,due_at,repeat_days,conversation_id,status')
+      .eq('account_id', ctx.accountId).eq('status', 'active');
+    if (!teamView) query = query.eq('user_id', ctx.userId);
+    const { data, error } = await query.order('due_at', { ascending: true }).limit(100);
     if (error) throw error;
-    return NextResponse.json({ reminders: data ?? [] });
+    let names = new Map<string, string>();
+    if (teamView && data?.length) {
+      const { data: profiles, error: profileError } = await ctx.supabase.from('profiles')
+        .select('user_id,full_name,email').eq('account_id', ctx.accountId)
+        .in('user_id', [...new Set(data.map(item => item.user_id))]);
+      if (profileError) throw profileError;
+      names = new Map((profiles ?? []).map(profile => [profile.user_id, profile.full_name || profile.email || 'Asesora']));
+    }
+    return NextResponse.json({ reminders: (data ?? []).map(item => ({ ...item, owner_name: names.get(item.user_id) ?? null })),
+      canViewTeam: ctx.role === 'owner', currentUserId: ctx.userId });
   } catch (error) { return toErrorResponse(error); }
 }
 
