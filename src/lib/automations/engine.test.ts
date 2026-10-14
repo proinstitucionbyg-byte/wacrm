@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
     logAutomationIds: [] as string[],
     latestGreetingAutomationId: null as string | null,
     pendingCancels: 0,
+    pendingInserts: [] as Record<string, unknown>[],
   },
 }));
 
@@ -59,7 +60,7 @@ vi.mock("./admin-client", () => {
     if (table === "automation_logs") {
       if (type === "insert") {
         state.logAutomationIds.push((ops.payload as { automation_id: string }).automation_id);
-        return { data: { id: "log1" }, error: null };
+        return { data: { id: `log${state.logAutomationIds.length}` }, error: null };
       }
       if (type === "update") return { data: null, error: null };
       if (ops.filters.some(([operator, key]) => operator === 'in' && key === 'automation_id')) {
@@ -72,12 +73,19 @@ vi.mock("./admin-client", () => {
       const automationId = ops.filters.find(
         ([operator, key]) => operator === 'eq' && key === 'automation_id',
       )?.[2];
+      const startPosition = ops.filters.find(
+        ([operator, key]) => operator === 'gte' && key === 'position',
+      )?.[2] as number | undefined;
+      const candidate = typeof automationId === 'string'
+        ? state.stepsByAutomationId[automationId] ?? state.steps : state.steps;
       return {
-        data: typeof automationId === 'string'
-          ? state.stepsByAutomationId[automationId] ?? state.steps
-          : state.steps,
+        data: startPosition === undefined ? candidate : candidate.filter(step => Number(step.position) >= startPosition),
         error: null,
       };
+    }
+    if (table === "automation_pending_executions" && type === "insert") {
+      state.pendingInserts.push(ops.payload as Record<string, unknown>);
+      return { data: null, error: null };
     }
     if (table === "automation_pending_executions" && type === "update") {
       state.pendingCancels++;
@@ -101,7 +109,7 @@ vi.mock("./admin-client", () => {
       upsert: (p: unknown) => ((ops.type = "upsert"), (ops.payload = p), b),
       eq: (k: string, v: unknown) => (ops.filters.push(["eq", k, v]), b),
       in: (k: string, v: unknown) => (ops.filters.push(["in", k, v]), b),
-      gte: () => b,
+      gte: (k: string, v: unknown) => (ops.filters.push(['gte', k, v]), b),
       is: () => b,
       order: () => b,
       limit: () => b,
@@ -130,7 +138,7 @@ vi.mock("./meta-send", () => ({
   engineSendInteractive: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
 }));
 
-import { runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
+import { resumePendingExecution, runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
 import { INITIAL_GREETING_ID, RETURN_GREETING_ID } from './greeting-continuity';
 import type { Automation } from "@/types";
 
@@ -149,6 +157,7 @@ beforeEach(() => {
   h.state.logAutomationIds = [];
   h.state.latestGreetingAutomationId = null;
   h.state.pendingCancels = 0;
+  h.state.pendingInserts = [];
 });
 
 describe('confirmed complete delivery', () => {
@@ -181,6 +190,36 @@ describe('confirmed complete delivery', () => {
 });
 
 describe('run_automation chaining', () => {
+  it('holds the parent after a linked block schedules its own wait', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.logStatus = 'partial';
+    h.state.automations = [automationWithUpdateStep(), { ...automationWithUpdateStep(), id: 'a2' }];
+    h.state.stepsByAutomationId = {
+      a1: [
+        { id: 'link', automation_id: 'a1', step_type: 'run_automation', position: 0,
+          parent_step_id: null, step_config: { automation_id: 'a2' } },
+        { id: 'after', automation_id: 'a1', step_type: 'update_contact_field', position: 1,
+          parent_step_id: null, step_config: { field: 'company', value: 'after child' } },
+      ],
+      a2: [{ id: 'wait', automation_id: 'a2', step_type: 'wait', position: 0,
+        parent_step_id: null, step_config: { amount: 10, unit: 'minutes' } }],
+    };
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(h.state.pendingInserts).toHaveLength(2);
+    expect(h.state.pendingInserts[1]).toEqual(expect.objectContaining({
+      automation_id: 'a1', next_step_position: 1,
+      context: expect.objectContaining({ await_child_log_id: 'log2' }),
+    }));
+    expect(h.state.updateCalls).toHaveLength(0);
+    h.state.logStatus = 'success';
+    await resumePendingExecution({
+      id: 'parent-pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
+      contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
+      next_step_position: 1, context: h.state.pendingInserts[1].context as { conversation_id: string },
+    });
+    expect(h.state.updateCalls).toHaveLength(1);
+  });
+
   it('runs the selected active automation in the same account', async () => {
     h.state.owned = { id: 'c1' };
     h.state.automations = [

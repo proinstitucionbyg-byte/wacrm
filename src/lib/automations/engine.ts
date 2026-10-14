@@ -52,6 +52,8 @@ export interface AutomationContext {
   vars?: Record<string, unknown>
   /** Server-owned chain history used to stop circular automation links. */
   automation_chain_ids?: string[]
+  /** A linked block must finish its own waits before the parent continues. */
+  await_child_log_id?: string
   /** The tag id that was added, for tag_added trigger. */
   tag_id?: string
   /** Agent the conversation was assigned to, for conversation_assigned. */
@@ -345,11 +347,35 @@ export async function resumePendingExecution(pending: {
       return
     }
   }
+  if (pending.context?.await_child_log_id) {
+    const childLogId = pending.context.await_child_log_id
+    const { data: child, error: childError } = await db.from('automation_logs')
+      .select('status').eq('id', childLogId).eq('account_id', pending.account_id).maybeSingle()
+    if (childError || !child || child.status === 'failed') {
+      await finalizeLog(pending.log_id, 'failed', 'El bloque enlazado no terminó correctamente')
+      await markPending(pending.id, 'failed')
+      return
+    }
+    if (child.status !== 'success') {
+      const { data: childPending, error: pendingError } = await db.from('automation_pending_executions')
+        .select('id').eq('log_id', childLogId).in('status', ['pending', 'running']).limit(1)
+      if (pendingError || !childPending?.length) {
+        await finalizeLog(pending.log_id, 'failed', 'El bloque enlazado se interrumpió')
+        await markPending(pending.id, 'cancelled')
+        return
+      }
+      const { error: retryError } = await db.from('automation_pending_executions')
+        .update({ status: 'pending', run_at: new Date(Date.now() + 60_000).toISOString() })
+        .eq('id', pending.id).eq('status', 'running')
+      if (retryError) await markPending(pending.id, 'failed')
+      return
+    }
+  }
   try {
     await executeStepsFrom({
       automation: automation as Automation,
       contactId: pending.contact_id,
-      context: pending.context ?? {},
+      context: { ...(pending.context ?? {}), await_child_log_id: undefined },
       parentStepId: pending.parent_step_id,
       branch: pending.branch,
       startPosition: pending.next_step_position,
@@ -541,13 +567,37 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         continue
       }
 
-      const detail = await runStep(step, args)
+      const outcome = await runStep(step, args)
+      const detail = typeof outcome === 'string' ? outcome : outcome.detail
       results.push({
         step_id: step.id,
         step_type: step.step_type,
         status: 'success',
         detail,
       })
+      if (typeof outcome !== 'string') {
+        const { data: child, error: childError } = await db.from('automation_logs')
+          .select('status').eq('id', outcome.childLogId).eq('account_id', args.automation.account_id).maybeSingle()
+        if (childError || !child || child.status === 'failed') throw new Error('El bloque enlazado falló')
+        if (child.status === 'partial') {
+          const { error: waitError } = await db.from('automation_pending_executions').insert({
+            automation_id: args.automation.id,
+            account_id: args.automation.account_id,
+            user_id: args.automation.user_id,
+            contact_id: args.contactId,
+            log_id: args.logId,
+            parent_step_id: args.parentStepId,
+            branch: args.branch,
+            next_step_position: step.position + 1,
+            context: { ...args.context, await_child_log_id: outcome.childLogId },
+            run_at: new Date(Date.now() + 60_000).toISOString(),
+            status: 'pending',
+          })
+          if (waitError) throw new Error('No se pudo esperar al bloque enlazado')
+          await appendResults(args.logId, results, 'partial', null)
+          return
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       results.push({
@@ -570,7 +620,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   }
 }
 
-async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string> {
+async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string | { detail: string; childLogId: string }> {
   const db = supabaseAdmin()
   console.log("STEP TYPE:", step.step_type)
 console.log(step.step_config)
@@ -867,7 +917,7 @@ console.log('======================')
         'automation_link',
       )
       if (!childLogId) throw new Error('run_automation: target did not start')
-      return `automation ${targetId} started`
+      return { detail: `automation ${targetId} started`, childLogId }
     }
 
     case 'send_webhook': {
