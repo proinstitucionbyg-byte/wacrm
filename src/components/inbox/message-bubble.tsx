@@ -427,7 +427,7 @@ export function MessageBubble({
   return (
     <div
 className={cn(
-  "flex flex-col",
+  "flex min-w-0 max-w-full flex-col",
   isAgent ? "items-end" : "items-start",
   selectionMode && "cursor-pointer",
 )}
@@ -449,7 +449,7 @@ className={cn(
 >
       <div
   className={cn(
-    "relative rounded-3xl px-4 py-3 shadow-lg",
+    "relative min-w-0 max-w-full [overflow-wrap:anywhere] rounded-3xl px-4 py-3 shadow-lg",
     isAgent
       ? "rounded-br-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/20"
       : "rounded-bl-lg border border-slate-700 bg-slate-900/70 text-white light:border-border light:bg-card light:text-foreground light:shadow-sm",
