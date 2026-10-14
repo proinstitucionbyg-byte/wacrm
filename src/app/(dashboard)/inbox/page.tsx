@@ -71,17 +71,26 @@ export default function InboxPage() {
         el.style.removeProperty('height');
         return;
       }
-      // The visual viewport shrinks when a phone keyboard opens, keeping
-      // the message field and Send button above it.
-      const height = window.visualViewport?.height ?? window.innerHeight;
-      el.style.height = `${Math.max(240, Math.round(height - 56))}px`;
+      // Measure from this pane's actual top, including the dashboard
+      // header and any notice. Subtracting a fixed 56px left the composer
+      // behind the iPhone keyboard whenever those heights changed.
+      const viewport = window.visualViewport;
+      const visibleBottom = (viewport?.offsetTop ?? 0) +
+        (viewport?.height ?? window.innerHeight);
+      const top = el.getBoundingClientRect().top;
+      el.style.height = `${Math.max(120, Math.floor(visibleBottom - top))}px`;
     };
     updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    if (mobileViewportRef.current?.parentElement) observer.observe(mobileViewportRef.current.parentElement);
     window.addEventListener('resize', updateHeight);
     window.visualViewport?.addEventListener('resize', updateHeight);
+    window.visualViewport?.addEventListener('scroll', updateHeight);
     return () => {
       window.removeEventListener('resize', updateHeight);
+      observer.disconnect();
       window.visualViewport?.removeEventListener('resize', updateHeight);
+      window.visualViewport?.removeEventListener('scroll', updateHeight);
     };
   }, []);
   useEffect(() => {
@@ -388,7 +397,16 @@ if (activeConversation?.id === fetched.id) {
    */
   const wasConnectedRef = useRef(false);
   const initialConnectDoneRef = useRef(false);
-  
+  useEffect(() => {
+    if (isConnected && initialConnectDoneRef.current && !wasConnectedRef.current) {
+      // Events missed while the socket was disconnected are not replayed.
+      const timer = window.setTimeout(() => setResyncToken((n) => n + 1), 0);
+      wasConnectedRef.current = true;
+      return () => window.clearTimeout(timer);
+    }
+    if (isConnected) initialConnectDoneRef.current = true;
+    wasConnectedRef.current = isConnected;
+  }, [isConnected]);
 
   /**
    * Refetch when the tab regains focus. Background tabs may have their
@@ -396,7 +414,19 @@ if (activeConversation?.id === fetched.id) {
    * visibilitychange → visible is a reliable signal that we may have
    * missed events. Cheap to fire; the children dedupe on their own.
    */
-  
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (!document.hidden) setResyncToken((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    // A periodic catch-up covers a socket that appears connected but
+    // silently misses an INSERT. It refetches data, never reloads the page.
+    const timer = window.setInterval(refreshIfVisible, 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+      window.clearInterval(timer);
+    };
+  }, []);
   /**
    * Manual refresh trigger for the thread-header refresh button.
    * Bumps the same resyncToken the reconnect / visibility paths use,

@@ -206,6 +206,10 @@ export function MessageThread({
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const loadedConversationRef = useRef<string | null>(null);
+  const scrollConversationRef = useRef<string | null>(null);
+  const lastTailRef = useRef<string | null>(null);
+  const nearBottomRef = useRef(true);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [profiles, setProfiles] = useState<
@@ -357,7 +361,7 @@ export function MessageThread({
     let cancelled = false;
 
     (async () => {
-      setLoading(true);
+      if (loadedConversationRef.current !== conversationId) setLoading(true);
 
       try {
         const data = await loadConversationMessages(supabase, conversationId, () => cancelled);
@@ -366,7 +370,10 @@ export function MessageThread({
         console.error('Failed to fetch messages:', error);
       }
 
-      if (!cancelled) setLoading(false);
+      if (!cancelled) {
+        loadedConversationRef.current = conversationId;
+        setLoading(false);
+      }
     })();
 
     return () => {
@@ -537,13 +544,19 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // Auto-scroll to bottom on new messages
+  // Keep the reader's position when a background resync returns the same
+  // messages. Follow new messages only when the reader was near the bottom.
   useEffect(() => {
-    if (scrollRef.current) {
-      const el = scrollRef.current;
-      el.scrollTop = el.scrollHeight;
+    if (scrollConversationRef.current !== (conversationId ?? null)) {
+      scrollConversationRef.current = conversationId ?? null;
+      lastTailRef.current = null;
+      nearBottomRef.current = true;
     }
-  }, [messages]);
+    const tail = messages.at(-1)?.id ?? null;
+    if (tail !== lastTailRef.current && nearBottomRef.current && scrollRef.current)
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    lastTailRef.current = tail;
+  }, [conversationId, messages]);
 
   const handleSend = useCallback(
     async (text: string, replyToId?: string) => {
@@ -1359,7 +1372,10 @@ export function MessageThread({
       </Sheet>
 
       {/* Messages Area */}
-      <div ref={scrollRef} className="mobile-message-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
+      <div ref={scrollRef} onScroll={(event) => {
+        const el = event.currentTarget;
+        nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      }} className="mobile-message-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
