@@ -692,7 +692,7 @@ async function loadMemberPermissions(userId: string) {
     if (!open) { setPermissionsMember(null); setConfirmPreset(false); }
   }}
 >
-  <DialogContent className="bg-popover border-border sm:max-w-2xl">
+  <DialogContent className="bg-popover border-border flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:max-w-2xl">
     <DialogHeader>
       <DialogTitle className="text-popover-foreground">
         Permisos
@@ -726,7 +726,7 @@ async function loadMemberPermissions(userId: string) {
       </div>
     )}
 
-    <div className="max-h-[60vh] overflow-y-auto py-4 pr-2 space-y-3">
+    <div className="min-h-0 flex-1 overflow-y-auto py-4 pr-2 space-y-3">
   {permissionsLoading ? (
     <div className="flex items-center justify-center py-6">
       <Loader2 className="size-5 animate-spin" />

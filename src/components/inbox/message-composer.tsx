@@ -605,7 +605,7 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-border bg-card relative max-h-[55%] shrink-0 overflow-y-auto border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:p-3">
+    <div className={cn('border-border bg-card relative shrink-0 overflow-y-auto border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:p-3', draft ? 'max-h-[45dvh]' : 'max-h-[30dvh]')}>
       {needsAdviserNickname && !readOnly && (
         <p className="text-muted-foreground mb-2 text-sm">
           Completa y guarda tu apodo en{' '}
@@ -735,7 +735,7 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="flex min-w-0 items-end gap-1.5 lg:gap-2">
+        <div className="bg-card sticky bottom-0 z-10 flex min-w-0 items-end gap-1.5 pt-1 lg:static lg:gap-2 lg:pt-0">
           {/* Attach menu — photo / video / document / voice. */}
           <DropdownMenu>
             <DropdownMenuTrigger

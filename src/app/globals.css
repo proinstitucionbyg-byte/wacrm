@@ -260,3 +260,13 @@ html[data-theme="neo"] {
     @apply font-sans;
   }
 }
+
+@media (max-width: 1023px) {
+  /* Touch scrolling stays available without a desktop-style rail and arrows. */
+  .mobile-message-scroll {
+    scrollbar-width: none;
+  }
+  .mobile-message-scroll::-webkit-scrollbar {
+    display: none;
+  }
+}
