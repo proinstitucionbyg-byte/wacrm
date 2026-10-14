@@ -1146,10 +1146,10 @@ export function MessageThread({
               {displayName.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold text-white">
+              <h2 className="truncate text-base font-semibold text-white light:text-foreground">
                 {displayName}
               </h2>
-              <p className="truncate text-xs text-slate-400">{contact.phone}</p>
+              <p className="truncate text-xs text-slate-400 light:text-muted-foreground">{contact.phone}</p>
             </div>
             {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
@@ -1158,8 +1158,8 @@ export function MessageThread({
               className={cn(
                 'ml-2 hidden gap-1 rounded-full border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] sm:inline-flex',
                 sessionInfo.expired
-                  ? 'border-red-500/40 bg-red-500/10 text-red-300'
-                  : 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+                  ? 'border-red-500/40 bg-red-500/10 text-red-300 light:text-red-700'
+                  : 'border-sky-500/40 bg-sky-500/10 text-sky-300 light:text-sky-700'
               )}
             >
               <Clock className="h-3 w-3" />
@@ -1210,7 +1210,7 @@ export function MessageThread({
                 aria-label={t('refreshConversation')}
                 title={t('refresh')}
                 className={cn(
-                  'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 text-slate-300 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-60'
+                  'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 text-slate-300 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-60 light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900 light:hover:shadow-sm'
                 )}
               >
                 <RefreshCw
@@ -1224,7 +1224,7 @@ export function MessageThread({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20',
+                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900 light:hover:shadow-sm',
                   currentStatus?.color ?? 'text-muted-foreground'
                 )}
               >
@@ -1255,7 +1255,7 @@ export function MessageThread({
               <DropdownMenuTrigger
                 disabled={!canAssign}
                 className={cn(
-                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20',
+                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900 light:hover:shadow-sm',
                   assignedAgentId ? 'text-primary' : 'text-muted-foreground'
                 )}
               >

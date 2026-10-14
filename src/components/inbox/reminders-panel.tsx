@@ -185,7 +185,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
       onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
       title="Mis recordatorios · arrastra para mover" aria-label="Abrir mis recordatorios; arrastra para mover"
       style={buttonPosition ? { left: buttonPosition.x, top: buttonPosition.y } : { right: 16, top: '40%' }}
-      className="fixed z-40 inline-flex h-11 touch-none cursor-grab items-center gap-2 rounded-xl border border-sky-500/50 bg-slate-900 px-4 text-slate-100 shadow-xl hover:border-sky-400 hover:bg-slate-800 active:cursor-grabbing">
+      className="fixed z-40 inline-flex h-11 touch-none cursor-grab items-center gap-2 rounded-xl border border-sky-500/50 bg-slate-900 px-4 text-slate-100 shadow-xl hover:border-sky-400 hover:bg-slate-800 active:cursor-grabbing light:border-sky-200 light:bg-white light:text-sky-800 light:shadow-lg light:hover:bg-sky-50">
       <BellRing className="h-4 w-4"/><span className="hidden xl:inline">Recordatorios</span>
     </button>
     <Sheet open={open} onOpenChange={setOpen}>

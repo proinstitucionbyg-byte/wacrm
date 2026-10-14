@@ -244,7 +244,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
       <aside
       className={cn(
-        "fixed inset-y-0 left-0 z-40 flex h-full w-72 flex-col border-r border-sky-900/40 bg-[#0B1220] shadow-[30px_0_80px_rgba(0,0,0,.35)] backdrop-blur-xl",
+        "fixed inset-y-0 left-0 z-40 flex h-full w-72 flex-col border-r border-sky-900/40 bg-[#0B1220] shadow-[30px_0_80px_rgba(0,0,0,.35)] backdrop-blur-xl light:border-sidebar-border light:bg-sidebar light:shadow-[12px_0_32px_rgba(29,78,121,.07)]",
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
           // Desktop: static, always visible — reset all the mobile framing.
@@ -309,24 +309,24 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     className={cn(
   "group flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200",
   isActive
-  ? "border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/15 to-transparent text-white shadow-[0_8px_24px_rgba(14,165,233,.15)]"
-  : "text-slate-400 hover:bg-slate-800/40 hover:text-white"
+  ? "border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/15 to-transparent text-white shadow-[0_8px_24px_rgba(14,165,233,.15)] light:from-sky-100 light:to-white light:text-sky-900 light:shadow-none"
+  : "text-slate-400 hover:bg-slate-800/40 hover:text-white light:text-slate-600 light:hover:bg-sky-50 light:hover:text-sky-900"
 )}
                   >
                     <item.icon
   className={cn(
     "h-5 w-5 transition-all duration-200",
     isActive
-  ? "text-sky-300"
-  : "text-slate-500 group-hover:text-sky-300",
+  ? "text-sky-300 light:text-sky-600"
+  : "text-slate-500 group-hover:text-sky-300 light:text-slate-500 light:group-hover:text-sky-600",
   )}
 />
                     <span
   className={cn(
     "flex-1 transition-colors",
     isActive
-  ? "font-semibold text-white"
-  : "text-slate-300 group-hover:text-white"
+  ? "font-semibold text-white light:text-sky-900"
+  : "text-slate-300 group-hover:text-white light:text-slate-600 light:group-hover:text-sky-900"
   )}
 >
   {item.label ?? t(item.labelKey as string)}

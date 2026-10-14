@@ -271,7 +271,7 @@ export function ContactSidebar({ contact, conversationId }: ContactSidebarProps)
                   onChange={(e) => setNewNote(e.target.value)}
                   placeholder={tSidebar("addNotePlaceholder")}
                   rows={2}
-                  className="flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-xs text-white placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                  className="flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-xs text-white placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-white light:text-foreground light:placeholder:text-muted-foreground"
                 />
                 <Button
                   size="sm"
@@ -287,7 +287,7 @@ export function ContactSidebar({ contact, conversationId }: ContactSidebarProps)
                 {notes.map((note) => (
                   <div
                     key={note.id}
-                    className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3"
+                    className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 light:border-border light:bg-card-2"
                   >
                     <p className="whitespace-pre-wrap text-xs text-muted-foreground">
                       {note.note_text}

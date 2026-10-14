@@ -326,13 +326,13 @@ export function ConversationList({
             value={search}
             onChange={handleSearchChange}
             placeholder={t('searchPlaceholder')}
-            className="h-11 rounded-xl border-slate-700 bg-slate-900/70 pl-9 text-sm text-white placeholder:text-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+            className="h-11 rounded-xl border-slate-700 bg-slate-900/70 pl-9 text-sm text-white placeholder:text-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 light:border-border light:bg-white light:text-foreground light:placeholder:text-muted-foreground"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-1">
           <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-slate-300 transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white">
+            <DropdownMenuTrigger className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-slate-300 transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900">
               {activeFilter?.label ?? t('filterAll')}
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
@@ -361,7 +361,7 @@ export function ConversationList({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  'inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800',
+                  'inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 light:border-border light:bg-white light:hover:bg-sky-50',
                   selectedTagIds.length > 0
                     ? 'text-primary'
                     : 'text-muted-foreground hover:text-foreground'
@@ -403,7 +403,7 @@ export function ConversationList({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  'inline-flex h-9 max-w-40 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800',
+                  'inline-flex h-9 max-w-40 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 light:border-border light:bg-white light:hover:bg-sky-50',
                   selectedCompany
                     ? 'text-primary'
                     : 'text-muted-foreground hover:text-foreground'
@@ -496,7 +496,7 @@ export function ConversationList({
           every conversation instead of shrinking to the remaining
           space — the list then overflows and gets clipped by the
           parent's overflow-hidden with no scrollbar (issue #229). */}
-      <ScrollArea className="min-h-0 flex-1 bg-slate-950/20">
+      <ScrollArea className="min-h-0 flex-1 bg-slate-950/20 light:bg-[#f8fbff]">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
@@ -625,9 +625,9 @@ function ConversationItem({
     <button
       onClick={handleClick}
       className={cn(
-        'group mx-2 my-1.5 flex w-[calc(100%-16px)] items-start gap-3 rounded-2xl px-4 py-3 text-left transition-all duration-200 hover:scale-[1.01] hover:bg-slate-800/70 hover:shadow-xl hover:shadow-sky-500/10',
+        'group mx-2 my-1.5 flex w-[calc(100%-16px)] items-start gap-3 rounded-2xl px-4 py-3 text-left transition-all duration-200 hover:scale-[1.01] hover:bg-slate-800/70 hover:shadow-xl hover:shadow-sky-500/10 light:hover:bg-sky-50 light:hover:shadow-sm',
         isActive &&
-          'border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent shadow-[0_12px_32px_rgba(14,165,233,.22)]'
+          'border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent shadow-[0_12px_32px_rgba(14,165,233,.22)] light:from-sky-100 light:via-sky-50 light:to-white light:shadow-sm'
       )}
     >
       <div
@@ -635,7 +635,7 @@ function ConversationItem({
           'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white transition-all duration-200',
           isActive
             ? 'bg-sky-500 shadow-lg ring-2 shadow-sky-500/40 ring-sky-300'
-            : 'bg-slate-800 ring-2 ring-slate-700'
+            : 'bg-slate-800 ring-2 ring-slate-700 light:bg-sky-700 light:ring-sky-100'
         )}
       >
         {contact?.avatar_url ? (
@@ -659,8 +659,8 @@ function ConversationItem({
             className={cn(
               'truncate text-sm transition-all duration-200',
               isActive
-                ? 'font-semibold text-white'
-                : 'font-medium text-slate-200 group-hover:text-white'
+                ? 'font-semibold text-white light:text-sky-950'
+                : 'font-medium text-slate-200 group-hover:text-white light:text-foreground light:group-hover:text-sky-900'
             )}
           >
             {displayName}
@@ -668,7 +668,7 @@ function ConversationItem({
           <span
             className={cn(
               'shrink-0 text-[11px] transition-colors duration-200',
-              isActive ? 'text-sky-300' : 'text-slate-400'
+              isActive ? 'text-sky-300 light:text-sky-700' : 'text-slate-400 light:text-muted-foreground'
             )}
           >
             {timeAgo}
@@ -679,8 +679,8 @@ function ConversationItem({
             className={cn(
               'truncate text-xs transition-colors duration-200',
               isActive
-                ? 'text-slate-200'
-                : 'text-slate-400 group-hover:text-slate-300'
+                ? 'text-slate-200 light:text-slate-700'
+                : 'text-slate-400 group-hover:text-slate-300 light:text-muted-foreground light:group-hover:text-slate-700'
             )}
           >
             {conversation.last_message_text || t('noMessagesYet')}

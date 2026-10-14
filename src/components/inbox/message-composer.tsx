@@ -841,7 +841,7 @@ export function MessageComposer({
             // The placeholder text also surfaces the read-only state.
             title={readOnly ? t('readOnlyTitle') : undefined}
             className={cn(
-              'flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-white transition-all duration-200 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20',
+              'flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-white transition-all duration-200 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-white light:text-foreground light:placeholder:text-muted-foreground',
               (sessionExpired || readOnly) && 'cursor-not-allowed opacity-50'
             )}
           />

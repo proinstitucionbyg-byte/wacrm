@@ -452,7 +452,7 @@ className={cn(
     "relative rounded-3xl px-4 py-3 shadow-lg",
     isAgent
       ? "rounded-br-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/20"
-      : "rounded-bl-lg border border-slate-700 bg-slate-900/70 text-white",
+      : "rounded-bl-lg border border-slate-700 bg-slate-900/70 text-white light:border-border light:bg-white light:text-foreground light:shadow-sm",
       selected && "ring-2 ring-primary"
   )}
 >
