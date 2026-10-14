@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import { useAuth } from '@/hooks/use-auth';
+import { useCan } from '@/hooks/use-can';
 import { useTheme } from '@/hooks/use-theme';
 import { SettingsRail } from '@/components/settings/settings-rail';
 import { SettingsOverview } from '@/components/settings/settings-overview';
@@ -20,13 +21,15 @@ import { MembersTab } from '@/components/settings/members-tab';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import {
   resolveSection,
+  SETTINGS_SECTIONS,
   type SettingsSection,
 } from '@/components/settings/settings-sections';
 
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency } = useAuth();
+  const { defaultCurrency, isOwner } = useAuth();
+  const canManageTags = useCan('tags.manage');
   const { mode } = useTheme();
   const t = useTranslations('Settings');
 
@@ -34,7 +37,12 @@ export default function SettingsPage() {
   // section — deep-linkable, and it keeps the existing links in the
   // app sidebar/header working. Legacy tab values (tags, custom-fields)
   // resolve onto their new home; unknown/empty → the Overview landing.
-  const section = resolveSection(searchParams.get('tab'));
+  const allowedSections = SETTINGS_SECTIONS.filter((item) =>
+    isOwner ||
+    (item !== 'overview' && item !== 'security' && item !== 'whatsapp' &&
+      item !== 'api' && (item !== 'fields' || canManageTags)));
+  const requestedSection = resolveSection(searchParams.get('tab'));
+  const section = allowedSections.includes(requestedSection) ? requestedSection : 'profile';
 
   const go = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -79,7 +87,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
-        <SettingsRail active={section} onSelect={go} hints={hints} />
+        <SettingsRail active={section} onSelect={go} hints={hints} sections={allowedSections} />
         <div className="min-w-0">{panel[section]}</div>
       </div>
     </div>

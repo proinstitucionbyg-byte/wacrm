@@ -7,6 +7,16 @@ import {
   verifyPhoneNumber,
 } from '@/lib/whatsapp/meta-api'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
+import { requireRole, toErrorResponse } from '@/lib/auth/account'
+
+async function rejectNonOwner(): Promise<NextResponse | null> {
+  try {
+    await requireRole('owner')
+    return null
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
 
 /**
  * Resolve the caller's account_id from their profile. Inlined here
@@ -61,6 +71,8 @@ function supabaseAdmin() {
  *   { connected: false, reason: 'meta_api_error',   message: '...' }
  */
 export async function GET() {
+  const denied = await rejectNonOwner()
+  if (denied) return denied
   try {
     const supabase = await createClient()
 
@@ -115,7 +127,6 @@ export async function GET() {
     let accessToken: string
     try {
       accessToken = decrypt(config.access_token)
-      console.log("TOKEN:", accessToken)
     } catch (err) {
       console.error('[whatsapp/config GET] Token decryption failed:', err)
       return NextResponse.json(
@@ -165,6 +176,8 @@ export async function GET() {
  * Verifies credentials with Meta first, then encrypts and stores.
  */
 export async function POST(request: Request) {
+  const denied = await rejectNonOwner()
+  if (denied) return denied
   try {
     const supabase = await createClient()
 
@@ -440,6 +453,8 @@ export async function POST(request: Request) {
  * encrypted token (mismatched ENCRYPTION_KEY across environments).
  */
 export async function DELETE() {
+  const denied = await rejectNonOwner()
+  if (denied) return denied
   try {
     const supabase = await createClient()
 
