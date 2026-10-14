@@ -192,7 +192,9 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader className="border-b border-border">
           <SheetTitle>Mis recordatorios</SheetTitle>
-          <SheetDescription>Solo tú ves estos avisos. Llegan a la campana de notificaciones, incluso si cierras el navegador.</SheetDescription>
+          <SheetDescription>{canViewTeam
+            ? 'Cada asesora ve y gestiona solo sus recordatorios. Como CEO, también puedes consultar los del equipo.'
+            : 'Tus recordatorios son personales y llegan a la campana de notificaciones, incluso si cierras el navegador.'}</SheetDescription>
         </SheetHeader>
         <div className="space-y-4 p-4">
           {canViewTeam && <div className="flex gap-2" aria-label="Vista de recordatorios">
