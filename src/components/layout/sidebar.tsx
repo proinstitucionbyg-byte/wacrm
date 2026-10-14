@@ -309,7 +309,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     className={cn(
   "group flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200",
   isActive
-  ? "border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/15 to-transparent text-white shadow-[0_8px_24px_rgba(14,165,233,.15)] light:from-sky-100 light:to-white light:text-sky-900 light:shadow-none"
+  ? "border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/15 to-transparent text-white shadow-[0_8px_24px_rgba(14,165,233,.15)] light:from-secondary light:to-card light:text-sky-900 light:shadow-none"
   : "text-slate-400 hover:bg-slate-800/40 hover:text-white light:text-slate-600 light:hover:bg-sky-50 light:hover:text-sky-900"
 )}
                   >

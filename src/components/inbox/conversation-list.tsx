@@ -273,9 +273,9 @@ export function ConversationList({
     // w-full on mobile so the list occupies the whole viewport when it's
     // the single pane showing; fixed 320px on desktop where it shares the
     // row with the thread + contact sidebar.
-    <div className="border-border bg-card flex h-full w-full flex-col border-r lg:w-80">
+    <div className="border-border bg-card flex h-full min-w-0 w-full flex-col overflow-hidden border-r lg:w-80">
       {/* Search + Filter */}
-      <div className="border-border space-y-3 border-b p-4">
+      <div className="border-border space-y-2 border-b p-3 lg:space-y-3 lg:p-4">
         <InboxRecovery onChanged={() => setLabelsRevision(value => value + 1)}/>
         {canViewPayments && (
           <Link
@@ -326,13 +326,13 @@ export function ConversationList({
             value={search}
             onChange={handleSearchChange}
             placeholder={t('searchPlaceholder')}
-            className="h-11 rounded-xl border-slate-700 bg-slate-900/70 pl-9 text-sm text-white placeholder:text-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 light:border-border light:bg-white light:text-foreground light:placeholder:text-muted-foreground"
+            className="h-11 rounded-xl border-slate-700 bg-slate-900/70 pl-9 text-base text-white placeholder:text-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 light:border-border light:bg-card light:text-foreground light:placeholder:text-muted-foreground lg:text-sm"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap lg:flex-wrap lg:overflow-visible">
           <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-slate-300 transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900">
+          <DropdownMenuTrigger className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-slate-300 transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white light:border-border light:bg-card light:text-foreground light:hover:bg-secondary light:hover:text-sky-900 lg:h-9">
               {activeFilter?.label ?? t('filterAll')}
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
@@ -361,7 +361,7 @@ export function ConversationList({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  'inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 light:border-border light:bg-white light:hover:bg-sky-50',
+                  'inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 light:border-border light:bg-card light:hover:bg-secondary lg:h-9',
                   selectedTagIds.length > 0
                     ? 'text-primary'
                     : 'text-muted-foreground hover:text-foreground'
@@ -403,7 +403,7 @@ export function ConversationList({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  'inline-flex h-9 max-w-40 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 light:border-border light:bg-white light:hover:bg-sky-50',
+                  'inline-flex h-11 max-w-40 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 light:border-border light:bg-card light:hover:bg-secondary lg:h-9',
                   selectedCompany
                     ? 'text-primary'
                     : 'text-muted-foreground hover:text-foreground'
@@ -496,7 +496,7 @@ export function ConversationList({
           every conversation instead of shrinking to the remaining
           space — the list then overflows and gets clipped by the
           parent's overflow-hidden with no scrollbar (issue #229). */}
-      <ScrollArea className="min-h-0 flex-1 bg-slate-950/20 light:bg-[#f8fbff]">
+      <ScrollArea className="min-h-0 min-w-0 flex-1 bg-slate-950/20 light:bg-card-2">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
@@ -627,7 +627,7 @@ function ConversationItem({
       className={cn(
         'group mx-2 my-1.5 flex w-[calc(100%-16px)] items-start gap-3 rounded-2xl px-4 py-3 text-left transition-all duration-200 hover:scale-[1.01] hover:bg-slate-800/70 hover:shadow-xl hover:shadow-sky-500/10 light:hover:bg-sky-50 light:hover:shadow-sm',
         isActive &&
-          'border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent shadow-[0_12px_32px_rgba(14,165,233,.22)] light:from-sky-100 light:via-sky-50 light:to-white light:shadow-sm'
+          'border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent shadow-[0_12px_32px_rgba(14,165,233,.22)] light:from-secondary light:via-card-2 light:to-card light:shadow-sm'
       )}
     >
       <div

@@ -23,7 +23,7 @@ vi.mock('@/lib/rate-limit', () => ({
   RATE_LIMITS: { send: {} },
   rateLimitResponse: vi.fn(),
 }));
-import { POST } from '@/app/api/inbox/commands/route';
+import { GET, POST } from '@/app/api/inbox/commands/route';
 const id = '11111111-1111-4111-8111-111111111111';
 const request = (text = 'MANDAR(PROMO)') =>
   new Request('https://crm.test', {
@@ -58,6 +58,23 @@ beforeEach(() => {
   });
 });
 describe('prepared inbox commands', () => {
+  it('lists active blocks with a folder and a short message preview', async () => {
+    m.from.mockImplementation((table: string) => {
+      if (table === 'automations') {
+        const chain = { select: () => chain, eq: () => chain, order: async () => ({ data: [{ id, name: 'BIENVENIDA', description: 'Detalle', folder_id: id }], error: null }) };
+        return chain;
+      }
+      if (table === 'automation_steps') {
+        const chain = { select: () => chain, in: () => chain, is: () => chain, order: async () => ({ data: [{ automation_id: id, step_type: 'send_message', step_config: { text: 'Hola estudiante.\n\nMás información.' } }], error: null }) };
+        return chain;
+      }
+      const chain = { select: () => chain, eq: () => chain, in: async () => ({ data: [{ id, name: 'Inscripciones' }], error: null }) };
+      return chain;
+    });
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).blocks).toEqual([{ id, name: 'BIENVENIDA', category: 'Inscripciones', preview: 'Hola estudiante.' }]);
+  });
   it('requires permission before accessing data', async () => {
     m.permission.mockRejectedValue({ status: 403 });
     expect((await POST(request())).status).toBe(403);

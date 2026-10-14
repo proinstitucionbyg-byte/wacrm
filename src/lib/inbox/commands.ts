@@ -17,6 +17,9 @@ export function resolveCommand<T extends { id: string; name: string }>(
   name: string,
   blocks: T[]
 ): T | null {
+  // Picker selections use the stable ID, so equal titles remain distinct.
+  const byId = blocks.find((block) => block.id === name);
+  if (byId) return byId;
   const matches = blocks.filter(
     (block) => normalizedCommand(block.name) === normalizedCommand(name)
   );

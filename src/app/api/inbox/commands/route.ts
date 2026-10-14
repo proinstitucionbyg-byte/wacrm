@@ -14,14 +14,43 @@ import {
 export async function GET() {
   try {
     const ctx = await requirePermission('inbox', 'send');
+    const db = supabaseAdmin();
     const { data, error } = await ctx.supabase
       .from('automations')
-      .select('id,name')
+      .select('id,name,description,folder_id')
       .eq('account_id', ctx.accountId)
       .eq('is_active', true)
       .order('name');
     if (error) throw error;
-    return NextResponse.json({ blocks: data ?? [] });
+    const automations = data ?? [];
+    if (automations.length === 0) return NextResponse.json({ blocks: [] });
+    const ids = automations.map((automation) => automation.id);
+    const folderIds = [...new Set(automations.map((automation) => automation.folder_id).filter((id): id is string => Boolean(id)))];
+    const [{ data: steps, error: stepsError }, foldersResult] = await Promise.all([
+      db.from('automation_steps')
+        .select('automation_id,step_type,step_config,parent_step_id,position')
+        .in('automation_id', ids)
+        .is('parent_step_id', null)
+        .order('position'),
+      folderIds.length
+        ? db.from('automation_folders').select('id,name').eq('account_id', ctx.accountId).in('id', folderIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (stepsError) throw stepsError;
+    if (foldersResult.error) throw foldersResult.error;
+    const folderNames = new Map((foldersResult.data ?? []).map((folder) => [folder.id, folder.name]));
+    const previews = new Map<string, string>();
+    for (const step of steps ?? []) {
+      if (step.step_type !== 'send_message' || previews.has(step.automation_id)) continue;
+      const firstParagraph = String(step.step_config?.text ?? '').split(/\n\s*\n/)[0].replace(/\s+/g, ' ').trim();
+      if (firstParagraph) previews.set(step.automation_id, firstParagraph.slice(0, 220));
+    }
+    return NextResponse.json({ blocks: automations.map((automation) => ({
+      id: automation.id,
+      name: automation.name,
+      category: automation.folder_id ? folderNames.get(automation.folder_id) ?? 'Otras automatizaciones' : 'Sin carpeta',
+      preview: previews.get(automation.id) ?? automation.description?.trim().slice(0, 220) ?? '',
+    })) });
   } catch (error) {
     return toErrorResponse(error);
   }

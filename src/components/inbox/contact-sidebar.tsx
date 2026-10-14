@@ -25,9 +25,10 @@ import { ConversationCases } from "./conversation-cases";
 interface ContactSidebarProps {
   contact: Contact | null;
   conversationId?: string;
+  mobile?: boolean;
 }
 
-export function ContactSidebar({ contact, conversationId }: ContactSidebarProps) {
+export function ContactSidebar({ contact, conversationId, mobile = false }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -123,7 +124,7 @@ export function ContactSidebar({ contact, conversationId }: ContactSidebarProps)
 
   if (!contact) {
     return (
-      <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
+      <div className={cn("flex h-full items-center justify-center border-l border-border bg-card", mobile ? "w-full" : "w-70")}>
         <p className="text-sm text-muted-foreground">{tThread("selectConversation")}</p>
       </div>
     );
@@ -133,7 +134,7 @@ export function ContactSidebar({ contact, conversationId }: ContactSidebarProps)
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-full w-70 flex-col border-l border-border bg-card">
+    <div className={cn("flex h-full flex-col border-l border-border bg-card", mobile ? "w-full" : "w-70")}>
       <ScrollArea className="flex-1">
         <div className="p-4">
           {/* Contact Info */}
@@ -271,7 +272,7 @@ export function ContactSidebar({ contact, conversationId }: ContactSidebarProps)
                   onChange={(e) => setNewNote(e.target.value)}
                   placeholder={tSidebar("addNotePlaceholder")}
                   rows={2}
-                  className="flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-xs text-white placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-white light:text-foreground light:placeholder:text-muted-foreground"
+                  className="flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-xs text-white placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-card light:text-foreground light:placeholder:text-muted-foreground"
                 />
                 <Button
                   size="sm"

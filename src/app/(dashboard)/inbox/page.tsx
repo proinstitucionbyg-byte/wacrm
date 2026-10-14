@@ -14,6 +14,7 @@ import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { RemindersPanel } from "@/components/inbox/reminders-panel";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -60,6 +61,29 @@ export default function InboxPage() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  const [mobileContactOpen, setMobileContactOpen] = useState(false);
+  const mobileViewportRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const updateHeight = () => {
+      const el = mobileViewportRef.current;
+      if (!el) return;
+      if (window.innerWidth >= 1024) {
+        el.style.removeProperty('height');
+        return;
+      }
+      // The visual viewport shrinks when a phone keyboard opens, keeping
+      // the message field and Send button above it.
+      const height = window.visualViewport?.height ?? window.innerHeight;
+      el.style.height = `${Math.max(240, Math.round(height - 56))}px`;
+    };
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    window.visualViewport?.addEventListener('resize', updateHeight);
+    return () => {
+      window.removeEventListener('resize', updateHeight);
+      window.visualViewport?.removeEventListener('resize', updateHeight);
+    };
+  }, []);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
@@ -86,6 +110,8 @@ export default function InboxPage() {
   // back to the deep-linked conversation if they've already clicked
   // elsewhere.
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
+  const mobileSelectionPendingRef = useRef<string | null>(null);
+  const mobileClosePendingRef = useRef(false);
 
   // Tracks conversations whose hydrate fetch is currently in flight. The
   // conv-INSERT and the first-message-INSERT events both call into
@@ -391,6 +417,8 @@ if (activeConversation?.id === fetched.id) {
       // user back to the deep-linked thread after they've navigated.
       if (
         deepLinkConvId &&
+        !mobileClosePendingRef.current &&
+        (!mobileSelectionPendingRef.current || mobileSelectionPendingRef.current === deepLinkConvId) &&
         autoSelectedForDeepLinkRef.current !== deepLinkConvId &&
         loaded.length > 0
       ) {
@@ -461,10 +489,15 @@ if (activeConversation?.id === fetched.id) {
       // sees `ref !== deepLinkConvId`, fires a second time, and
       // clobbers the messages MessageThread just fetched.
       autoSelectedForDeepLinkRef.current = conv.id;
-      // Reflect the selection in the URL so a refresh lands the user
-      // back in the same thread, and so copy-paste links work. Use
-      // replace() to avoid polluting browser history with every click.
-      router.replace(`/inbox?c=${conv.id}`, { scroll: false });
+      // A phone's Back gesture should return to the conversation list.
+      // Desktop keeps its existing replace behavior.
+      if (window.matchMedia("(max-width: 1023px)").matches) {
+        mobileClosePendingRef.current = false;
+        mobileSelectionPendingRef.current = conv.id;
+        router.push(`/inbox?c=${conv.id}`, { scroll: false });
+      } else {
+        router.replace(`/inbox?c=${conv.id}`, { scroll: false });
+      }
     },
     [activeConversation?.id, router]
   );
@@ -473,6 +506,9 @@ if (activeConversation?.id === fetched.id) {
   // back. Also clears the ?c= param so a refresh lands on the list
   // instead of re-opening the thread the user just backed out of.
   const handleCloseConversation = useCallback(() => {
+    mobileSelectionPendingRef.current = null;
+    mobileClosePendingRef.current = true;
+    setMobileContactOpen(false);
     setActiveConversation(null);
     setActiveContact(null);
     setMessages([]);
@@ -481,6 +517,33 @@ if (activeConversation?.id === fetched.id) {
     autoSelectedForDeepLinkRef.current = null;
     router.replace("/inbox", { scroll: false });
   }, [router]);
+
+  // Keep the mobile pane in sync with the browser Back/Forward gestures.
+  useEffect(() => {
+    if (!window.matchMedia("(max-width: 1023px)").matches) return;
+    if (mobileClosePendingRef.current && deepLinkConvId) return;
+    mobileClosePendingRef.current = false;
+    if (mobileSelectionPendingRef.current && deepLinkConvId !== mobileSelectionPendingRef.current) return;
+    mobileSelectionPendingRef.current = null;
+    if (!deepLinkConvId) {
+      if (activeConversation) {
+        setActiveConversation(null);
+        setActiveContact(null);
+        setMessages([]);
+        setMobileContactOpen(false);
+        autoSelectedForDeepLinkRef.current = null;
+      }
+      return;
+    }
+    if (activeConversation?.id === deepLinkConvId) return;
+    const match = conversations.find((item) => item.id === deepLinkConvId);
+    if (match) {
+      setActiveConversation(match);
+      setActiveContact(match.contact ?? null);
+      setMessages([]);
+      autoSelectedForDeepLinkRef.current = match.id;
+    }
+  }, [deepLinkConvId, conversations, activeConversation]);
 
 
   const handleMessagesLoaded = useCallback((loaded: Message[]) => {
@@ -543,7 +606,7 @@ if (activeConversation?.id === fetched.id) {
   const hasActiveConv = !!activeConversation;
 
   return (
-    <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
+    <div ref={mobileViewportRef} className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden sm:-m-6 lg:h-[calc(100vh-3.5rem)]">
       {/* WhatsApp connection banner — in the flex column, not absolute,
           so it pushes the panels down instead of overlapping them. */}
       {whatsappConnected === false && (
@@ -555,13 +618,13 @@ if (activeConversation?.id === fetched.id) {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
             thread can occupy the full width. Always visible on lg+. */}
         <div
           className={cn(
-            "flex h-full flex-1 lg:flex-none",
+            "flex h-full min-h-0 min-w-0 flex-1 lg:flex-none",
             hasActiveConv ? "hidden lg:flex" : "flex",
           )}
         >
@@ -586,7 +649,7 @@ if (activeConversation?.id === fetched.id) {
             on the right. Issue #165. */}
         <div
           className={cn(
-            "flex h-full min-w-0 flex-1 lg:flex",
+            "flex h-full min-h-0 min-w-0 flex-1 lg:flex",
             hasActiveConv ? "flex" : "hidden lg:flex",
           )}
         >
@@ -600,6 +663,7 @@ if (activeConversation?.id === fetched.id) {
             onStatusChange={handleStatusChange}
             onAssignChange={handleAssignChange}
             onBack={handleCloseConversation}
+            onOpenContactInfo={() => setMobileContactOpen(true)}
             resyncToken={resyncToken}
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
@@ -618,6 +682,16 @@ if (activeConversation?.id === fetched.id) {
         )}
       </div>
       <RemindersPanel conversationId={activeConversation?.id ?? null} />
+      <Sheet open={mobileContactOpen} onOpenChange={setMobileContactOpen}>
+        <SheetContent side="right" className="!w-full max-w-sm gap-0 p-0 lg:hidden">
+          <SheetHeader className="border-b border-border pr-14">
+            <SheetTitle>Información del contacto</SheetTitle>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {mobileContactOpen && <ContactSidebar contact={activeContact} conversationId={activeConversation?.id} mobile />}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

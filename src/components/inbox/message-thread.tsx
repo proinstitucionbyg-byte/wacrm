@@ -27,6 +27,8 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  MoreVertical,
+  ContactRound,
 } from 'lucide-react';
 import { format, isToday, isYesterday, differenceInHours } from 'date-fns';
 import { useTranslations } from 'next-intl';
@@ -69,6 +71,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 interface ReplyDraft {
   id: string;
@@ -102,6 +105,7 @@ interface MessageThreadProps {
    * mobile only.
    */
   onBack?: () => void;
+  onOpenContactInfo?: () => void;
   /**
    * Increment to force the messages + reactions fetch effects to refire.
    * Parent bumps this on realtime reconnect / tab visibility → visible
@@ -188,6 +192,7 @@ export function MessageThread({
   onStatusChange,
   onAssignChange,
   onBack,
+  onOpenContactInfo,
   resyncToken = 0,
   onRefresh,
   contactPanelOpen,
@@ -202,6 +207,7 @@ export function MessageThread({
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [profiles, setProfiles] = useState<
     (Profile & { area?: string | null })[]
   >([]);
@@ -1079,7 +1085,7 @@ export function MessageThread({
     // clipped and the hover toolbar overlaps the Tags panel. Letting the
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
-    <div data-message-thread={conversation.id} className={cn('flex min-w-0 flex-1 flex-col', DOODLE_BG_CLASSES)}>
+    <div data-message-thread={conversation.id} className={cn('flex min-h-0 min-w-0 flex-1 flex-col', DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
       {selectionMode ? (
@@ -1132,7 +1138,7 @@ export function MessageThread({
                 type="button"
                 onClick={onBack}
                 aria-label={t('backToConversations')}
-                className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md lg:hidden"
+                className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-md lg:hidden"
               >
                 <ArrowLeft className="h-5 w-5" />
               </button>
@@ -1167,7 +1173,10 @@ export function MessageThread({
             </Badge>
           </div>
 
-          <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setMobileActionsOpen(true)} aria-label="Más opciones del chat" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-foreground hover:bg-muted lg:hidden">
+            <MoreVertical className="h-5 w-5" />
+          </button>
+          <div className="hidden items-center gap-2 lg:flex">
             {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just
@@ -1210,7 +1219,7 @@ export function MessageThread({
                 aria-label={t('refreshConversation')}
                 title={t('refresh')}
                 className={cn(
-                  'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 text-slate-300 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-60 light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900 light:hover:shadow-sm'
+                  'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 text-slate-300 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-60 light:border-border light:bg-card light:text-foreground light:hover:bg-secondary light:hover:text-sky-900 light:hover:shadow-sm'
                 )}
               >
                 <RefreshCw
@@ -1224,7 +1233,7 @@ export function MessageThread({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900 light:hover:shadow-sm',
+                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 light:border-border light:bg-card light:text-foreground light:hover:bg-secondary light:hover:text-sky-900 light:hover:shadow-sm',
                   currentStatus?.color ?? 'text-muted-foreground'
                 )}
               >
@@ -1255,7 +1264,7 @@ export function MessageThread({
               <DropdownMenuTrigger
                 disabled={!canAssign}
                 className={cn(
-                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 light:border-border light:bg-white light:text-foreground light:hover:bg-sky-50 light:hover:text-sky-900 light:hover:shadow-sm',
+                  'inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 text-sm text-slate-200 shadow-sm transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white hover:shadow-lg hover:shadow-sky-500/20 light:border-border light:bg-card light:text-foreground light:hover:bg-secondary light:hover:text-sky-900 light:hover:shadow-sm',
                   assignedAgentId ? 'text-primary' : 'text-muted-foreground'
                 )}
               >
@@ -1324,8 +1333,33 @@ export function MessageThread({
         </div>
       )}
 
+      <Sheet open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
+        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:hidden">
+          <SheetHeader className="px-0 pt-0 pr-12"><SheetTitle>Opciones del chat</SheetTitle></SheetHeader>
+          <div className="grid gap-3">
+            {onOpenContactInfo && <button type="button" onClick={() => { setMobileActionsOpen(false); onOpenContactInfo(); }} className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 text-left text-sm"><ContactRound className="h-4 w-4" /> Información del contacto</button>}
+            {onRefresh && <button type="button" onClick={() => { handleRefreshClick(); setMobileActionsOpen(false); }} className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 text-left text-sm"><RefreshCw className="h-4 w-4" /> Actualizar conversación</button>}
+            <label className="text-sm">Estado
+              <select value={conversation.status} onChange={(event) => { void handleStatusChange(event.target.value as ConversationStatus); setMobileActionsOpen(false); }} className="mt-1 min-h-11 w-full rounded-lg border border-border bg-background px-3 text-foreground">
+                {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(`status${option.label}`)}</option>)}
+              </select>
+            </label>
+            {canAssign && <>
+              <label className="text-sm">Asesor asignado
+                <select value={assignedAgentId ?? ''} onChange={(event) => { void handleAssignChange(event.target.value || null); setMobileActionsOpen(false); }} className="mt-1 min-h-11 w-full rounded-lg border border-border bg-background px-3 text-foreground">
+                  <option value="">Sin asignar</option>
+                  {profiles.map((profile) => <option key={profile.user_id} value={profile.user_id}>{profile.full_name}</option>)}
+                </select>
+              </label>
+              <button type="button" onClick={() => { setMobileActionsOpen(false); setTransfer(null); setTransferArea(''); setTransferPicker(true); }} className="min-h-11 rounded-lg border border-border px-3 text-left text-sm">Derivar conversación</button>
+            </>}
+            <div className="min-h-11"><InboxCleanup conversationId={conversation.id} onCleared={() => { setMobileActionsOpen(false); onBack?.(); }} onRefresh={onRefresh}/></div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />

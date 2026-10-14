@@ -42,6 +42,10 @@ describe('prepared adviser commands', () => {
         { id: 'two', name: 'pago' },
       ])
     ).toBeNull());
+  it('uses the selected block ID when two titles are equal', () => {
+    const blocks = [{ id: 'one', name: 'BIENVENIDA' }, { id: 'two', name: 'BIENVENIDA' }];
+    expect(resolveCommand('two', blocks)?.id).toBe('two');
+  });
   it('recognizes a promotion with course aliases and typing mistakes', () => {
     const blocks = [{ id: 'promo', name: 'ASISTENTE 19.90' }, { id: 'malla', name: 'MALLAS DE ADMIN' }, { id: 'other', name: 'FARMACIA 19.90' }];
     expect(resolveCommand('super promod e asistentae administrayvo', blocks)?.id).toBe('promo');

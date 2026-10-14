@@ -49,7 +49,7 @@ import {
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive';
 import type { InteractiveMessagePayload, QuickReply } from '@/types';
 import { QuickReplyPicker } from './quick-reply-picker';
-import { AutomationCommandPicker } from './automation-command-picker';
+import { AutomationCommandPicker, type PreparedBlock } from './automation-command-picker';
 import { AdviserIntroductionCard } from './adviser-introduction-card';
 import type { AdviserIntroduction } from '@/lib/inbox/adviser-introduction';
 
@@ -163,6 +163,7 @@ export function MessageComposer({
   const [savingQuickReply, setSavingQuickReply] = useState(false);
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
   const [commandPickerOpen, setCommandPickerOpen] = useState(false);
+  const [selectedBlock, setSelectedBlock] = useState<PreparedBlock | null>(null);
 
   // Media attachment state. `draft` holds an uploaded-but-not-yet-sent
   // attachment; `busy` covers the upload/transcode window.
@@ -231,33 +232,45 @@ export function MessageComposer({
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending || sessionExpired) return;
+    if (!trimmed || trimmed.startsWith('/') || sending || sessionExpired) return;
 
     setSending(true);
     try {
-      onSend(trimmed, replyTo?.id);
+      onSend(selectedBlock && trimmed === `MANDAR(${selectedBlock.name})`
+        ? `MANDAR(${selectedBlock.id})` : trimmed, replyTo?.id);
       setText('');
+      setSelectedBlock(null);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+  }, [text, sending, sessionExpired, onSend, replyTo?.id, selectedBlock]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Escape' && commandPickerOpen) {
+        setCommandPickerOpen(false);
+        if (text.startsWith('/')) setText('');
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
+        // Phone keyboards use Enter for a new line; the send button is explicit.
+        if (window.matchMedia('(max-width: 1023px)').matches) return;
         e.preventDefault();
-        handleSend();
+        if (!commandPickerOpen) handleSend();
       }
     },
-    [handleSend]
+    [commandPickerOpen, handleSend, text]
   );
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setText(e.target.value);
+      const value = e.target.value;
+      setText(value);
+      setSelectedBlock(null);
+      setCommandPickerOpen(value.startsWith('/'));
       adjustHeight();
     },
     [adjustHeight]
@@ -592,7 +605,7 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-border bg-card border-t p-3">
+    <div className="border-border bg-card relative max-h-[55%] shrink-0 overflow-y-auto border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:p-3">
       {needsAdviserNickname && !readOnly && (
         <p className="text-muted-foreground mb-2 text-sm">
           Completa y guarda tu apodo en{' '}
@@ -675,6 +688,16 @@ export function MessageComposer({
         }}
       />
 
+      {selectedBlock && text === `MANDAR(${selectedBlock.name})` && (
+        <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-border bg-secondary/70 px-3 py-2 text-xs">
+          <div className="min-w-0">
+            <p className="font-semibold">{selectedBlock.name}</p>
+            <p className="text-muted-foreground">{selectedBlock.preview || 'Esta automatización puede enviar varios mensajes o archivos.'}</p>
+            <p className="mt-1 text-muted-foreground">Revisa el bloque y pulsa Enviar para iniciarlo.</p>
+          </div>
+          <button type="button" aria-label="Quitar automatización seleccionada" onClick={() => { setText(''); setSelectedBlock(null); textareaRef.current?.focus(); }} className="rounded p-1 hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+      )}
       {draft ? (
         <MediaDraftPreview
           draft={draft}
@@ -687,9 +710,9 @@ export function MessageComposer({
         />
       ) : recording ? (
         // Recording bar — replaces the composer while the mic is live.
-        <div className="border-border bg-muted flex items-center gap-3 rounded-xl border px-4 py-2.5">
+        <div className="border-border bg-muted flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2.5 lg:gap-3 lg:px-4">
           <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
-          <span className="text-foreground flex-1 text-sm">
+          <span className="text-foreground min-w-0 flex-1 text-sm">
             {t('recording', {
               current: formatDuration(recordSeconds),
               max: formatDuration(MAX_RECORDING_SECONDS),
@@ -698,21 +721,21 @@ export function MessageComposer({
           <button
             type="button"
             onClick={cancelRecording}
-            className="text-muted-foreground hover:bg-card hover:text-foreground rounded-md px-2 py-1 text-xs"
+            className="text-muted-foreground hover:bg-card hover:text-foreground min-h-11 shrink-0 rounded-md px-2 py-1 text-xs lg:min-h-0"
           >
             {t('cancel')}
           </button>
           <Button
             size="sm"
             onClick={stopRecording}
-            className="bg-primary hover:bg-primary/90 h-9 w-9 shrink-0 p-0"
+            className="bg-primary hover:bg-primary/90 h-11 w-11 shrink-0 p-0 lg:h-9 lg:w-9"
             title={t('stopAndAttach')}
           >
             <Square className="h-4 w-4" />
           </Button>
         </div>
       ) : (
-        <div className="flex items-end gap-2">
+        <div className="flex min-w-0 items-end gap-1.5 lg:gap-2">
           {/* Attach menu — photo / video / document / voice. */}
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -725,7 +748,7 @@ export function MessageComposer({
                     : t('attachMedia')
               }
               aria-label="Adjuntar archivo"
-              className="text-muted-foreground hover:text-foreground inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-border px-2 disabled:cursor-not-allowed disabled:opacity-50"
+              className="text-muted-foreground hover:text-foreground inline-flex h-11 w-11 shrink-0 items-center justify-center gap-2 rounded-md border border-border disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-auto lg:px-2"
             >
               {busy ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -738,21 +761,22 @@ export function MessageComposer({
               align="start"
               className="border-border bg-popover"
             >
-              <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
+              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => imageInputRef.current?.click()}>
                 <ImageIcon className="mr-2 h-4 w-4" />
                 {t('photo')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
+              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => videoInputRef.current?.click()}>
                 <Video className="mr-2 h-4 w-4" />
                 {t('video')}
               </DropdownMenuItem>
               <DropdownMenuItem
+                className="min-h-11 lg:min-h-0"
                 onClick={() => documentInputRef.current?.click()}
               >
                 <FileText className="mr-2 h-4 w-4" />
                 {t('document')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void startRecording()}>
+              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => void startRecording()}>
                 <Mic className="mr-2 h-4 w-4" />
                 {t('voiceNote')}
               </DropdownMenuItem>
@@ -764,6 +788,7 @@ export function MessageComposer({
           <DropdownMenu>
             <DropdownMenuTrigger
               disabled={inputsDisabled}
+              aria-label="Más acciones de mensaje"
               title={
                 readOnly
                   ? t('readOnlyTitle')
@@ -771,7 +796,7 @@ export function MessageComposer({
                     ? undefined
                     : t('moreActions')
               }
-              className="text-muted-foreground hover:text-foreground inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50"
+              className="text-muted-foreground hover:text-foreground inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50 lg:h-9 lg:w-9"
             >
               <Plus className="h-4 w-4" />
             </DropdownMenuTrigger>
@@ -779,16 +804,22 @@ export function MessageComposer({
               align="start"
               className="border-border bg-popover"
             >
-              <DropdownMenuItem onClick={() => openInteractiveBuilder()}>
+              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => openInteractiveBuilder()}>
                 <MessageSquareDashed className="mr-2 h-4 w-4" />
                 {t('interactiveMessage')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setQuickReplyOpen(true)}>
+              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => setQuickReplyOpen(true)}>
                 <Zap className="mr-2 h-4 w-4" />
                 {t('quickReplies')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setCommandPickerOpen(true)}>
+              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => setCommandPickerOpen(true)}>
                 <Zap className="mr-2 h-4 w-4" /> BLOQUES PREPARADOS
+              </DropdownMenuItem>
+              <DropdownMenuItem className="min-h-11 lg:hidden" onClick={onOpenTemplates}>
+                <LayoutTemplate className="mr-2 h-4 w-4" /> Plantillas
+              </DropdownMenuItem>
+              <DropdownMenuItem className="min-h-11 lg:hidden" disabled={drafting} onClick={() => void handleDraft()}>
+                <Sparkles className="mr-2 h-4 w-4" /> Redactar con IA
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -799,7 +830,7 @@ export function MessageComposer({
             canAct={!readOnly}
             gateReason="send messages"
             title={readOnly ? undefined : t('sendTemplate')}
-            className="text-muted-foreground hover:text-foreground h-9 w-9 shrink-0 p-0"
+            className="text-muted-foreground hover:text-foreground hidden h-9 w-9 shrink-0 p-0 lg:inline-flex"
             onClick={onOpenTemplates}
           >
             <LayoutTemplate className="h-4 w-4" />
@@ -812,7 +843,7 @@ export function MessageComposer({
             gateReason="send messages"
             disabled={drafting}
             title={readOnly ? undefined : t('draftWithAI')}
-            className="text-muted-foreground hover:text-primary h-9 w-9 shrink-0 p-0"
+            className="text-muted-foreground hover:text-primary hidden h-9 w-9 shrink-0 p-0 lg:inline-flex"
             onClick={handleDraft}
           >
             {drafting ? (
@@ -841,7 +872,7 @@ export function MessageComposer({
             // The placeholder text also surfaces the read-only state.
             title={readOnly ? t('readOnlyTitle') : undefined}
             className={cn(
-              'flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-white transition-all duration-200 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-white light:text-foreground light:placeholder:text-muted-foreground',
+              'min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-900/70 px-3 py-2.5 text-base text-white transition-all duration-200 outline-none placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-card light:text-foreground light:placeholder:text-muted-foreground lg:px-5 lg:py-3 lg:text-sm',
               (sessionExpired || readOnly) && 'cursor-not-allowed opacity-50'
             )}
           />
@@ -850,7 +881,8 @@ export function MessageComposer({
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
-            disabled={!text.trim() || sessionExpired || sending}
+            aria-label="Enviar mensaje"
+            disabled={!text.trim() || text.startsWith('/') || sessionExpired || sending}
             onClick={handleSend}
             className="h-11 w-11 shrink-0 rounded-xl bg-sky-500 p-0 shadow-lg shadow-sky-500/30 transition-all duration-200 hover:scale-105 hover:bg-sky-600 disabled:opacity-40"
           >
@@ -863,7 +895,7 @@ export function MessageComposer({
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge. */}
       {!draft && !recording && (
-        <p className="mt-2 pl-[5.5rem] text-[10px] text-slate-500">
+        <p className="mt-2 hidden pl-[5.5rem] text-[10px] text-slate-500 lg:block">
           {t('draftHint')}
         </p>
       )}
@@ -905,7 +937,13 @@ export function MessageComposer({
       <AutomationCommandPicker
         open={commandPickerOpen}
         onOpenChange={setCommandPickerOpen}
-        onPick={setText}
+        query={text.startsWith('/') ? text.slice(1) : ''}
+        onPick={(block) => {
+          setText(`MANDAR(${block.name})`);
+          setSelectedBlock(block);
+          setCommandPickerOpen(false);
+          requestAnimationFrame(() => { adjustHeight(); textareaRef.current?.focus(); });
+        }}
       />
       <QuickReplyPicker
         open={quickReplyOpen}
@@ -986,13 +1024,13 @@ function MediaDraftPreview({
             maxLength={MEDIA_CAPTION_MAX}
             onChange={(e) => onCaptionChange(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && window.matchMedia('(min-width: 1024px)').matches) {
                 e.preventDefault();
                 onSend();
               }
             }}
             placeholder={t('addCaption')}
-            className="border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 max-h-48 min-h-20 flex-1 resize-y rounded-xl border px-4 py-2.5 text-sm transition-colors outline-none"
+            className="border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 max-h-48 min-h-20 min-w-0 flex-1 resize-y rounded-xl border px-4 py-2.5 text-base transition-colors outline-none lg:text-sm"
           />
         )}
         <GatedButton
@@ -1002,7 +1040,7 @@ function MediaDraftPreview({
           disabled={busy}
           onClick={onSend}
           className={cn(
-            'bg-primary hover:bg-primary/90 h-9 w-9 shrink-0 p-0 disabled:opacity-40',
+            'bg-primary hover:bg-primary/90 h-11 w-11 shrink-0 p-0 disabled:opacity-40 lg:h-9 lg:w-9',
             draft.kind === 'audio' && 'ml-auto'
           )}
         >
