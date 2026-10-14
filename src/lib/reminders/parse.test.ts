@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { suggestReminder } from './parse';
 
 describe('suggestReminder', () => {
+  it('reconoce 11 y media de la noche como 23:30', () => {
+    expect(suggestReminder('Recuérdame hoy a las 11 y media de la noche', new Date(2026, 9, 14, 10)).dueLocal)
+      .toBe('2026-10-14T23:30');
+  });
   const now = new Date(2026, 9, 12, 10, 0);
 
   it('recognizes tomorrow afternoon', () => {

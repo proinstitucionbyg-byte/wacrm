@@ -53,14 +53,14 @@ export function suggestReminder(text: string, now = new Date()): { dueLocal: str
         if (weekday >= 0) target.setDate(target.getDate() + ((weekday - target.getDay() + 7) % 7 || 7));
       }
     }
-    const clock = value.match(/(?:a\s+las?\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:de\s+la\s+)?(tarde|manana|noche|am|pm|a\.m\.|p\.m\.)/)
-      ?? value.match(/(?:a\s+las?\s+)(\d{1,2})(?::(\d{2}))?/)
+    const clock = value.match(/(?:a\s+las?\s+)?(\d{1,2})(?::(\d{2})|\s+y\s+(media))?\s*(?:de\s+la\s+)?(tarde|manana|noche|am|pm|a\.m\.|p\.m\.)/)
+      ?? value.match(/(?:a\s+las?\s+)(\d{1,2})(?::(\d{2})|\s+y\s+(media))?/)
       ?? value.match(/\b(\d{1,2}):(\d{2})\b/);
     if (!clock && !explicitDate && !/\b(?:manana|pasado manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/.test(value))
       return { dueLocal: '', repeatDays, needsInterval };
     let hour = clock ? Number(clock[1]) : 9;
-    const minute = clock?.[2] ? Number(clock[2]) : 0;
-    const period = clock?.[3];
+    const minute = clock?.[3] === 'media' ? 30 : clock?.[2] ? Number(clock[2]) : 0;
+    const period = clock?.[4] ?? (clock?.length === 4 ? clock[3] : undefined);
     if (period && /^(tarde|noche|pm|p\.m\.)$/.test(period) && hour < 12) hour += 12;
     if (period === 'noche' && hour === 12) hour = 0;
     if (period && /^(manana|am|a\.m\.)$/.test(period) && hour === 12) hour = 0;
@@ -68,7 +68,7 @@ export function suggestReminder(text: string, now = new Date()): { dueLocal: str
       return { dueLocal: '', repeatDays: repeatDays && repeatDays <= 365 ? repeatDays : null, needsInterval };
     target.setHours(hour, minute, 0, 0);
     if (target.getTime() <= now.getTime()) {
-      if (explicitYear) return { dueLocal: '', repeatDays: repeatDays && repeatDays <= 365 ? repeatDays : null, needsInterval };
+      if (explicitYear || /\bhoy\b/.test(value)) return { dueLocal: '', repeatDays: repeatDays && repeatDays <= 365 ? repeatDays : null, needsInterval };
       if (explicitDate) target.setFullYear(target.getFullYear() + 1);
       else target.setDate(target.getDate() + (/\b(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/.test(value) ? 7 : 1));
     }
