@@ -151,6 +151,15 @@ function EnrollmentEditor({
               ? 'EN COLA PARA GOOGLE'
               : 'COMPLETAR DATOS'}
       </p>
+      {draft.status === 'collecting' && issues.length > 0 && (
+        <section className="rounded border border-amber-500/40 p-3" aria-label="Observación para fidelización">
+          <h3 className="text-sm font-semibold">OBSERVACIÓN PARA FIDELIZACIÓN</h3>
+          <p className="mt-1 text-xs">El pago ya fue validado. Revisar lo recibido, llamar para pedir solo los datos realmente ausentes y completar esta ficha. Los documentos se emitirán al cerrar el registro.</p>
+          <ul className="mt-2 list-disc pl-5 text-xs">
+            {issues.map((issue) => <li key={issue}>{issue}</li>)}
+          </ul>
+        </section>
+      )}
       {draft.error && (
         <p role="alert" className="text-red-400">
           REVISAR REGISTRO: {draft.error}
@@ -372,7 +381,7 @@ function EnrollmentEditor({
         />
         Confirmé en la conversación la promoción y sus seis cuotas
       </label>
-      {issues.length > 0 && (
+      {draft.status !== 'collecting' && issues.length > 0 && (
         <div className="rounded border border-amber-500/40 p-3">
           <h3 className="text-sm font-semibold">PENDIENTES PARA REGISTRAR</h3>
           <ul className="mt-2 list-disc pl-5 text-xs">

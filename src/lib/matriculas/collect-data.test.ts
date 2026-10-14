@@ -77,8 +77,22 @@ describe('deterministic chat intake', () => {
     expect(data.start_date).toBeUndefined();
     expect(data.prices).toBeUndefined();
   });
-  it('does not guess a name when written name and OCR disagree', () => {
-    expect(collectEnrollmentData({}, [front]).full_name).toBeUndefined();
+  it('keeps the written name provisionally when OCR disagrees without confirming identity', () => {
+    const result = collectEnrollmentData({}, [front]);
+    expect(result.full_name).toBe('CLAUDIA CRISTINA HERRERA DANCUART');
+    expect(result.identity_confirmed).toBeUndefined();
+  });
+  it('reads a separate written name, course and email but ignores questions as names', () => {
+    const result = collectEnrollmentData({}, [
+      { id: '1', content_text: 'Auxiliar de educación inicial' },
+      { id: '2', content_text: 'Cómo hago para inscribirme al curso' },
+      { id: '3', content_text: 'Ana Maria Perez Torres' },
+      { id: '4', content_text: '12345678\nana.perez@example.com' },
+      { id: '5', content_text: 'Soy mayor de edad' },
+    ]);
+    expect(result.course).toBe('AUXILIAR DE EDUCACION INICIAL');
+    expect(result.full_name).toBe('ANA MARIA PEREZ TORRES');
+    expect(result.email).toBe('ana.perez@example.com');
   });
   it('preserves manual corrections and confirmed flags', () => {
     const data = {

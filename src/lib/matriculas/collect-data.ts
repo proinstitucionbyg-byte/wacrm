@@ -29,7 +29,8 @@ export function collectEnrollmentData(
   messages: IntakeMessage[]
 ): EnrollmentData {
   const candidates = new Map<keyof EnrollmentData, Set<string>>();
-  const add = (field: keyof EnrollmentData, raw: unknown) => {
+  const writtenNames = new Set<string>();
+  const add = (field: keyof EnrollmentData, raw: unknown, written = false) => {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 500) return;
     const parsed = parseEnrollmentData({ [field]: raw });
     const value = parsed?.[field];
@@ -37,6 +38,7 @@ export function collectEnrollmentData(
     const values = candidates.get(field) ?? new Set<string>();
     values.add(value);
     candidates.set(field, values);
+    if (written && field === 'full_name') writtenNames.add(value);
   };
   const photoIds: string[] = [];
   const guardianIds: string[] = [];
@@ -47,6 +49,17 @@ export function collectEnrollmentData(
     }
     // Some captions arrive with literal backslash-n from the sender.
     const text = (message.content_text ?? '').replace(/\\n/g, '\n');
+    const trimmed = text.trim();
+    // Students often answer the prompted fields as separate bare messages.
+    // Accept only unambiguous shapes; a question or conversational sentence
+    // must never become a name, course or document by inference.
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) add('email', trimmed);
+    const bareCourse = courses.filter(([pattern]) =>
+      new RegExp(`^${pattern.source}$`, pattern.flags).test(key(trimmed)));
+    if (bareCourse.length === 1) add('course', bareCourse[0][1]);
+    if (/^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(trimmed) &&
+        !/\b(SOY|QUIERO|COMO|CUANDO|CURSO|INSCRIBIRME|MATRICULARME|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES)\b/.test(key(trimmed)) &&
+        bareCourse.length === 0) add('full_name', trimmed, true);
     for (const line of text.split(/\r?\n/)) {
       const labelled = line.match(
         /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*:\s*(.+)$/i
@@ -54,7 +67,7 @@ export function collectEnrollmentData(
       if (!labelled) continue;
       const label = key(labelled[1]);
       const value = labelled[2];
-      if (/^NOMBRE/.test(label)) add('full_name', value);
+      if (/^NOMBRE/.test(label)) add('full_name', value, true);
       else if (/^(CORREO|EMAIL)/.test(label)) add('email', value);
       else if (/^(CELULAR|TELEFONO)/.test(label)) {
         const phone = value.replace(/[\s()-]/g, '');
@@ -74,6 +87,10 @@ export function collectEnrollmentData(
       } else if (['DIRECCION','DEPARTAMENTO','DISTRITO'].includes(label)) {
         add(({DIRECCION:'address', DEPARTAMENTO:'department', DISTRITO:'district'} as const)[label as 'DIRECCION'|'DEPARTAMENTO'|'DISTRITO'],value);
       } else if (label === 'PROMOCION') add('promotion_id', value);
+    }
+    for (const line of text.split(/\r?\n/)) {
+      const value = line.trim();
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) add('email', value);
     }
     const normalized = key(text);
     // A question or a list of courses is not an enrollment decision.
@@ -109,8 +126,12 @@ export function collectEnrollmentData(
   const next = { ...data };
   // Conflicting OCR/text values remain empty for review; existing edits always win.
   for (const [field, values] of candidates) {
-    if (!next[field] && values.size === 1)
-      Object.assign(next, { [field]: [...values][0] });
+    // A student's explicit written name is kept as provisional data even
+    // when OCR yields a different spelling. Identity remains unconfirmed.
+    const chosen = field === 'full_name' && writtenNames.size === 1
+      ? [...writtenNames][0]
+      : values.size === 1 ? [...values][0] : null;
+    if (!next[field] && chosen) Object.assign(next, { [field]: chosen });
   }
   const ids = [...new Set([...(data.identity_message_ids ?? []), ...photoIds])];
   if (!data.identity_confirmed && photoIds.length && ids.length <= 4)
