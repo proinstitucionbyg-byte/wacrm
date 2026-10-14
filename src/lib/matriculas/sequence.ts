@@ -102,6 +102,15 @@ export async function startEnrollmentSequence(
   if (reserveError?.code === '23505') return;
   if (reserveError || !run)
     throw reserveError ?? Error('NO SE PUDO RESERVAR LA SECUENCIA');
+  if (stage === 'final' && welcomed) {
+    const { error: closeError } = await db
+      .from('enrollment_sequence_runs')
+      .update({ status: 'closed', error: null })
+      .eq('id', run.id)
+      .eq('account_id', accountId);
+    if (closeError) throw closeError;
+    return true;
+  }
   const launched = await runAutomationById({
     accountId,
     automationId: matches[0].id,

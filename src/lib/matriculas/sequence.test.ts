@@ -149,7 +149,8 @@ describe('secuencia protegida de matricula', () => {
     vi.spyOn(state.db, 'rpc').mockResolvedValue({data:true,error:null} as never);
     await startEnrollmentSequence(state.db,'account','draft','final');
     expect(state.writes.find(row=>row.table==='enrollment_sequence_runs'&&row.payload.stage==='final')?.payload.completed_at).toBeTruthy();
-    expect(runAutomationById).toHaveBeenCalledWith(expect.objectContaining({automationId:'final30'}));
+    expect(state.writes.at(-1)?.payload.status).toBe('closed');
+    expect(runAutomationById).not.toHaveBeenCalled();
   });
   it.each([
     ['2026-10-06', 'final30'],
