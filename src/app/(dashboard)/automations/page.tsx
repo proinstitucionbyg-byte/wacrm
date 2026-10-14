@@ -795,6 +795,9 @@ function AutomationCard({
           {automation.description && (
             <p className="mt-0.5 truncate text-xs text-muted-foreground">{automation.description}</p>
           )}
+          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+            Código: {automation.id}
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span
               className={cn(
@@ -833,6 +836,15 @@ function AutomationCard({
   <DropdownMenuItem onClick={onEdit}>
     <Pencil className="h-4 w-4" />
     {t("edit")}
+  </DropdownMenuItem>
+
+  <DropdownMenuItem onClick={() => {
+    void navigator.clipboard.writeText(automation.id)
+      .then(() => toast.success("Código copiado"))
+      .catch(() => toast.error("No se pudo copiar el código"))
+  }}>
+    <Copy className="h-4 w-4" />
+    Copiar código
   </DropdownMenuItem>
 
   <DropdownMenuItem onClick={onDuplicate}>

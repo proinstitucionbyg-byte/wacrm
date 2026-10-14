@@ -1552,31 +1552,35 @@ function StepEditor({
       const selectedId = (cfg.automation_id as string) ?? ""
       return (
         <>
-          <FieldBlock label="Automatización siguiente">
-            {automations.length > 0 ? (
+          {automations.length > 0 && (
+            <FieldBlock label="Elegir automatización existente">
               <select
                 value={selectedId}
                 onChange={(e) => set({ automation_id: e.target.value })}
                 className={SELECT_CLASS}
               >
                 <option value="">Selecciona una automatización</option>
+                {selectedId && !automations.some((automation) => automation.id === selectedId) && (
+                  <option value={selectedId}>Código ingresado: {selectedId}</option>
+                )}
                 {automations.map((automation) => (
                   <option key={automation.id} value={automation.id}>
-                    {automation.name} · {automation.id.slice(0, 8)}
+                    {automation.name} · {automation.id}
                   </option>
                 ))}
               </select>
-            ) : (
-              <Input
-                value={selectedId}
-                onChange={(e) => set({ automation_id: e.target.value })}
-                placeholder="Código de la automatización"
-                className="bg-muted text-foreground"
-              />
-            )}
+            </FieldBlock>
+          )}
+          <FieldBlock label="O pegar código de automatización">
+            <Input
+              value={selectedId}
+              onChange={(e) => set({ automation_id: e.target.value.trim() })}
+              placeholder="Pega aquí el código completo"
+              className="bg-muted text-foreground"
+            />
           </FieldBlock>
           <p className="text-xs text-muted-foreground">
-            Ejecuta el bloque seleccionado y luego continúa con el siguiente paso de este flujo.
+            Usa el código de una automatización activa. Ejecuta sus mensajes, imágenes y audios; después continúa con el siguiente paso. Agrega "Esperar" antes si quieres una pausa.
           </p>
         </>
       )
