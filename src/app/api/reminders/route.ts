@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
+import { normalizePhone } from '@/lib/whatsapp/phone-utils';
+
+type ReminderInput = { body?: unknown; due_at?: unknown; repeat_days?: unknown; conversation_id?: unknown;
+  action_kind?: unknown; destination_phone?: unknown; message_text?: unknown };
 
 export async function GET(request: Request) {
   try {
@@ -8,7 +12,7 @@ export async function GET(request: Request) {
     if (teamView && ctx.role !== 'owner') {
       return NextResponse.json({ error: 'Solo el CEO puede ver los recordatorios del equipo.' }, { status: 403 });
     }
-    let query = ctx.supabase.from('adviser_reminders').select('id,user_id,body,due_at,repeat_days,conversation_id,status')
+    let query = ctx.supabase.from('adviser_reminders').select('id,user_id,body,due_at,repeat_days,conversation_id,status,action_kind,destination_phone,message_text')
       .eq('account_id', ctx.accountId).eq('status', 'active');
     if (!teamView) query = query.eq('user_id', ctx.userId);
     const { data, error } = await query.order('due_at', { ascending: true }).limit(100);
@@ -29,27 +33,81 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const ctx = await getCurrentAccount();
-    const input = await request.json().catch(() => null) as Record<string, unknown> | null;
-    const body = typeof input?.body === 'string' ? input.body.trim() : '';
-    const dueAt = typeof input?.due_at === 'string' ? new Date(input.due_at) : new Date(NaN);
-    const repeatDays = input?.repeat_days == null ? null : Number(input.repeat_days);
-    const conversationId = typeof input?.conversation_id === 'string' ? input.conversation_id : null;
-    if (!body || body.length > 1000 || !Number.isFinite(dueAt.getTime()) || dueAt.getTime() < Date.now() + 10_000
-      || dueAt.getTime() > Date.now() + 5 * 365 * 86400_000
-      || (repeatDays !== null && (!Number.isInteger(repeatDays) || repeatDays < 1 || repeatDays > 365))) {
-      return NextResponse.json({ error: 'Escribe el recordatorio y elige una fecha futura válida.' }, { status: 400 });
+    const input = await request.json().catch(() => null) as (ReminderInput & { reminders?: ReminderInput[] }) | null;
+    const entries: ReminderInput[] | null = input ? (Array.isArray(input.reminders) ? input.reminders : [input]) : null;
+    if (!entries || !Array.isArray(entries) || entries.length < 1 || entries.length > 10) {
+      return NextResponse.json({ error: 'Incluye entre 1 y 10 recordatorios.' }, { status: 400 });
     }
-    if (conversationId) {
-      const { data: visible, error: visibilityError } = await ctx.supabase.from('conversations').select('id')
-        .eq('id', conversationId).eq('account_id', ctx.accountId).maybeSingle();
-      if (visibilityError) throw visibilityError;
-      if (!visible) return NextResponse.json({ error: 'No tienes acceso a ese chat.' }, { status: 403 });
+    const rows = [];
+    for (const entry of entries) {
+      const body = typeof entry.body === 'string' ? entry.body.trim() : '';
+      const dueAt = typeof entry.due_at === 'string' ? new Date(entry.due_at) : new Date(NaN);
+      const repeatDays = entry.repeat_days == null ? null : Number(entry.repeat_days);
+      const kind = entry.action_kind === 'message' ? 'message' : 'notification';
+      const phone = typeof entry.destination_phone === 'string' ? normalizePhone(entry.destination_phone) : '';
+      const destinationPhone = phone.startsWith('51') && phone.length === 11 ? phone.slice(2) : phone;
+      const messageText = typeof entry.message_text === 'string' ? entry.message_text.trim() : '';
+      let conversationId = typeof entry.conversation_id === 'string' ? entry.conversation_id : null;
+      if (!body || body.length > 1000 || !Number.isFinite(dueAt.getTime()) || dueAt.getTime() < Date.now() + 10_000
+        || dueAt.getTime() > Date.now() + 5 * 365 * 86400_000
+        || (repeatDays !== null && (!Number.isInteger(repeatDays) || repeatDays < 1 || repeatDays > 365))) {
+        return NextResponse.json({ error: 'Escribe cada recordatorio con una fecha futura válida.' }, { status: 400 });
+      }
+      if (kind === 'message') {
+        if (!/^9\d{8}$/.test(destinationPhone) || !messageText || messageText.length > 1000 || repeatDays !== null) {
+          return NextResponse.json({ error: 'Para enviar un mensaje, indica un celular peruano y el texto exacto; el envío no puede repetirse.' }, { status: 400 });
+        }
+        if (conversationId) {
+          const { data: selected, error: selectedError } = await ctx.supabase.from('conversations')
+            .select('id,contact:contacts(phone,channel,external_id)').eq('id', conversationId)
+            .eq('account_id', ctx.accountId).maybeSingle();
+          if (selectedError) throw selectedError;
+          const contact = Array.isArray(selected?.contact) ? selected.contact[0] : selected?.contact;
+          const selectedPhone = normalizePhone(contact?.phone || '');
+          if (!(contact?.channel === 'whatsapp' || contact?.channel == null && !contact?.external_id)
+            || ![destinationPhone, `51${destinationPhone}`].includes(selectedPhone)) {
+            conversationId = null;
+          }
+        }
+        if (!conversationId) {
+        // Resolve an existing WhatsApp chat; never create a new contact from dictation.
+        const matches: { id: string; phone: string }[] = [];
+        let exhausted = false;
+        for (let page = 0; page < 10; page++) {
+          const { data: contacts, error: contactError } = await ctx.supabase.from('contacts')
+            .select('id,phone,channel,external_id').eq('account_id', ctx.accountId)
+            .or('channel.eq.whatsapp,channel.is.null')
+            .order('id').range(page * 1000, page * 1000 + 999);
+          if (contactError) throw contactError;
+          matches.push(...(contacts ?? []).filter(contact => {
+            const normalized = normalizePhone(contact.phone || '');
+            return (contact.channel === 'whatsapp' || contact.channel == null && !contact.external_id)
+              && (normalized === destinationPhone || normalized === `51${destinationPhone}`);
+          }));
+          if ((contacts ?? []).length < 1000) { exhausted = true; break; }
+        }
+        if (!exhausted) return NextResponse.json({ error: 'Hay demasiados contactos para resolver el número con seguridad. Selecciona el chat manualmente.' }, { status: 400 });
+        if (matches.length !== 1) return NextResponse.json({ error: `El número ${destinationPhone} no identifica un único contacto de WhatsApp del CRM. Selecciona el chat correcto.` }, { status: 400 });
+        const { data: chats, error: chatError } = await ctx.supabase.from('conversations').select('id')
+          .eq('account_id', ctx.accountId).eq('contact_id', matches[0].id).limit(2);
+        if (chatError) throw chatError;
+        if (chats?.length !== 1) return NextResponse.json({ error: `No se encontró un chat único para ${destinationPhone}.` }, { status: 400 });
+        conversationId = chats[0].id;
+        }
+      } else if (conversationId) {
+        const { data: visible, error: visibilityError } = await ctx.supabase.from('conversations').select('id')
+          .eq('id', conversationId).eq('account_id', ctx.accountId).maybeSingle();
+        if (visibilityError) throw visibilityError;
+        if (!visible) return NextResponse.json({ error: 'No tienes acceso a ese chat.' }, { status: 403 });
+      }
+      rows.push({ account_id: ctx.accountId, user_id: ctx.userId, conversation_id: conversationId,
+        body, due_at: dueAt.toISOString(), repeat_days: repeatDays, action_kind: kind,
+        destination_phone: kind === 'message' ? destinationPhone : null,
+        message_text: kind === 'message' ? messageText : null });
     }
-    const { data, error } = await ctx.supabase.from('adviser_reminders').insert({
-      account_id: ctx.accountId, user_id: ctx.userId, conversation_id: conversationId,
-      body, due_at: dueAt.toISOString(), repeat_days: repeatDays,
-    }).select('id,body,due_at,repeat_days,conversation_id,status').single();
+    const { data, error } = await ctx.supabase.from('adviser_reminders').insert(rows)
+      .select('id,body,due_at,repeat_days,conversation_id,status,action_kind');
     if (error) throw error;
-    return NextResponse.json({ reminder: data }, { status: 201 });
+    return NextResponse.json({ reminders: data }, { status: 201 });
   } catch (error) { return toErrorResponse(error); }
 }

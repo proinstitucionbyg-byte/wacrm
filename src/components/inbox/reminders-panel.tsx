@@ -5,9 +5,9 @@ import { createPortal } from 'react-dom';
 import { BellRing, Mic, Square, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { suggestReminder } from '@/lib/reminders/parse';
+import { parseReminderDrafts, type ReminderDraft } from '@/lib/reminders/instructions';
 
-interface Reminder { id: string; user_id: string; owner_name: string | null; body: string; due_at: string; repeat_days: number | null; conversation_id: string | null; }
+interface Reminder { id: string; user_id: string; owner_name: string | null; body: string; due_at: string; repeat_days: number | null; conversation_id: string | null; action_kind: string; destination_phone: string | null; message_text: string | null; }
 interface ButtonPosition { x: number; y: number; }
 const POSITION_KEY = 'wacrm-reminders-button-position';
 
@@ -26,6 +26,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
   const [canViewTeam, setCanViewTeam] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [body, setBody] = useState('');
+  const [drafts, setDrafts] = useState<ReminderDraft[]>([]);
   const [dueLocal, setDueLocal] = useState('');
   const [repeatDays, setRepeatDays] = useState('');
   const [needsInterval, setNeedsInterval] = useState(false);
@@ -109,31 +110,47 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
 
   function updateBody(value: string) {
     setBody(value);
-    if (!value.trim()) return;
-    const suggested = suggestReminder(value);
-    setDueLocal(suggested.dueLocal);
-    setRepeatDays(suggested.repeatDays ? String(suggested.repeatDays) : '');
-    setNeedsInterval(suggested.needsInterval);
+    const parsed = parseReminderDrafts(value);
+    setDrafts(parsed);
+    const first = parsed[0];
+    setDueLocal(first?.dueLocal || '');
+    setRepeatDays(first?.repeatDays ? String(first.repeatDays) : '');
+    setNeedsInterval(first?.needsInterval || false);
+  }
+
+  function updateDraft(index: number, change: Partial<ReminderDraft>) {
+    setDrafts(current => current.map((item, at) => at === index ? { ...item, ...change } : item));
   }
 
   async function save() {
-    if (!body.trim() || !dueLocal || needsInterval && !repeatDays) {
-      toast.error('Escribe el recordatorio, confirma la fecha y especifica cada cuántos días se repetirá.');
-      return;
+    const entries = drafts.map((draft, index) => ({ ...draft,
+      dueLocal: drafts.length === 1 ? dueLocal : draft.dueLocal,
+      repeatDays: drafts.length === 1 ? Number(repeatDays) || null : draft.repeatDays,
+      needsInterval: drafts.length === 1 ? needsInterval : draft.needsInterval,
+      label: `RE${index + 1}` }));
+    if (!entries.length || entries.some(entry => !entry.body || !entry.dueLocal || entry.needsInterval && !entry.repeatDays)) {
+      toast.error('Revisa la fecha y repetición de cada recordatorio.'); return;
     }
-    const due = new Date(dueLocal);
-    if (!Number.isFinite(due.getTime()) || due.getTime() <= Date.now()) {
-      toast.error('Elige una fecha y hora futuras.'); return;
+    if (entries.some(entry => !Number.isFinite(new Date(entry.dueLocal).getTime()) || new Date(entry.dueLocal).getTime() <= Date.now())) {
+      toast.error('Cada fecha y hora debe ser futura.'); return;
+    }
+    if (entries.some(entry => entry.sendIntent && (!entry.destinationPhone || !entry.messageText))) {
+      toast.error('Para cada mensaje revisa el celular y el texto exacto que se enviará.'); return;
+    }
+    if (entries.some(entry => entry.sendIntent && entry.repeatDays)) {
+      toast.error('Un mensaje programado se envía una sola vez.'); return;
     }
     setSaveBusy(true);
     try {
       const response = await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: body.trim(), due_at: due.toISOString(), repeat_days: repeatDays ? Number(repeatDays) : null,
-          conversation_id: conversationId }) });
+        body: JSON.stringify({ reminders: entries.map(entry => ({ body: entry.body,
+          due_at: new Date(entry.dueLocal).toISOString(), repeat_days: entry.repeatDays,
+          conversation_id: conversationId, action_kind: entry.sendIntent ? 'message' : 'notification',
+          destination_phone: entry.destinationPhone, message_text: entry.messageText })) }) });
       if (!response.ok) throw new Error((await response.json()).error || 'No se pudo guardar.');
-      setBody(''); setDueLocal(''); setRepeatDays(''); setNeedsInterval(false);
+      setBody(''); setDrafts([]); setDueLocal(''); setRepeatDays(''); setNeedsInterval(false);
       await refresh();
-      toast.success(`Recordatorio guardado para ${due.toLocaleString('es-PE', { timeZone: 'America/Lima' })}. Aparecerá en Notificaciones.`);
+      toast.success(`${entries.length} recordatorio(s) guardado(s). Los mensajes se enviarán solo si sigue abierta la ventana de WhatsApp.`);
     } catch (error) { toast.error(error instanceof Error ? error.message : 'No se pudo guardar.'); }
     finally { setSaveBusy(false); }
   }
@@ -185,7 +202,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
       onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
       title="Mis recordatorios · arrastra para mover" aria-label="Abrir mis recordatorios; arrastra para mover"
       style={buttonPosition ? { left: buttonPosition.x, top: buttonPosition.y } : { right: 16, top: '40%' }}
-      className="fixed z-40 inline-flex h-11 touch-none cursor-grab items-center gap-2 rounded-xl border border-sky-500/50 bg-slate-900 px-4 text-slate-100 shadow-xl hover:border-sky-400 hover:bg-slate-800 active:cursor-grabbing light:border-sky-200 light:bg-white light:text-sky-800 light:shadow-lg light:hover:bg-sky-50">
+      className="fixed z-40 inline-flex h-11 touch-none cursor-grab items-center gap-2 rounded-xl border border-sky-500/50 bg-slate-900 px-4 text-slate-100 shadow-xl hover:border-sky-400 hover:bg-slate-800 active:cursor-grabbing light:border-border light:bg-card light:text-sky-800 light:shadow-lg light:hover:bg-secondary">
       <BellRing className="h-4 w-4"/><span className="hidden xl:inline">Recordatorios</span>
     </button>
     <Sheet open={open} onOpenChange={setOpen}>
@@ -204,7 +221,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
               className={`rounded-md border px-3 py-1 text-sm ${teamView ? 'border-sky-500 text-sky-400' : 'border-border'}`}>Todo el equipo</button>
           </div>}
           <label className="block text-sm">¿Qué quieres recordar?
-            <textarea value={body} onChange={event => updateBody(event.target.value)} rows={3} maxLength={1000}
+            <textarea value={body} onChange={event => updateBody(event.target.value)} rows={3} maxLength={10000}
               placeholder="Recuérdame mañana a las 3 de la tarde llamar al estudiante"
               className="mt-1 w-full rounded-md border border-border bg-background p-2" />
           </label>
@@ -213,8 +230,8 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
             {recording ? <Square className="h-4 w-4 text-red-500"/> : <Mic className="h-4 w-4"/>}
             {transcribing ? 'Transcribiendo...' : recording ? 'Detener audio' : 'Dictar por audio'}
           </button>
-          <p className="text-xs text-muted-foreground">Di en un solo audio qué recordar, cuándo y cada cuánto. La fecha y la repetición se completan solas; solo corrígelas si hace falta. El aviso aparece en Notificaciones del CRM.</p>
-          <label className="block text-sm">Fecha y hora
+          <p className="text-xs text-muted-foreground">Puedes dictar o escribir RE1, RE2… o “recordatorio 1, recordatorio 2…” en un solo audio. Revisa cada fecha. Para enviar un mensaje, indica el celular y el texto exacto; se enviará solo si la persona escribió durante las últimas 24 horas.</p>
+          {drafts.length <= 1 && <><label className="block text-sm">Fecha y hora
             <input type="datetime-local" step="1" value={dueLocal} onChange={event => setDueLocal(event.target.value)}
               className="mt-1 w-full rounded-md border border-border bg-background p-2" />
           </label>
@@ -222,7 +239,23 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
             <input type="number" min={1} max={365} value={repeatDays} onChange={event => {setRepeatDays(event.target.value); setNeedsInterval(false);}}
               placeholder="Sin repetición" className="mt-1 w-full rounded-md border border-border bg-background p-2" />
           </label>
-          {needsInterval && <p className="text-xs text-amber-400">Indica un número de días para repetirlo.</p>}
+          {needsInterval && <p className="text-xs text-amber-400">Indica un número de días para repetirlo.</p>}</>}
+          {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-md border border-border p-3 text-sm">
+            <p className="font-medium">{draft.label}: {draft.body}</p>
+            {drafts.length > 1 && <><label className="block">Fecha y hora
+              <input type="datetime-local" step="1" value={draft.dueLocal} onChange={event => updateDraft(index, { dueLocal: event.target.value })}
+                className="mt-1 w-full rounded-md border border-border bg-background p-2" /></label>
+              <label className="block">Repetir cada cuántos días (opcional)
+                <input type="number" min={1} max={365} value={draft.repeatDays ?? ''} onChange={event => updateDraft(index, { repeatDays: Number(event.target.value) || null, needsInterval: false })}
+                  className="mt-1 w-full rounded-md border border-border bg-background p-2" /></label></>}
+            {draft.sendIntent && <><p className="font-medium text-sky-400">Mensaje programado de WhatsApp</p>
+              <label className="block">Celular de destino
+                <input value={draft.destinationPhone || ''} onChange={event => updateDraft(index, { destinationPhone: event.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-background p-2" /></label>
+              <label className="block">Texto exacto que se enviará
+                <textarea value={draft.messageText || ''} onChange={event => updateDraft(index, { messageText: event.target.value })} rows={2}
+                  className="mt-1 w-full rounded-md border border-border bg-background p-2" /></label></>}
+          </div>)}
           <button type="button" onClick={() => void save()} disabled={saveBusy || transcribing || recording}
             className="w-full rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">
             {saveBusy ? 'Guardando...' : 'Guardar recordatorio'}
@@ -232,7 +265,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
             {items.length === 0 && <p className="text-sm text-muted-foreground">Todavía no tienes recordatorios.</p>}
             {items.map(item => <div key={item.id} className="mb-2 flex items-start gap-2 rounded-md border border-border p-3">
               <div className="min-w-0 flex-1">{teamView && <p className="text-xs font-medium text-sky-400">{item.owner_name || 'Asesora'}</p>}
-                <p className="break-words text-sm">{item.body}</p>
+                <p className="break-words text-sm">{item.action_kind === 'message' ? `Enviar al ${item.destination_phone}: ${item.message_text}` : item.body}</p>
                 <p className="text-xs text-muted-foreground">{new Date(item.due_at).toLocaleString('es-PE')}{item.repeat_days ? ` · Cada ${item.repeat_days} día(s)` : ''}</p>
               </div>
               {item.user_id === currentUserId && <button type="button" onClick={() => void remove(item.id)} title="Eliminar recordatorio" aria-label="Eliminar recordatorio" className="text-muted-foreground hover:text-red-400"><Trash2 className="h-4 w-4"/></button>}

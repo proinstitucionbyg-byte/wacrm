@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runIncompleteIntakes } from '@/lib/matriculas/incomplete-intake';
+import { dispatchDueReminderMessages } from '@/lib/reminders/dispatch';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
 import { resumePendingExecution } from '@/lib/automations/engine';
 import type { AutomationContext } from '@/lib/automations/engine';
@@ -35,6 +36,8 @@ export async function GET(request: Request) {
   const admin = supabaseAdmin();
   const { error: reminderError } = await admin.rpc('publish_due_adviser_reminders');
   if (reminderError) console.error('No se pudieron entregar los recordatorios personales', reminderError);
+  try { await dispatchDueReminderMessages(admin); }
+  catch (error) { console.error('No se pudieron procesar los mensajes programados', error); }
   await expireSalesAssignments();
   await routeWaitingSalesConversations();
   await reactivateExpiredManualControls();
