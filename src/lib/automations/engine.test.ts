@@ -205,6 +205,15 @@ describe('confirmed complete delivery', () => {
       conversationId: 'chat', sequenceId: 'welcome',
     })).toBe(true);
   });
+  it('does not report a failed automation as launched to the idle follow-up', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.logStatus = 'failed';
+    expect(await runAutomationById({
+      accountId: ACCOUNT, automationId: 'a1', contactId: 'c1',
+      conversationId: 'chat',
+    })).toBe(false);
+  });
 });
 
 describe('run_automation chaining', () => {

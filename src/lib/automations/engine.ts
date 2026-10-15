@@ -285,14 +285,11 @@ export async function runAutomationById(input: {
         ...(input.sequenceId ? { enrollment_sequence_id: input.sequenceId } : {}),
       },
     })
-    if (input.manualAgentId || input.sequenceId || input.requireComplete) {
-      if (!logId) return false
-      const { data: result, error: resultError } = await db.from('automation_logs').select('status').eq('id', logId).single()
-      return !resultError && (input.requireComplete
-        ? result?.status === 'success'
-        : ['success','partial'].includes(result?.status))
-    }
-    return true
+    if (!logId) return false
+    const { data: result, error: resultError } = await db.from('automation_logs').select('status').eq('id', logId).single()
+    return !resultError && (input.requireComplete
+      ? result?.status === 'success'
+      : ['success','partial'].includes(result?.status))
   } catch (err) {
     console.error('[automations] runAutomationById failed:', err)
     return false

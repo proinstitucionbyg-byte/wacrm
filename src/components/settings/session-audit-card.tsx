@@ -173,6 +173,12 @@ export function SessionAuditCard() {
                 <p>Última ubicación compartida: {session.latitude.toFixed(5)}, {session.longitude.toFixed(5)}
                   {session.accuracy_m !== null ? ` (precisión estimada ±${Math.round(session.accuracy_m)} m)` : ''}
                   {' · '}{dateTime(session.location_seen_at)}
+                  {' · '}<a
+                    href={`https://www.google.com/maps?q=${encodeURIComponent(`${session.latitude},${session.longitude}`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline underline-offset-2"
+                  >Ver última ubicación en Google Maps</a>
                 </p>
               ) : <p className={session.location_declined_at ? 'text-amber-600' : undefined}>Ubicación precisa: {session.location_declined_at ? 'rechazada; el CEO fue avisado' : 'aún no compartida'}</p>}
             </div>

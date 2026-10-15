@@ -236,6 +236,7 @@ export async function runIdleFollowups(): Promise<number> {
       .gt('last_message_at', new Date(now - WINDOW_MS).toISOString())
       .eq('ai_enabled', true)
       .eq('automation_enabled', true)
+      .neq('status', 'closed')
       .order('last_message_at', { ascending: false })
       .limit(50)
     if (error || !convs) return 0
