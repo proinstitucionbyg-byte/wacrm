@@ -1537,7 +1537,7 @@ export function MessageThread({
       />
 
       {/* Composer */}
-      <EnrollmentWelcomeCheck key={conversation.id} conversationId={conversation.id} />
+      <EnrollmentWelcomeCheck conversationId={conversation.id} />
       <MessageComposer
         key={conversation.id}
         assignmentAt={conversation.inbox_assignment_at}

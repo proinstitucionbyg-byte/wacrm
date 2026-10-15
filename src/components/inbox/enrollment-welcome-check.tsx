@@ -32,6 +32,7 @@ export function EnrollmentWelcomeCheck({
     }
   }, [conversationId]);
   useEffect(() => {
+    setTask(null);
     void Promise.resolve().then(load);
     // Load on chat selection only. Polling this card previously accumulated
     // duplicate DOM slots in the inbox on every refresh.
