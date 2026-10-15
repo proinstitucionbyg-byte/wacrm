@@ -572,6 +572,9 @@ export interface WaitStepConfig {
 export interface RunAutomationStepConfig {
   /** Active automation in the same account that should run next. */
   automation_id: string;
+  /** Optional inclusive, one-based top-level block range (A1, A2, ...). */
+  start_step?: number;
+  end_step?: number;
 }
 
 export type ConditionSubject =

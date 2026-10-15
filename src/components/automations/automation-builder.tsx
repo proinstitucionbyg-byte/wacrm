@@ -1180,7 +1180,7 @@ function StepRenderer({
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                {isCondition ? "Condition" : step.step_type === "wait" ? "Wait" : "Action"}
+                {isCondition ? "Condition" : step.step_type === "wait" ? "Wait" : "Action"} · {parentScope.kind === "root" ? `A${index + 1}` : `Rama ${index + 1}`}
               </div>
               <div className="truncate text-sm font-medium text-foreground">{t(`steps.${meta.label}`)}</div>
               <div className="truncate text-[11px] text-muted-foreground">{previewFor(step)}</div>
@@ -1579,8 +1579,20 @@ function StepEditor({
               className="bg-muted text-foreground"
             />
           </FieldBlock>
+          <div className="grid grid-cols-2 gap-3">
+            <FieldBlock label="Desde el bloque (opcional)">
+              <Input type="number" min={1} step={1} value={(cfg.start_step as number | undefined) ?? ""}
+                onChange={(e) => set({ start_step: e.target.value ? Number(e.target.value) : undefined })}
+                placeholder="A1" className="bg-muted text-foreground" />
+            </FieldBlock>
+            <FieldBlock label="Hasta el bloque (opcional)">
+              <Input type="number" min={1} step={1} value={(cfg.end_step as number | undefined) ?? ""}
+                onChange={(e) => set({ end_step: e.target.value ? Number(e.target.value) : undefined })}
+                placeholder="A5" className="bg-muted text-foreground" />
+            </FieldBlock>
+          </div>
           <p className="text-xs text-muted-foreground">
-            Usa el código de una automatización activa. Ejecuta sus mensajes, imágenes y audios; después continúa con el siguiente paso. Agrega "Esperar" antes si quieres una pausa.
+            Deja ambos bloques vacíos para ejecutar toda la automatización. Para una parte, escribe por ejemplo A3 a A5. Los códigos A1, A2… aparecen junto a cada bloque del editor de origen. Tras sus pausas, continúa con el siguiente paso de esta automatización.
           </p>
         </>
       )

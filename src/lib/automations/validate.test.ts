@@ -177,6 +177,17 @@ describe("validateStepsForActivation", () => {
     ]);
   });
 
+  it("accepts a complete block range and rejects incomplete or reversed ranges", () => {
+    expect(validateStepsForActivation([
+      { step_type: "run_automation", step_config: { automation_id: "next-id", start_step: 3, end_step: 5 } },
+    ])).toEqual([]);
+    for (const range of [{ start_step: 3 }, { end_step: 5 }, { start_step: 5, end_step: 3 }]) {
+      expect(validateStepsForActivation([
+        { step_type: "run_automation", step_config: { automation_id: "next-id", ...range } },
+      ])).toEqual([{ path: "steps[0].start_step", message: "select a valid A-start to A-end block range" }]);
+    }
+  });
+
   it("recursively walks condition branches with stable dot-paths", () => {
     const issues = validateStepsForActivation([
       {

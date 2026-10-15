@@ -52,6 +52,8 @@ export interface AutomationContext {
   vars?: Record<string, unknown>
   /** Server-owned chain history used to stop circular automation links. */
   automation_chain_ids?: string[]
+  /** End block for a linked automation, retained when its wait resumes. */
+  automation_step_end_by_id?: Record<string, number>
   /** A linked block must finish its own waits before the parent continues. */
   await_child_log_id?: string
   /** The tag id that was added, for tag_added trigger. */
@@ -379,6 +381,9 @@ export async function resumePendingExecution(pending: {
       parentStepId: pending.parent_step_id,
       branch: pending.branch,
       startPosition: pending.next_step_position,
+      endPosition: pending.parent_step_id === null
+        ? pending.context?.automation_step_end_by_id?.[pending.automation_id]
+        : undefined,
       logId: pending.log_id,
       triggerEvent: 'resumed_wait',
     })
@@ -402,6 +407,7 @@ async function executeAutomation(
   automation: Automation,
   input: DispatchInput,
   triggerEventOverride?: string,
+  range?: { startPosition: number; endPosition: number },
 ) {
   const db = supabaseAdmin()
   const priorChain = input.context?.automation_chain_ids ?? []
@@ -412,6 +418,9 @@ async function executeAutomation(
   const executionContext: AutomationContext = {
     ...(input.context ?? {}),
     automation_chain_ids: [...priorChain, automation.id],
+    automation_step_end_by_id: range
+      ? { ...(input.context?.automation_step_end_by_id ?? {}), [automation.id]: range.endPosition }
+      : input.context?.automation_step_end_by_id,
   }
 
   const { data: log, error: logErr } = await db
@@ -443,7 +452,8 @@ async function executeAutomation(
     context: executionContext,
     parentStepId: null,
     branch: null,
-    startPosition: 0,
+    startPosition: range?.startPosition ?? 0,
+    endPosition: range?.endPosition,
     logId: log.id,
     triggerEvent: triggerEventOverride ?? input.triggerType,
   })
@@ -469,6 +479,7 @@ interface ExecuteArgs {
   parentStepId: string | null
   branch: 'yes' | 'no' | null
   startPosition: number
+  endPosition?: number
   logId: string | null
   triggerEvent: string
 }
@@ -482,6 +493,10 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     .eq('automation_id', args.automation.id)
     .gte('position', args.startPosition)
     .order('position', { ascending: true })
+
+  if (args.parentStepId === null && args.endPosition !== undefined) {
+    baseQuery.lte('position', args.endPosition)
+  }
 
   const scoped =
     args.parentStepId === null
@@ -622,8 +637,6 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
 
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string | { detail: string; childLogId: string }> {
   const db = supabaseAdmin()
-  console.log("STEP TYPE:", step.step_type)
-console.log(step.step_config)
 
   switch (step.step_type) {
     case 'send_message': {
@@ -711,7 +724,6 @@ case 'send_media': {
   const mediaUrl = rawCfg.media_url ?? rawCfg.url
   const mediaType = rawCfg.media_type ?? 'image'
 
-console.log('>>> ENTRE AL CASE SEND_MEDIA <<<')
   if (!args.contactId) {
     throw new Error('send_media needs a contact')
   }
@@ -720,10 +732,6 @@ console.log('>>> ENTRE AL CASE SEND_MEDIA <<<')
     throw new Error('send_media needs media_url (or url)')
   }
 
-console.log('======================')
-console.log('SEND MEDIA STEP')
-console.log(JSON.stringify({ mediaType, mediaUrl, caption: rawCfg.caption }, null, 2))
-console.log('======================')
   const conversationId = await resolveConversationId(args)
 
   const transcript = mediaType === 'audio' ? await automationAudioEvidence({
@@ -895,6 +903,12 @@ console.log('======================')
         throw new Error('run_automation: maximum chain length reached')
       }
 
+      const hasRange = cfg.start_step !== undefined || cfg.end_step !== undefined
+      if (hasRange && (!Number.isInteger(cfg.start_step) || !Number.isInteger(cfg.end_step)
+        || (cfg.start_step ?? 0) < 1 || (cfg.end_step ?? 0) < (cfg.start_step ?? 0))) {
+        throw new Error('run_automation: invalid block range')
+      }
+
       const { data: target, error } = await db
         .from('automations')
         .select('*')
@@ -906,6 +920,16 @@ console.log('======================')
         throw new Error('run_automation: target is unavailable or inactive')
       }
 
+      if (hasRange) {
+        const { data: bounds, error: boundsError } = await db.from('automation_steps')
+          .select('position').eq('automation_id', targetId).is('parent_step_id', null)
+          .in('position', [(cfg.start_step ?? 1) - 1, (cfg.end_step ?? 1) - 1])
+        if (boundsError || !bounds?.some(row => row.position === (cfg.start_step ?? 1) - 1)
+          || !bounds?.some(row => row.position === (cfg.end_step ?? 1) - 1)) {
+          throw new Error('run_automation: selected block no longer exists')
+        }
+      }
+
       const childLogId = await executeAutomation(
         target as Automation,
         {
@@ -915,6 +939,7 @@ console.log('======================')
           context: args.context,
         },
         'automation_link',
+        hasRange ? { startPosition: (cfg.start_step ?? 1) - 1, endPosition: (cfg.end_step ?? 1) - 1 } : undefined,
       )
       if (!childLogId) throw new Error('run_automation: target did not start')
       return { detail: `automation ${targetId} started`, childLogId }

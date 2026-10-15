@@ -76,10 +76,18 @@ vi.mock("./admin-client", () => {
       const startPosition = ops.filters.find(
         ([operator, key]) => operator === 'gte' && key === 'position',
       )?.[2] as number | undefined;
+      const endPosition = ops.filters.find(
+        ([operator, key]) => operator === 'lte' && key === 'position',
+      )?.[2] as number | undefined;
+      const positions = ops.filters.find(
+        ([operator, key]) => operator === 'in' && key === 'position',
+      )?.[2] as number[] | undefined;
       const candidate = typeof automationId === 'string'
         ? state.stepsByAutomationId[automationId] ?? state.steps : state.steps;
       return {
-        data: startPosition === undefined ? candidate : candidate.filter(step => Number(step.position) >= startPosition),
+        data: candidate.filter(step => (startPosition === undefined || Number(step.position) >= startPosition)
+          && (endPosition === undefined || Number(step.position) <= endPosition)
+          && (!positions || positions.includes(Number(step.position)))),
         error: null,
       };
     }
@@ -110,6 +118,7 @@ vi.mock("./admin-client", () => {
       eq: (k: string, v: unknown) => (ops.filters.push(["eq", k, v]), b),
       in: (k: string, v: unknown) => (ops.filters.push(["in", k, v]), b),
       gte: (k: string, v: unknown) => (ops.filters.push(['gte', k, v]), b),
+      lte: (k: string, v: unknown) => (ops.filters.push(['lte', k, v]), b),
       is: () => b,
       order: () => b,
       limit: () => b,
@@ -190,6 +199,68 @@ describe('confirmed complete delivery', () => {
 });
 
 describe('run_automation chaining', () => {
+  it('runs only A3 through A5 and then continues the parent', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep(), { ...automationWithUpdateStep(), id: 'a2' }];
+    h.state.stepsByAutomationId = {
+      a1: [
+        { id: 'link', automation_id: 'a1', step_type: 'run_automation', position: 0,
+          parent_step_id: null, step_config: { automation_id: 'a2', start_step: 3, end_step: 5 } },
+        { id: 'after', automation_id: 'a1', step_type: 'update_contact_field', position: 1,
+          parent_step_id: null, step_config: { field: 'company', value: 'parent' } },
+      ],
+      a2: Array.from({ length: 6 }, (_, position) => ({
+        id: `child${position}`, automation_id: 'a2', step_type: 'update_contact_field',
+        position, parent_step_id: null, step_config: { field: 'company', value: `A${position + 1}` },
+      })),
+    };
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(h.state.logAutomationIds).toEqual(['a1', 'a2']);
+    expect(h.state.updateCalls).toHaveLength(4);
+  });
+
+  it('keeps the A5 boundary when A3 waits and then resumes the parent', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.logStatus = 'partial';
+    h.state.automations = [automationWithUpdateStep(), { ...automationWithUpdateStep(), id: 'a2' }];
+    h.state.stepsByAutomationId = {
+      a1: [
+        { id: 'link', automation_id: 'a1', step_type: 'run_automation', position: 0,
+          parent_step_id: null, step_config: { automation_id: 'a2', start_step: 3, end_step: 5 } },
+        { id: 'after', automation_id: 'a1', step_type: 'update_contact_field', position: 1,
+          parent_step_id: null, step_config: { field: 'company', value: 'parent' } },
+      ],
+      a2: [
+        { id: 'before', automation_id: 'a2', step_type: 'update_contact_field', position: 0,
+          parent_step_id: null, step_config: { field: 'company', value: 'A1' } },
+        { id: 'wait', automation_id: 'a2', step_type: 'wait', position: 2,
+          parent_step_id: null, step_config: { amount: 10, unit: 'minutes' } },
+        ...[3, 4, 5].map(position => ({ id: `child${position}`, automation_id: 'a2',
+          step_type: 'update_contact_field', position, parent_step_id: null,
+          step_config: { field: 'company', value: `A${position + 1}` } })),
+      ],
+    };
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(h.state.pendingInserts).toHaveLength(2);
+    const childPending = h.state.pendingInserts[0];
+    expect(childPending.context).toEqual(expect.objectContaining({
+      automation_step_end_by_id: expect.objectContaining({ a2: 4 }),
+    }));
+    h.state.logStatus = 'success';
+    await resumePendingExecution({
+      id: 'child-pending', automation_id: 'a2', account_id: ACCOUNT, user_id: 'u1',
+      contact_id: 'c1', log_id: 'log2', parent_step_id: null, branch: null,
+      next_step_position: 3, context: childPending.context as { conversation_id: string },
+    });
+    expect(h.state.updateCalls).toHaveLength(2);
+    await resumePendingExecution({
+      id: 'parent-pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
+      contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
+      next_step_position: 1, context: h.state.pendingInserts[1].context as { conversation_id: string },
+    });
+    expect(h.state.updateCalls).toHaveLength(3);
+  });
+
   it('holds the parent after a linked block schedules its own wait', async () => {
     h.state.owned = { id: 'c1' };
     h.state.logStatus = 'partial';

@@ -139,6 +139,12 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
           message: 'target automation is required',
         })
       }
+      if (c.start_step !== undefined || c.end_step !== undefined) {
+        if (!Number.isInteger(c.start_step) || !Number.isInteger(c.end_step)
+          || Number(c.start_step) < 1 || Number(c.end_step) < Number(c.start_step)) {
+          issues.push({ path: `${path}.start_step`, message: 'select a valid A-start to A-end block range' })
+        }
+      }
       break
     case 'condition':
       if (!nonEmpty(c.subject)) {
