@@ -2,6 +2,7 @@
 
 import { PasswordForm } from './password-form';
 import { SessionsCard } from './sessions-card';
+import { LocationSharingCard, SessionAuditCard } from './session-audit-card';
 import { SettingsPanelHead } from './settings-panel-head';
 import { useTranslations } from 'next-intl';
 
@@ -20,6 +21,8 @@ export function SecurityPanel() {
       <div className="space-y-4">
         <PasswordForm />
         <SessionsCard />
+        <LocationSharingCard />
+        <SessionAuditCard />
       </div>
     </section>
   );

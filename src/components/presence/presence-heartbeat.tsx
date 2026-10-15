@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { HEARTBEAT_MS, IDLE_AFTER_MS, type StoredPresence } from "@/lib/presence";
+import { locationConsentKey, locationDeclinedKey } from "@/lib/presence/location-consent";
 
 /**
  * PresenceHeartbeat — headless. Mount ONCE per signed-in dashboard tab
@@ -20,7 +21,7 @@ import { HEARTBEAT_MS, IDLE_AFTER_MS, type StoredPresence } from "@/lib/presence
  * 'offline' from staleness — no unreliable unload write needed.
  */
 export function PresenceHeartbeat() {
-  const { accountId } = useAuth();
+  const { accountId, user } = useAuth();
 
   // 0 = "never recorded"; set on mount so we don't read the clock during
   // render (impure). Until the effect runs the tab counts as active.
@@ -31,12 +32,64 @@ export function PresenceHeartbeat() {
     // window on a fresh signup — authed but profile/account row not yet
     // created — would make touch_presence raise "No account for caller"
     // and log a spurious error. The effect re-runs once accountId lands.
-    if (!accountId) return;
+    if (!accountId || !user) return;
 
     const supabase = createClient();
     let cancelled = false;
     let lastBeatAt = 0;
+    let watchId: number | null = null;
+    let locationRefreshId: ReturnType<typeof setInterval> | null = null;
+    let latestLocation: { latitude: number; longitude: number; accuracy: number } | null = null;
+    let locationDirty = false;
     lastActivityRef.current = Date.now();
+
+    const startLocationWatch = () => {
+      if (watchId !== null || !navigator.geolocation ||
+          localStorage.getItem(locationConsentKey(user.id)) !== "yes") return;
+      watchId = navigator.geolocation.watchPosition(
+        ({ coords }) => {
+          latestLocation = {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy,
+          };
+          locationDirty = true;
+        },
+        (error) => {
+          // A temporary GPS/network failure is not a withdrawal of consent.
+          // Only a browser permission denial should request consent again.
+          if (error.code === error.PERMISSION_DENIED) {
+            stopLocationWatch();
+            localStorage.removeItem(locationConsentKey(user.id));
+            sessionStorage.setItem(locationDeclinedKey(user.id), "yes");
+            void beat();
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 30_000 },
+      );
+      const refreshLocation = () => navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          latestLocation = {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy,
+          };
+          locationDirty = true;
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 },
+      );
+      refreshLocation();
+      locationRefreshId = setInterval(refreshLocation, 10 * 60_000);
+    };
+    const stopLocationWatch = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (locationRefreshId !== null) clearInterval(locationRefreshId);
+      watchId = null;
+      locationRefreshId = null;
+      latestLocation = null;
+      locationDirty = false;
+    };
 
     const markActive = () => {
       lastActivityRef.current = Date.now();
@@ -64,6 +117,17 @@ export function PresenceHeartbeat() {
         // misconfigured RPC is visible without spamming.
         console.error("[PresenceHeartbeat] touch_presence failed:", error.message);
       }
+      const location = locationDirty ? latestLocation : null;
+      locationDirty = false;
+      try {
+        await fetch("/api/account/security/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ location, locationDeclined: sessionStorage.getItem(locationDeclinedKey(user.id)) === "yes" }),
+        });
+      } catch {
+        // Session audit is best effort and must never interrupt presence.
+      }
     };
 
     // Activity listeners. `passive` so we never block scroll/input.
@@ -86,6 +150,10 @@ export function PresenceHeartbeat() {
     };
     document.addEventListener("visibilitychange", onReturn);
     window.addEventListener("focus", onReturn);
+    window.addEventListener("wacrm-location-enabled", startLocationWatch);
+    window.addEventListener("wacrm-location-disabled", stopLocationWatch);
+    window.addEventListener("wacrm-location-declined", beat);
+    startLocationWatch();
 
     void beat();
     const interval = setInterval(() => void beat(), HEARTBEAT_MS);
@@ -98,8 +166,12 @@ export function PresenceHeartbeat() {
       );
       document.removeEventListener("visibilitychange", onReturn);
       window.removeEventListener("focus", onReturn);
+      window.removeEventListener("wacrm-location-enabled", startLocationWatch);
+      window.removeEventListener("wacrm-location-disabled", stopLocationWatch);
+      window.removeEventListener("wacrm-location-declined", beat);
+      stopLocationWatch();
     };
-  }, [accountId]);
+  }, [accountId, user]);
 
   return null;
 }
