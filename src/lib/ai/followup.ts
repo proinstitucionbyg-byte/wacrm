@@ -22,10 +22,9 @@ export const FOLLOWUP_LOYALTY_ID = 'vortex_followup_fidelizacion'
 export function canFollowUpAfterLastMessage(
   senderType: string,
   text: string | null,
-  automationAlreadyRan: boolean,
 ): boolean {
   if (senderType === 'customer') return true
-  return senderType === 'bot' && /[?¿]/.test(text ?? '') && !automationAlreadyRan
+  return senderType === 'bot' && /[?¿]/.test(text ?? '')
 }
 
 /** Handle the Continue → area menu sent by the idle follow-up. */
@@ -256,7 +255,7 @@ export async function runIdleFollowups(): Promise<number> {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (!last || !canFollowUpAfterLastMessage(last.sender_type, last.content_text, false)) continue
+      if (!last || !canFollowUpAfterLastMessage(last.sender_type, last.content_text)) continue
 
       const { data: customer } = last.sender_type === 'customer'
         ? { data: last }
@@ -268,24 +267,6 @@ export async function runIdleFollowups(): Promise<number> {
             .limit(1)
             .maybeSingle()
       if (!customer || now - Date.parse(customer.created_at) >= WINDOW_MS) continue
-      // A bot question also needs a follow-up when the customer goes silent.
-      // Never restart an automation that already ran after that customer reply.
-      if (last.sender_type === 'bot') {
-        const { data: priorAutomation, error: logError } = await db
-          .from('automation_logs')
-          .select('id')
-          .eq('account_id', c.account_id)
-          .eq('contact_id', c.contact_id)
-          .gte('created_at', customer.created_at)
-          .limit(1)
-          .maybeSingle()
-        if (logError) continue
-        if (priorAutomation) {
-          await claimFollowup(db, c)
-          continue
-        }
-      }
-
       if (isLikelyAutomatedInbound(customer.content_text)) {
         await claimFollowup(db, c)
         continue
@@ -323,6 +304,23 @@ export async function runIdleFollowups(): Promise<number> {
           .maybeSingle()
         if (general && (general.trigger_config as Record<string, unknown> | null)?.internal_only !== true) {
           candidates = [{ id: general.id, name: general.name }]
+        }
+      }
+      if (last.sender_type === 'bot' && candidates.length > 0) {
+        // A greeting block may have run already; that does not mean the
+        // selected course block was sent. Compare only the selected block.
+        const { data: priorRuns, error: logError } = await db
+          .from('automation_logs')
+          .select('automation_id')
+          .eq('account_id', c.account_id)
+          .eq('contact_id', c.contact_id)
+          .eq('automation_id', candidates[0].id)
+          .gte('created_at', customer.created_at)
+          .limit(1)
+        if (logError) continue
+        if (priorRuns?.length) {
+          await claimFollowup(db, c)
+          continue
         }
       }
       const claim = await claimFollowup(db, c)
