@@ -29,6 +29,7 @@ import {
   PanelRightClose,
   MoreVertical,
   ContactRound,
+  Pin,
 } from 'lucide-react';
 import { format, isToday, isYesterday, differenceInHours } from 'date-fns';
 import { useTranslations } from 'next-intl';
@@ -202,7 +203,7 @@ export function MessageThread({
   const tTimer = useTranslations('Inbox.sessionTimer');
   const tQuote = useTranslations('Inbox.replyQuote');
 
-  const { user } = useAuth();
+  const { user, accountId } = useAuth();
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -225,6 +226,8 @@ export function MessageThread({
     } | null>(null),
     [transferring, setTransferring] = useState(false);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
+  const [pinnedMessageIds, setPinnedMessageIds] = useState<string[]>([]);
+  const pinnedConversationRef = useRef<string | null>(null);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
   // parent's resyncToken); the 700ms spin is just feedback so the click
@@ -349,6 +352,38 @@ export function MessageThread({
 
   const conversationId = conversation?.id;
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
+
+  useEffect(() => {
+    if (!conversationId || !user) {
+      pinnedConversationRef.current = null;
+      setPinnedMessageIds([]);
+      return;
+    }
+    if (pinnedConversationRef.current !== conversationId) {
+      pinnedConversationRef.current = conversationId;
+      setPinnedMessageIds([]);
+    }
+    let cancelled = false;
+    void createClient().from('message_pins').select('message_id').eq('conversation_id', conversationId)
+      .eq('user_id', user.id).order('created_at', { ascending: false }).then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { console.error('Failed to fetch pinned messages:', error); return; }
+        setPinnedMessageIds((data ?? []).map(row => row.message_id));
+      });
+    return () => { cancelled = true; };
+  }, [conversationId, user, resyncToken]);
+
+  const togglePin = async (messageId: string) => {
+    if (!conversationId || !user || !accountId) return;
+    const pinned = pinnedMessageIds.includes(messageId);
+    const db = createClient();
+    const { error } = pinned
+      ? await db.from('message_pins').delete().eq('user_id', user.id).eq('message_id', messageId)
+      : await db.from('message_pins').insert({ user_id: user.id, account_id: accountId,
+          conversation_id: conversationId, message_id: messageId });
+    if (error) { toast.error('No se pudo cambiar el mensaje anclado.'); return; }
+    setPinnedMessageIds(current => pinned ? current.filter(id => id !== messageId) : [messageId, ...current]);
+  };
 
   // Fetch messages whenever the selected conversation changes. Kept
   // separate from the unread-reset effect so that incoming messages
@@ -1371,6 +1406,20 @@ export function MessageThread({
         </SheetContent>
       </Sheet>
 
+      {pinnedMessageIds.some(id => messagesById.has(id)) && (
+        <div className="flex max-h-24 shrink-0 flex-col gap-1 overflow-y-auto border-b border-border bg-card/90 px-3 py-2" aria-label="Mensajes anclados">
+          {pinnedMessageIds.map(id => {
+            const pinnedMessage = messagesById.get(id);
+            if (!pinnedMessage) return null;
+            return <button key={id} type="button" className="flex items-center gap-2 truncate text-left text-xs text-foreground hover:text-primary"
+              onClick={() => document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+              <Pin className="h-3 w-3 shrink-0" />
+              <span className="truncate">{pinnedMessage.content_text || `[${pinnedMessage.content_type}]`}</span>
+            </button>;
+          })}
+        </div>
+      )}
+
       {/* Messages Area */}
       <div ref={scrollRef} onScroll={(event) => {
         const el = event.currentTarget;
@@ -1430,6 +1479,8 @@ export function MessageThread({
                       <MessageActions
                         key={msg.id}
                         message={msg}
+                        pinned={pinnedMessageIds.includes(msg.id)}
+                        onPin={!msg.id.startsWith('temp-') ? () => togglePin(msg.id) : undefined}
                         onReply={() => handleStartReply(msg)}
                         onHide={canHideMessages && !msg.id.startsWith('temp-') ? async () => {
                           if (!user) return;
@@ -1590,7 +1641,7 @@ export function MessageThread({
       </Dialog>
       {forwardModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card w-[420px] rounded-lg p-6 shadow-xl">
+          <div className="bg-card max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-[420px] overflow-y-auto rounded-lg p-4 shadow-xl sm:p-6">
             <h2 className="mb-4 text-lg font-semibold">Reenviar mensaje</h2>
 
             <div className="mb-6 max-h-80 overflow-y-auto rounded-md border">
