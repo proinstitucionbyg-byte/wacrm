@@ -164,7 +164,8 @@ export async function runAutomationsForTrigger(
         .eq('account_id', input.accountId)
         .eq('contact_id', input.contactId)
         .in('automation_id', [INITIAL_GREETING_ID, RETURN_GREETING_ID])
-        .eq('status', 'success')
+        // A greeting with a scheduled wait is partial after its message was sent.
+        .in('status', ['success', 'partial'])
         .order('created_at', { ascending: false })
         .limit(1);
       if (greetingHistoryError) {

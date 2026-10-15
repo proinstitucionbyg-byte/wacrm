@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
     upsertCalls: [] as { table: string; payload: unknown }[],
     logAutomationIds: [] as string[],
     latestGreetingAutomationId: null as string | null,
+    greetingHistory: [] as { automation_id: string; status: string }[],
     pendingCancels: 0,
     pendingInserts: [] as Record<string, unknown>[],
   },
@@ -64,6 +65,13 @@ vi.mock("./admin-client", () => {
       }
       if (type === "update") return { data: null, error: null };
       if (ops.filters.some(([operator, key]) => operator === 'in' && key === 'automation_id')) {
+        if (state.greetingHistory.length > 0) {
+          const statuses = ops.filters.find(([operator, key]) => operator === 'in' && key === 'status')?.[2] as string[] | undefined;
+          const exactStatus = ops.filters.find(([operator, key]) => operator === 'eq' && key === 'status')?.[2];
+          return { data: state.greetingHistory.filter((entry) =>
+            statuses ? statuses.includes(entry.status) : exactStatus === undefined || entry.status === exactStatus,
+          ).slice(0, 1), error: null };
+        }
         return { data: state.latestGreetingAutomationId
           ? [{ automation_id: state.latestGreetingAutomationId }] : [], error: null };
       }
@@ -165,6 +173,7 @@ beforeEach(() => {
   h.state.upsertCalls = [];
   h.state.logAutomationIds = [];
   h.state.latestGreetingAutomationId = null;
+  h.state.greetingHistory = [];
   h.state.pendingCancels = 0;
   h.state.pendingInserts = [];
 });
@@ -435,6 +444,19 @@ describe('greeting continuity dispatch', () => {
     expect(matched).toBe(true);
     expect(h.state.logAutomationIds).toEqual([]);
     expect(h.state.pendingCancels).toBe(0);
+  });
+
+  it('recognizes the new initial greeting even when a wait left its log partial', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = greetings;
+    h.state.greetingHistory = [
+      { automation_id: INITIAL_GREETING_ID, status: 'partial' },
+      { automation_id: RETURN_GREETING_ID, status: 'success' },
+    ];
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Hola!', conversation_id: 'chat', previous_inbound_at: '2026-10-12T14:00:00.000Z',
+        inbound_at: '2026-10-12T15:00:00.000Z' } });
+    expect(h.state.logAutomationIds).toEqual([RETURN_GREETING_ID]);
   });
 
   it('starts a new cycle after three hours without a customer message', async () => {

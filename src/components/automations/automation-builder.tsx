@@ -22,6 +22,7 @@ import {
   TagIcon,
   UserCheck,
   PencilLine,
+  Copy,
   Briefcase,
   Hourglass,
   GitBranch,
@@ -797,6 +798,16 @@ steps: toApiSteps(state.steps),
           placeholder={t("untitled")}
           className="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:bg-muted focus:outline-none sm:text-base"
         />
+        {initial.id && (
+          <Button type="button" variant="outline" size="sm" title={`Código: ${initial.id}`}
+            aria-label="Copiar código de automatización"
+            onClick={() => void navigator.clipboard.writeText(initial.id!)
+              .then(() => toast.success("Código de automatización copiado"))
+              .catch(() => toast.error("No se pudo copiar el código"))}>
+            <Copy className="h-4 w-4" />
+            <span className="hidden md:inline">Copiar código</span>
+          </Button>
+        )}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="hidden sm:inline">{t("active")}</span>
           <Switch
@@ -814,6 +825,11 @@ steps: toApiSteps(state.steps),
           {isEditing ? t("save") : t("saveDraft")}
         </Button>
       </header>
+      {initial.id && (
+        <p className="border-b border-border bg-card/60 px-4 py-1.5 text-[11px] text-muted-foreground">
+          Código de esta automatización: <code className="break-all text-foreground">{initial.id}</code>
+        </p>
+      )}
 
       {/* Canvas */}
       <div className="relative flex-1 overflow-y-auto">
@@ -1189,6 +1205,15 @@ function StepRenderer({
               className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")}
             />
           </button>
+          {parentScope.kind === "root" && (
+            <button type="button" className="mb-2 ml-4 inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label={`Copiar código del bloque A${index + 1}`}
+              onClick={() => void navigator.clipboard.writeText(`A${index + 1}`)
+                .then(() => toast.success(`Bloque A${index + 1} copiado`))
+                .catch(() => toast.error("No se pudo copiar el código"))}>
+              <Copy className="h-3 w-3" /> A{index + 1}
+            </button>
+          )}
           {expanded && (
             <div className="border-t border-border px-4 py-3">
               <StepEditor
@@ -1581,13 +1606,15 @@ function StepEditor({
           </FieldBlock>
           <div className="grid grid-cols-2 gap-3">
             <FieldBlock label="Desde el bloque (opcional)">
-              <Input type="number" min={1} step={1} value={(cfg.start_step as number | undefined) ?? ""}
-                onChange={(e) => set({ start_step: e.target.value ? Number(e.target.value) : undefined })}
+              <Input type="text" inputMode="numeric" value={cfg.start_step ? `A${cfg.start_step}` : ""}
+                onKeyDown={(e) => { if (e.key.toLowerCase() === "a") e.preventDefault() }}
+                onChange={(e) => { const match = /^A?([1-9]\d*)$/i.exec(e.target.value.trim()); set({ start_step: match ? Number(match[1]) : undefined }) }}
                 placeholder="A1" className="bg-muted text-foreground" />
             </FieldBlock>
             <FieldBlock label="Hasta el bloque (opcional)">
-              <Input type="number" min={1} step={1} value={(cfg.end_step as number | undefined) ?? ""}
-                onChange={(e) => set({ end_step: e.target.value ? Number(e.target.value) : undefined })}
+              <Input type="text" inputMode="numeric" value={cfg.end_step ? `A${cfg.end_step}` : ""}
+                onKeyDown={(e) => { if (e.key.toLowerCase() === "a") e.preventDefault() }}
+                onChange={(e) => { const match = /^A?([1-9]\d*)$/i.exec(e.target.value.trim()); set({ end_step: match ? Number(match[1]) : undefined }) }}
                 placeholder="A5" className="bg-muted text-foreground" />
             </FieldBlock>
           </div>
