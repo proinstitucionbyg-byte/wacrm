@@ -470,6 +470,40 @@ describe('greeting continuity dispatch', () => {
   });
 });
 
+describe('overlapping keyword routes', () => {
+  it('ignores a blank keyword rather than matching every inbound text', () => {
+    const automation = { ...automationWithUpdateStep(), trigger_type: 'keyword_match',
+      trigger_config: { keywords: ['', 'farmacia'], match_type: 'contains' } } as Automation;
+    expect(triggerMatches(automation, { message_text: 'Quiero nutrición' })).toBe(false);
+    expect(triggerMatches(automation, { message_text: 'Quiero farmacia' })).toBe(true);
+  });
+  it('runs only the most specific block for one inbound message', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [
+      { ...automationWithUpdateStep(), id: 'broad', trigger_type: 'keyword_match',
+        trigger_config: { keywords: ['super promo'], match_type: 'contains' } },
+      { ...automationWithUpdateStep(), id: 'course', trigger_type: 'keyword_match',
+        trigger_config: { keywords: ['super promo farmacia'], match_type: 'contains' } },
+    ];
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Quiero la Super Promo Farmacia', conversation_id: 'chat' } });
+    expect(h.state.logAutomationIds).toEqual(['course']);
+  });
+
+  it('uses the older block when exact keywords have equal specificity', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [
+      { ...automationWithUpdateStep(), id: 'newer', created_at: '2026-10-12', trigger_type: 'keyword_match',
+        trigger_config: { keywords: ['quiero inscribirme'], match_type: 'exact' } },
+      { ...automationWithUpdateStep(), id: 'older', created_at: '2026-10-10', trigger_type: 'keyword_match',
+        trigger_config: { keywords: ['quiero inscribirme'], match_type: 'exact' } },
+    ];
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Quiero inscribirme', conversation_id: 'chat' } });
+    expect(h.state.logAutomationIds).toEqual(['older']);
+  });
+});
+
 describe("update_contact_field — custom fields", () => {
   it("upserts contact_custom_values when the field is account-owned", async () => {
     h.state.owned = { id: "c1" };

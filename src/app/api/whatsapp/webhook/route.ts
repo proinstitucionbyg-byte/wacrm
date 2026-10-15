@@ -14,6 +14,7 @@ import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { handleTeacherInbound } from '@/lib/matriculas/teachers'
 import { routeInboundSales } from '@/lib/ai/sales-routing'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
+import { inboundRoutingText } from '@/lib/automations/routing-text'
 import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
 import { startEnrollmentSequence } from '@/lib/matriculas/sequence'
 import { collectConversationEnrollments } from '@/lib/matriculas/collect'
@@ -657,6 +658,7 @@ async function processMessage(
   const parsedContent = await parseMessageContent(message, accessToken)
   const { mediaUrl, mediaType, interactiveReplyId } = parsedContent
   let { contentText } = parsedContent
+  let audioTranscript: string | null = null
       // Audio: transcribe so the AI, keyword automations and advisors can
   // read what the customer said. Best-effort, never throws.
   if (message.type === 'audio' && message.audio?.id) {
@@ -666,6 +668,7 @@ async function processMessage(
       mediaId: message.audio.id,
       accessToken,
     })
+    audioTranscript = transcript
     contentText = transcript?.trim()
       ? `🎤 ${transcript.trim()}`
       : '🎤 [Audio que no se pudo entender]'
@@ -838,7 +841,7 @@ const lastHuman = conversation.last_human_message_at
   ? new Date(conversation.last_human_message_at).getTime()
   : 0
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
-const inboundText = contentText ?? message.text?.body ?? ''
+const inboundText = inboundRoutingText(contentText ?? message.text?.body ?? null, audioTranscript)
 const automatedInbound = isLikelyAutomatedInbound(inboundText)
 
 const followupReplyHandled = interactiveReplyId
@@ -854,7 +857,7 @@ const followupReplyHandled = interactiveReplyId
 // Academic cancellation notices must not launch the sales funnel.
 let teacherHandled = false
 try {
-  teacherHandled = await handleTeacherInbound(supabaseAdmin(), { accountId, conversationId: conversation.id, contactId: contactRecord.id, userId: configOwnerUserId, messageId: message.id, text: contentText ?? message.text?.body ?? '', humanRecentlyActive })
+  teacherHandled = await handleTeacherInbound(supabaseAdmin(), { accountId, conversationId: conversation.id, contactId: contactRecord.id, userId: configOwnerUserId, messageId: message.id, text: inboundText, humanRecentlyActive })
 } catch (error) { console.error('[teacher] cancellation requires review', error) }
 // Assignment makes the lead available to an adviser. It does not consume the
 // inbound or pause the existing flow/AI; human replies use their own pause.
@@ -882,7 +885,7 @@ if (!automationPaused) {
           }
         : {
             kind: 'text',
-            text: contentText ?? message.text?.body ?? '',
+            text: inboundText,
             meta_message_id: message.id,
           },
     isFirstInboundMessage,
@@ -950,13 +953,8 @@ for (const triggerType of automationTriggers) {
   !interactiveReplyId &&
   (inboundText.trim() || imageAnalysis !== null)
 ) {
-    // La IA toma la conversación: se cancelan los pasos de espera pendientes
-  await supabaseAdmin()
-    .from('automation_pending_executions')
-    .update({ status: 'cancelled' })
-    .eq('contact_id', contactRecord.id)
-    .eq('status', 'pending')
-    .is('context->>enrollment_sequence_id', null)
+    // An AI answer to an unrelated question is not a route change. Existing
+    // scheduled steps continue until an explicit automation or adviser takes over.
   await dispatchInboundToAiReply({
     accountId,
     conversationId: conversation.id,

@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 const transport = vi.hoisted(() => vi.fn())
 const convertAudio = vi.hoisted(() => vi.fn())
+const pauseAdmin = vi.hoisted(() => vi.fn())
 vi.mock('./instagram-audio', () => ({ instagramAudioUrl: convertAudio }))
+vi.mock('@/lib/flows/admin-client', () => ({ supabaseAdmin: pauseAdmin }))
 vi.mock('./meta-api', async importOriginal => ({ ...await importOriginal<typeof import('./meta-api')>(), sendSocialPart: transport }))
 import { sendSocialMessage, type SocialSendInput } from './send'
 
@@ -30,6 +32,7 @@ beforeEach(() => {
   vi.stubEnv('INSTAGRAM_ACCESS_TOKEN', 'test-token')
   transport.mockResolvedValue('meta-confirmation')
   convertAudio.mockResolvedValue('https://example.org/converted.m4a')
+  pauseAdmin.mockReturnValue(database([{ error: null }]).db)
 })
 afterEach(() => vi.unstubAllEnvs())
 describe('shared social send', () => {
@@ -54,8 +57,18 @@ describe('shared social send', () => {
   })
   it('stores only a confirmed send, retaining the agent and text', async () => {
     const { db, writes } = database([{ data: { id: 'conv' } }, { data: { id: 'internal' } }, { error: null }])
+    const pause = database([{ error: null }])
+    pauseAdmin.mockReturnValue(pause.db)
     expect(await sendSocialMessage(db, { ...input, senderId: 'agent' })).toEqual({ whatsapp_message_id: 'meta-confirmation', message_id: 'internal' })
     expect(writes[0]).toEqual(['messages', expect.objectContaining({ sender_type: 'agent', sender_id: 'agent', message_id: 'meta-confirmation', content_text: input.text })])
+    expect(pauseAdmin).toHaveBeenCalledOnce()
+    expect(pause.filters).toContainEqual(['flow_runs', 'account_id', 'account'])
+    expect(pause.filters).toContainEqual(['flow_runs', 'contact_id', 'contact'])
+  })
+  it('does not pause a Flow for an automated social send', async () => {
+    const { db } = database([{ data: { id: 'conv' } }, { data: { id: 'internal' } }, { error: null }])
+    await sendSocialMessage(db, input)
+    expect(pauseAdmin).not.toHaveBeenCalled()
   })
   it('does not save a fake success if Meta rejects the request', async () => {
     transport.mockRejectedValue(new Error('Meta no autoriza'))
@@ -70,7 +83,8 @@ describe('shared social send', () => {
   it('retains a delivered image if its following caption fails', async () => {
     transport.mockResolvedValueOnce('image-confirmation').mockRejectedValueOnce(new Error('Meta denied caption'))
     const { db, writes } = database([{ data: { id: 'conv' } }, { data: { id: 'image' } }, { error: null }])
-    await expect(sendSocialMessage(db, { ...input, messageType: 'image', mediaUrl: 'https://example.org/a.jpg' })).rejects.toThrow('Meta denied caption')
+    await expect(sendSocialMessage(db, { ...input, senderId: 'agent', messageType: 'image', mediaUrl: 'https://example.org/a.jpg' })).rejects.toThrow('Meta denied caption')
     expect(writes.filter(write => (write as unknown[])[0] === 'messages')).toHaveLength(1)
+    expect(pauseAdmin).toHaveBeenCalledOnce()
   })
 })

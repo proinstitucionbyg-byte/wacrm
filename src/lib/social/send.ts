@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isSocialChannel, socialConfiguration, socialMessageParts, sendSocialPart, type SocialMessageInput } from './meta-api'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 export interface SocialSendInput extends SocialMessageInput {
   accountId: string
@@ -46,6 +47,19 @@ export async function sendSocialMessage(db: SupabaseClient, input: SocialSendInp
       last_message_text: part.contentText || `[${part.contentType}]`, last_message_at: now, updated_at: now,
     }).eq('id', input.conversationId).eq('account_id', input.accountId)
     if (updateError) throw new Error('Mensaje enviado; no se actualizó la vista del chat. Revisa antes de repetirlo.')
+    if (input.senderId) {
+      // Match WhatsApp manual sends: an adviser reply yields any active Flow.
+      // Pause after each confirmed part, so a later caption failure cannot
+      // leave an automated Flow competing with a message already delivered.
+      try {
+        const { error: pauseError } = await supabaseAdmin().from('flow_runs').update({
+          status: 'paused_by_agent', ended_at: now, end_reason: 'agent_replied',
+        }).eq('account_id', input.accountId).eq('contact_id', input.contactId).eq('status', 'active')
+        if (pauseError) console.error('[flows] social pause-on-agent-send failed:', pauseError.message)
+      } catch (pauseError) {
+        console.error('[flows] social pause-on-agent-send threw:', pauseError)
+      }
+    }
   }
   // Legacy property retained for the existing flow/enrollment engines.
   return { whatsapp_message_id: metaId, message_id: internalId }

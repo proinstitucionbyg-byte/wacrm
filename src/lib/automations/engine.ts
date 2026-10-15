@@ -146,6 +146,16 @@ export async function runAutomationsForTrigger(
     const ordinaryMatches = (automations as Automation[]).filter((automation) =>
       !isGreetingAutomation(automation.id) && triggerMatches(automation, input.context),
     );
+    // One inbound text chooses one route. A broad keyword can otherwise run
+    // beside a course-specific block and send two incompatible sequences.
+    if (input.triggerType === 'keyword_match') {
+      ordinaryMatches.sort((left, right) =>
+        matchingKeywordSpecificity(right, input.context?.message_text) - matchingKeywordSpecificity(left, input.context?.message_text)
+        || (left.created_at ?? '').localeCompare(right.created_at ?? '')
+        || left.id.localeCompare(right.id),
+      )
+      ordinaryMatches.splice(1)
+    }
     const selectedGreetingId = greetingAutomationId(
       input.context?.previous_inbound_at,
       input.context?.inbound_at,
@@ -1022,6 +1032,7 @@ export function triggerMatches(automation: Automation, ctx: AutomationContext | 
     const haystack = cfg.case_sensitive ? text : text.toLowerCase()
     return cfg.keywords.some((raw) => {
       const k = cfg.case_sensitive ? raw : raw.toLowerCase()
+      if (!k.trim()) return false
       return cfg.match_type === 'exact' ? haystack === k : haystack.includes(k)
     })
   }
@@ -1039,6 +1050,18 @@ export function triggerMatches(automation: Automation, ctx: AutomationContext | 
   }
 
   return true
+}
+
+function matchingKeywordSpecificity(automation: Automation, messageText: string | undefined): number {
+  if (automation.trigger_type !== 'keyword_match' || !messageText) return 0
+  const cfg = automation.trigger_config as KeywordMatchTriggerConfig
+  const text = cfg.case_sensitive ? messageText : messageText.toLowerCase()
+  return Math.max(0, ...cfg.keywords.map((keyword) => {
+    const match = cfg.case_sensitive ? keyword : keyword.toLowerCase()
+    if (!match.trim()) return 0
+    if (!(cfg.match_type === 'exact' ? text === match : text.includes(match))) return 0
+    return (cfg.match_type === 'exact' ? 10_000 : 0) + match.length
+  }))
 }
 
 async function evaluateCondition(cfg: ConditionStepConfig, args: ExecuteArgs): Promise<boolean> {

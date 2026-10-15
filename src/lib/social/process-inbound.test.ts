@@ -62,6 +62,30 @@ describe('social intake', () => {
     expect(filters).toContainEqual(['contacts', 'account_id', 'acct'])
     expect(mocks.collect).toHaveBeenCalledWith(db, 'acct', 'conv')
   })
+  it('passes transcribed voice text into automation routing', async () => {
+    mocks.transcribe.mockResolvedValue('Quiero información de nutrición')
+    const { db, writes } = database([ok({ id: 'contact', phone: '' }), ok({ id: 'conv' }), ok(),
+      { count: 0 }, ok({ id: 'msg' }), ok()])
+    const context = await storeSocialInbound(db, 'instagram', account, {
+      ...incoming, text: '', parts: [{ type: 'audio', url: 'https://cdn.example.org/voice.ogg', text: null }],
+    })
+    expect(context?.text).toBe('Quiero información de nutrición')
+    expect(writes).toContainEqual(expect.objectContaining({ table: 'messages', value: expect.objectContaining({
+      content_type: 'audio', content_text: '🎤 Quiero información de nutrición',
+    }) }))
+  })
+  it('asks for clarification when a social voice message cannot be transcribed', async () => {
+    mocks.transcribe.mockResolvedValue(null)
+    const { db } = database([ok({ id: 'contact', phone: '' }), ok({ id: 'conv' }), ok(),
+      { count: 0 }, ok({ id: 'msg' }), ok()])
+    const context = await storeSocialInbound(db, 'instagram', account, {
+      ...incoming, text: '', parts: [{ type: 'audio', url: 'https://cdn.example.org/voice.ogg', text: null }],
+    })
+    expect(context?.text).toBe('🎤 [Audio que no se pudo entender]')
+    const { db: dispatchDb } = database([ok({ id: 'conv', ai_enabled: true, automation_enabled: true })])
+    await dispatchSocialInbound(dispatchDb, context!)
+    expect(mocks.ai).toHaveBeenCalledOnce()
+  })
   it('passes the prior inbound time to continuity routing', async () => {
     const previous = '2026-10-10T22:00:00Z'
     const { db } = database([ok({ id: 'contact', phone: '' }), ok({ id: 'conv' }), ok(),
@@ -127,11 +151,11 @@ describe('social funnel dispatch', () => {
     expect(mocks.automations).not.toHaveBeenCalled()
     expect(mocks.ai).not.toHaveBeenCalled()
   })
-  it('cancels ordinary waits without cancelling the welcome deadline', async () => {
-    const { db, filters, writes } = database([ok({ id: 'conv' }), ok()])
+  it('preserves scheduled waits when AI answers a free-form question', async () => {
+    const { db, writes } = database([ok({ id: 'conv' })])
     await dispatchSocialInbound(db, dispatch)
-    expect(writes).toContainEqual({ table: 'automation_pending_executions', kind: 'update', value: { status: 'cancelled' } })
-    expect(filters).toContainEqual(['automation_pending_executions', 'account_id', 'acct'])
+    expect(writes.some(write => write.table === 'automation_pending_executions')).toBe(false)
+    expect(mocks.ai).toHaveBeenCalledOnce()
   })
   it('never dispatches an inaccessible conversation', async () => {
     const { db } = database([ok()])

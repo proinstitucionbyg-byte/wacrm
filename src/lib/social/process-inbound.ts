@@ -86,7 +86,7 @@ export async function storeSocialInbound(db: SupabaseClient, channel: SocialChan
     if (part.type === 'audio' && part.url) {
       const transcript = await transcribeSavedAudio({ db, accountId: account.id, url: part.url })
       text = transcript ? `🎤 ${transcript}` : '🎤 [Audio que no se pudo entender]'
-      if (transcript) dispatchText = [dispatchText, transcript].filter(Boolean).join('\n')
+      dispatchText = [dispatchText, transcript || text].filter(Boolean).join('\n')
     }
     const inserted = await db.from('messages').insert({
       id: internalId, conversation_id: conversation.id, sender_type: 'customer', content_type: part.type,
@@ -147,9 +147,7 @@ export async function dispatchSocialInbound(db: SupabaseClient, input: SocialDis
     }
   }
   if (conversation.ai_enabled !== false && !humanRecentlyActive && !consumed && !matched && !input.replyId && (input.text.trim() || input.hasImageEvidence)) {
-    const cancelled = await db.from('automation_pending_executions').update({ status: 'cancelled' }).eq('contact_id', input.contactId).eq('account_id', input.accountId)
-      .eq('status', 'pending').is('context->>enrollment_sequence_id', null)
-    if (cancelled.error) throw cancelled.error
+    // Answering a free-form question does not replace the scheduled sequence.
     await dispatchInboundToAiReply({ accountId: input.accountId, contactId: input.contactId, conversationId: input.conversationId, configOwnerUserId: input.userId })
   }
 }

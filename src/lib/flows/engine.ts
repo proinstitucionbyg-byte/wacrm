@@ -293,7 +293,7 @@ async function isDuplicateInbound(
   // through — small.
   const { data: runs } = await db
     .from("flow_runs")
-    .select("id, automation_enabled, last_human_message_at")
+    .select("id")
     .eq("account_id", accountId)
     .eq("contact_id", contactId);
   if (!runs?.length) return false;
