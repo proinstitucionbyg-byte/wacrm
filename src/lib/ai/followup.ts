@@ -9,6 +9,7 @@ import { findConnectedAgentForArea } from './handoff-routing'
 import { buildHandoffSummary } from './handoff'
 import { buildHandoffNotice } from './business-hours'
 import { isLikelyAutomatedInbound } from './automated-inbound'
+import { courseKey } from '@/lib/matriculas/calendar'
 
 const IDLE_MS = 10 * 60 * 1000
 const HUMAN_PAUSE_MS = 5 * 60 * 1000
@@ -17,6 +18,15 @@ const REFUSAL = /no me interesa|no gracias|ya no|no quiero/i
 export const FOLLOWUP_CONTINUE_ID = 'vortex_followup_continue'
 export const FOLLOWUP_SALES_ID = 'vortex_followup_ventas'
 export const FOLLOWUP_LOYALTY_ID = 'vortex_followup_fidelizacion'
+
+export function canFollowUpAfterLastMessage(
+  senderType: string,
+  text: string | null,
+  automationAlreadyRan: boolean,
+): boolean {
+  if (senderType === 'customer') return true
+  return senderType === 'bot' && /[?¿]/.test(text ?? '') && !automationAlreadyRan
+}
 
 /** Handle the Continue → area menu sent by the idle follow-up. */
 export async function handleIdleFollowupReply(args: {
@@ -241,29 +251,80 @@ export async function runIdleFollowups(): Promise<number> {
 
       const { data: last } = await db
         .from('messages')
-        .select('sender_type, content_text')
+        .select('sender_type, content_text, created_at')
         .eq('conversation_id', c.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (last?.sender_type !== 'customer') continue
+      if (!last || !canFollowUpAfterLastMessage(last.sender_type, last.content_text, false)) continue
 
-      if (isLikelyAutomatedInbound(last.content_text)) {
+      const { data: customer } = last.sender_type === 'customer'
+        ? { data: last }
+        : await db.from('messages')
+            .select('sender_type, content_text, created_at')
+            .eq('conversation_id', c.id)
+            .eq('sender_type', 'customer')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+      if (!customer || now - Date.parse(customer.created_at) >= WINDOW_MS) continue
+      // A bot question also needs a follow-up when the customer goes silent.
+      // Never restart an automation that already ran after that customer reply.
+      if (last.sender_type === 'bot') {
+        const { data: priorAutomation, error: logError } = await db
+          .from('automation_logs')
+          .select('id')
+          .eq('account_id', c.account_id)
+          .eq('contact_id', c.contact_id)
+          .gte('created_at', customer.created_at)
+          .limit(1)
+          .maybeSingle()
+        if (logError) continue
+        if (priorAutomation) {
+          await claimFollowup(db, c)
+          continue
+        }
+      }
+
+      if (isLikelyAutomatedInbound(customer.content_text)) {
         await claimFollowup(db, c)
         continue
       }
 
-      if (REFUSAL.test(last.content_text ?? '')) {
+      if (REFUSAL.test(customer.content_text ?? '')) {
         await claimFollowup(db, c)
         continue
       }
+      // The idle follow-up must not cancel a scheduled step of another flow.
+      const { data: pending, error: pendingError } = await db
+        .from('automation_pending_executions')
+        .select('id')
+        .eq('account_id', c.account_id)
+        .eq('contact_id', c.contact_id)
+        .eq('status', 'pending')
+        .limit(1)
+        .maybeSingle()
+      if (pendingError || pending) continue
       const config = await loadAiConfig(db, c.account_id)
       if (!config || !config.autoReplyEnabled) continue
 
       const messages = await buildConversationContext(db, c.id)
-      const candidates = messages.length > 0
+      let candidates = messages.length > 0
         ? await findCandidateAutomations(db, c.account_id, messages, 3)
         : []
+      const customerText = customer.content_text ?? ''
+      if (/\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText)) {
+        const { data: general } = await db.from('automations')
+          .select('id, name, trigger_config')
+          .eq('account_id', c.account_id)
+          .eq('is_active', true)
+          .eq('name', 'CURSOS GENERALES')
+          .limit(1)
+          .maybeSingle()
+        if (general && (general.trigger_config as Record<string, unknown> | null)?.internal_only !== true) {
+          candidates = [{ id: general.id, name: general.name }]
+        }
+      }
       const claim = await claimFollowup(db, c)
       if (!claim) continue
 
