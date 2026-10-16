@@ -7,7 +7,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { findContactByBsuid } from '@/lib/contacts/dedupe'
 import { isBsuid } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
-import { runAutomationsForTrigger } from '@/lib/automations/engine'
+import { resumeDeliveredMessage, runAutomationsForTrigger } from '@/lib/automations/engine'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
@@ -439,6 +439,9 @@ async function handleStatusUpdate(status: {
     const conv = msgRow.conversations as { account_id: string } | null
     const accountId = conv?.account_id
     if (accountId) {
+      if (status.status === 'delivered' || status.status === 'read') {
+        await resumeDeliveredMessage(status.id, msgRow.conversation_id, accountId)
+      }
       await dispatchWebhookEvent(
         supabaseAdmin(),
         accountId,

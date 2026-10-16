@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
     greetingHistory: [] as { automation_id: string; status: string }[],
     pendingCancels: 0,
     pendingInserts: [] as Record<string, unknown>[],
+    pendingRows: [] as Record<string, unknown>[],
     messageStatus: 'sent' as 'sent' | 'delivered' | 'read' | 'failed',
   },
 }));
@@ -107,8 +108,10 @@ vi.mock("./admin-client", () => {
     }
     if (table === "automation_pending_executions" && type === "update") {
       state.pendingCancels++;
-      return { data: null, error: null };
+      return { data: (ops.payload as { status?: string })?.status === 'running'
+        ? { id: ops.filters.find(([, key]) => key === 'id')?.[2] } : null, error: null };
     }
+    if (table === "automation_pending_executions") return { data: state.pendingRows, error: null };
     return { data: null, error: null };
   }
 
@@ -130,6 +133,7 @@ vi.mock("./admin-client", () => {
       gte: (k: string, v: unknown) => (ops.filters.push(['gte', k, v]), b),
       lte: (k: string, v: unknown) => (ops.filters.push(['lte', k, v]), b),
       is: () => b,
+      contains: () => b,
       order: () => b,
       limit: () => b,
       single: () => Promise.resolve(resolve(ops)),
@@ -158,7 +162,7 @@ vi.mock("./meta-send", () => ({
   engineSendMedia: vi.fn(async () => ({ whatsapp_message_id: "wamid.image" })),
 }));
 
-import { resumePendingExecution, runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
+import { resumeDeliveredMessage, resumePendingExecution, runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
 import { engineSendInteractive, engineSendMedia } from './meta-send';
 import { INITIAL_GREETING_ID, RETURN_GREETING_ID } from './greeting-continuity';
 import type { Automation } from "@/types";
@@ -181,10 +185,39 @@ beforeEach(() => {
   h.state.greetingHistory = [];
   h.state.pendingCancels = 0;
   h.state.pendingInserts = [];
+  h.state.pendingRows = [];
   h.state.messageStatus = 'sent';
 });
 
 describe('WhatsApp delivery order', () => {
+  it('resumes the next block immediately when Meta confirms delivery', async () => {
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [
+      { id: 'buttons', automation_id: 'a1', step_type: 'send_buttons', position: 1,
+        parent_step_id: null, step_config: { kind: 'buttons', body: 'Continua', buttons: [{ id: 'one', title: 'Seguir' }] } },
+    ];
+    h.state.messageStatus = 'delivered';
+    h.state.pendingRows = [{
+      id: 'pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
+      contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
+      next_step_position: 1, context: { conversation_id: 'chat', await_delivery_message_id: 'wamid.text' },
+    }];
+    await resumeDeliveredMessage('wamid.text', 'chat', ACCOUNT);
+    expect(engineSendInteractive).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restart a keyword sequence while its delivery is pending', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [{ ...automationWithUpdateStep(), trigger_type: 'keyword_match',
+      trigger_config: { keywords: ['matricularme'] } }];
+    h.state.pendingRows = [{ context: { conversation_id: 'chat', await_delivery_message_id: 'wamid.text' } }];
+    const matched = await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match',
+      contactId: 'c1', context: { conversation_id: 'chat', message_text: 'Cómo matricularme' } });
+    expect(matched).toBe(true);
+    expect(h.state.logAutomationIds).toHaveLength(0);
+    expect(h.state.pendingCancels).toBe(0);
+  });
+
   it('does not send a later block until Meta confirms the prior image was delivered', async () => {
     h.state.owned = { id: 'c1' };
     h.state.automations = [automationWithUpdateStep()];
@@ -227,12 +260,12 @@ describe('WhatsApp delivery order', () => {
         parent_step_id: null, step_config: { kind: 'buttons', body: 'Continua', buttons: [{ id: 'one', title: 'Seguir' }] } },
     ];
     await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
-    const context = { ...h.state.pendingInserts[0].context as Record<string, unknown>,
+    const context = { ...h.state.pendingInserts[0].context as Record<string, unknown>, conversation_id: 'chat',
       await_delivery_started_at: new Date(Date.now() - 120_000).toISOString() };
     await resumePendingExecution({
       id: 'pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
       contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
-      next_step_position: 1, context: context as { conversation_id: string },
+      next_step_position: 1, context,
     });
     expect(engineSendInteractive).toHaveBeenCalledTimes(1);
   });

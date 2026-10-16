@@ -197,6 +197,12 @@ export async function runAutomationsForTrigger(
 
     for (const automation of selectedAutomations) {
       matched = true;
+      // A repeated tap on the same option must not restart a sequence that is
+      // only waiting for Meta to confirm the previous block.
+      if (input.contactId && input.context?.conversation_id && !isGreetingAutomation(automation.id)
+          && await hasActiveDeliveryWait(db, input.accountId, input.contactId, automation.id, input.context.conversation_id)) {
+        continue;
+      }
       // A greeting is only a menu. Its unanswered buttons must not cancel an
       // 18-hour sales/fidelity wait already scheduled for this contact.
       if (input.contactId && !cancelledOld && !isGreetingAutomation(automation.id)) {
@@ -266,6 +272,10 @@ export async function runAutomationById(input: {
       .maybeSingle()
     if (error || !automation) return false
     if ((automation.trigger_config as Record<string,unknown>)?.internal_only && !input.sequenceId) return false
+
+    if (!input.manualAgentId && !input.sequenceId && await hasActiveDeliveryWait(
+      db, input.accountId, input.contactId, input.automationId, input.conversationId,
+    )) return true
 
     // The two existing greetings only show a menu; they preserve prior waits.
     if (!isGreetingAutomation(automation.id)) {
@@ -438,6 +448,53 @@ export async function resumePendingExecution(pending: {
     console.error('[automations] resume failed:', err)
     await markPending(pending.id, 'failed')
   }
+}
+
+/** Resume the next block as soon as Meta confirms the prior message arrived. */
+export async function resumeDeliveredMessage(messageId: string, conversationId: string, accountId: string): Promise<void> {
+  try {
+    const db = supabaseAdmin()
+    const { data: message, error: messageError } = await db.from('messages')
+      .select('status').eq('conversation_id', conversationId).eq('message_id', messageId).maybeSingle()
+    if (messageError || !['delivered', 'read'].includes(message?.status ?? '')) return
+
+    const { data: pending, error } = await db.from('automation_pending_executions')
+      .select('*').eq('account_id', accountId).eq('status', 'pending')
+      .contains('context', { conversation_id: conversationId, await_delivery_message_id: messageId })
+      .limit(10)
+    if (error) {
+      console.error('[automations] delivery resume lookup failed:', error)
+      return
+    }
+    for (const row of pending ?? []) {
+      const { data: claim, error: claimError } = await db.from('automation_pending_executions')
+        .update({ status: 'running' }).eq('id', row.id).eq('status', 'pending')
+        .select('id').maybeSingle()
+      if (claimError) {
+        console.error('[automations] delivery resume claim failed:', claimError)
+        continue
+      }
+      if (claim) await resumePendingExecution(row as Parameters<typeof resumePendingExecution>[0])
+    }
+  } catch (error) {
+    // The existing cron remains the recovery path if webhook handling fails.
+    console.error('[automations] delivery resume failed:', error)
+  }
+}
+
+async function hasActiveDeliveryWait(
+  db: ReturnType<typeof supabaseAdmin>, accountId: string, contactId: string,
+  automationId: string, conversationId: string,
+): Promise<boolean> {
+  const { data, error } = await db.from('automation_pending_executions')
+    .select('context').eq('account_id', accountId).eq('contact_id', contactId)
+    .eq('automation_id', automationId).eq('status', 'pending').limit(10)
+  if (error) {
+    console.error('[automations] active delivery lookup failed:', error)
+    return false
+  }
+  return (data ?? []).some((row) => row.context?.conversation_id === conversationId
+    && typeof row.context?.await_delivery_message_id === 'string')
 }
 
 // ------------------------------------------------------------
@@ -674,6 +731,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         })
         if (deliveryWaitError) throw new Error('No se pudo esperar la entrega del mensaje anterior')
         await appendResults(args.logId, results, 'partial', null)
+        await resumeDeliveredMessage(args.context.await_delivery_message_id, args.context.conversation_id!, args.automation.account_id)
         return
       }
     } catch (err) {
