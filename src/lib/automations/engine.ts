@@ -56,6 +56,10 @@ export interface AutomationContext {
   automation_step_end_by_id?: Record<string, number>
   /** A linked block must finish its own waits before the parent continues. */
   await_child_log_id?: string
+  /** WhatsApp accepted this message; later steps wait for its delivery webhook. */
+  await_delivery_message_id?: string
+  await_delivery_started_at?: string
+  await_delivery_fallback_ms?: number
   /** The tag id that was added, for tag_added trigger. */
   tag_id?: string
   /** Agent the conversation was assigned to, for conversation_assigned. */
@@ -357,6 +361,33 @@ export async function resumePendingExecution(pending: {
       return
     }
   }
+  if (pending.context?.await_delivery_message_id) {
+    const { data: message, error: messageError } = await db.from('messages')
+      .select('status')
+      .eq('conversation_id', pending.context.conversation_id)
+      .eq('message_id', pending.context.await_delivery_message_id)
+      .maybeSingle()
+    if (messageError || message?.status === 'failed') {
+      const reason = 'El mensaje anterior no se entregó; se detuvo la secuencia para conservar el orden'
+      await finalizeLog(pending.log_id, 'failed', reason)
+      await markPending(pending.id, 'failed')
+      await notifyDeliveryFailure(pending, reason)
+      return
+    }
+    if (message?.status !== 'delivered' && message?.status !== 'read') {
+      const startedAt = Date.parse(pending.context.await_delivery_started_at ?? '')
+      const fallbackMs = pending.context.await_delivery_fallback_ms ?? 90_000
+      if (Number.isFinite(startedAt) && Date.now() - startedAt < fallbackMs) {
+        const { error: retryError } = await db.from('automation_pending_executions')
+          .update({ status: 'pending', run_at: new Date(Date.now() + 30_000).toISOString() })
+          .eq('id', pending.id).eq('status', 'running')
+        if (retryError) await markPending(pending.id, 'failed')
+        return
+      }
+      // Some delivered WhatsApp messages never receive a delivery webhook.
+      // Continue after a short spacing window rather than losing the sale.
+    }
+  }
   if (pending.context?.await_child_log_id) {
     const childLogId = pending.context.await_child_log_id
     const { data: child, error: childError } = await db.from('automation_logs')
@@ -385,7 +416,9 @@ export async function resumePendingExecution(pending: {
     await executeStepsFrom({
       automation: automation as Automation,
       contactId: pending.contact_id,
-      context: { ...(pending.context ?? {}), await_child_log_id: undefined },
+      context: { ...(pending.context ?? {}), await_child_log_id: undefined,
+        await_delivery_message_id: undefined, await_delivery_started_at: undefined,
+        await_delivery_fallback_ms: undefined },
       parentStepId: pending.parent_step_id,
       branch: pending.branch,
       startPosition: pending.next_step_position,
@@ -528,7 +561,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   let status: 'success' | 'partial' | 'failed' = 'success'
   let errorMessage: string | null = null
 
-  for (const step of steps as AutomationStep[]) {
+  for (const [index, step] of (steps as AutomationStep[]).entries()) {
     // `wait` is the suspension point: enqueue and stop processing this
     // scope. The cron endpoint will pick it up later.
     if (step.step_type === 'wait') {
@@ -621,6 +654,28 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
           return
         }
       }
+      // Meta's send response only confirms acceptance. A following message
+      // can reach the phone first, especially when the prior one is media.
+      // Resume through the existing cron only after Meta reports delivery.
+      const nextStep = (steps as AutomationStep[])[index + 1]
+      if (args.context.await_delivery_message_id && nextStep && nextStep.step_type !== 'wait') {
+        const { error: deliveryWaitError } = await db.from('automation_pending_executions').insert({
+          automation_id: args.automation.id,
+          account_id: args.automation.account_id,
+          user_id: args.automation.user_id,
+          contact_id: args.contactId,
+          log_id: args.logId,
+          parent_step_id: args.parentStepId,
+          branch: args.branch,
+          next_step_position: nextStep.position,
+          context: args.context,
+          run_at: new Date(Date.now() + 30_000).toISOString(),
+          status: 'pending',
+        })
+        if (deliveryWaitError) throw new Error('No se pudo esperar la entrega del mensaje anterior')
+        await appendResults(args.logId, results, 'partial', null)
+        return
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       results.push({
@@ -660,6 +715,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string 
         contactId: args.contactId,
         text,
       })
+      rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId)
       args.writtenOfferText = [args.writtenOfferText, text].filter(Boolean).join('\n')
       return `sent via Meta (${whatsapp_message_id})`
     }
@@ -681,6 +737,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string 
         contactId: args.contactId,
         payload,
       })
+      rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId)
       return `interactive sent via Meta (${whatsapp_message_id})`
     }
 
@@ -716,6 +773,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string 
         language: cfg.language,
         params,
       })
+      rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId)
       return `template sent via Meta (${whatsapp_message_id})`
     }
 case 'send_media': {
@@ -759,6 +817,7 @@ case 'send_media': {
     filename: rawCfg.filename,
     transcript,
   })
+  rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId, 90_000)
 
   if (mediaType === 'image' && rawCfg.caption) {
     args.writtenOfferText = [args.writtenOfferText, rawCfg.caption].filter(Boolean).join('\n')
@@ -1004,6 +1063,22 @@ case 'send_media': {
  * manual engine POSTs. Throws if none exists — send steps have
  * no meaningful target without a conversation.
  */
+function rememberWhatsAppDelivery(args: ExecuteArgs, messageId: string, conversationId: string, fallbackMs = 30_000): void {
+  // The enrollment welcome path requires an atomic "complete" result before
+  // it marks documents sent. Do not turn that existing guarantee into a
+  // partial cron run while adding delivery pacing to ordinary automations.
+  if (args.context.enrollment_sequence_id || !messageId.startsWith('wamid.')) {
+    args.context.await_delivery_message_id = undefined
+    args.context.await_delivery_started_at = undefined
+    args.context.await_delivery_fallback_ms = undefined
+    return
+  }
+  args.context.conversation_id = conversationId
+  args.context.await_delivery_message_id = messageId
+  args.context.await_delivery_started_at = new Date().toISOString()
+  args.context.await_delivery_fallback_ms = fallbackMs
+}
+
 async function resolveConversationId(args: ExecuteArgs): Promise<string> {
   const fromCtx = args.context.conversation_id
   if (fromCtx) return fromCtx
@@ -1170,4 +1245,36 @@ async function markPending(id: string, status: 'done' | 'failed' | 'cancelled') 
     .from('automation_pending_executions')
     .update({ status })
     .eq('id', id)
+}
+
+async function notifyDeliveryFailure(
+  pending: { account_id: string; contact_id: string | null; log_id: string | null; context: AutomationContext },
+  reason: string,
+): Promise<void> {
+  if (!pending.context.conversation_id) return
+  try {
+    const db = supabaseAdmin()
+    const { data: profiles, error } = await db.from('profiles')
+      .select('user_id,account_role').eq('account_id', pending.account_id)
+    if (error) throw error
+    const admins = (profiles ?? []).filter(profile => ['owner', 'admin'].includes(profile.account_role))
+    if (!admins.length) return
+    const { error: noticeError } = await db.from('notifications').upsert(
+      admins.map(profile => ({
+        account_id: pending.account_id,
+        user_id: profile.user_id,
+        type: 'system_notice',
+        conversation_id: pending.context.conversation_id,
+        contact_id: pending.contact_id,
+        title: 'AUTOMATIZACIÓN PAUSADA · ENTREGA SIN CONFIRMAR',
+        body: `${reason}. Revisa el chat antes de reanudar o escribir de nuevo.`,
+        target_url: `/inbox?c=${pending.context.conversation_id}`,
+        dedup_key: `automation-delivery:${pending.log_id}`,
+      })),
+      { onConflict: 'account_id,user_id,dedup_key', ignoreDuplicates: true },
+    )
+    if (noticeError) throw noticeError
+  } catch (error) {
+    console.error('[automations] delivery failure notice failed:', error)
+  }
 }

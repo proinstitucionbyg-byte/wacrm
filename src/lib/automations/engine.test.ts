@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
     greetingHistory: [] as { automation_id: string; status: string }[],
     pendingCancels: 0,
     pendingInserts: [] as Record<string, unknown>[],
+    messageStatus: 'sent' as 'sent' | 'delivered' | 'read' | 'failed',
   },
 }));
 
@@ -77,6 +78,7 @@ vi.mock("./admin-client", () => {
       }
       return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
+    if (table === "messages") return { data: { status: state.messageStatus }, error: null };
     if (table === "automation_steps") {
       const automationId = ops.filters.find(
         ([operator, key]) => operator === 'eq' && key === 'automation_id',
@@ -153,15 +155,18 @@ vi.mock("./meta-send", () => ({
   engineSendText: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
   engineSendTemplate: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
   engineSendInteractive: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
+  engineSendMedia: vi.fn(async () => ({ whatsapp_message_id: "wamid.image" })),
 }));
 
 import { resumePendingExecution, runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
+import { engineSendInteractive, engineSendMedia } from './meta-send';
 import { INITIAL_GREETING_ID, RETURN_GREETING_ID } from './greeting-continuity';
 import type { Automation } from "@/types";
 
 const ACCOUNT = "acct-1";
 
 beforeEach(() => {
+  vi.clearAllMocks();
   h.state.owned = null;
   h.state.ownedCustomField = null;
   h.state.automations = [];
@@ -176,6 +181,87 @@ beforeEach(() => {
   h.state.greetingHistory = [];
   h.state.pendingCancels = 0;
   h.state.pendingInserts = [];
+  h.state.messageStatus = 'sent';
+});
+
+describe('WhatsApp delivery order', () => {
+  it('does not send a later block until Meta confirms the prior image was delivered', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [
+      { id: 'image', automation_id: 'a1', step_type: 'send_media', position: 0,
+        parent_step_id: null, step_config: { media_type: 'image', url: 'https://example.org/image.png' } },
+      { id: 'buttons', automation_id: 'a1', step_type: 'send_buttons', position: 1,
+        parent_step_id: null, step_config: { kind: 'buttons', body: 'Continua', buttons: [{ id: 'one', title: 'Seguir' }] } },
+    ];
+
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(engineSendMedia).toHaveBeenCalledTimes(1);
+    expect(engineSendInteractive).not.toHaveBeenCalled();
+    expect(h.state.pendingInserts).toHaveLength(1);
+    expect(h.state.pendingInserts[0]).toEqual(expect.objectContaining({
+      next_step_position: 1,
+      context: expect.objectContaining({ await_delivery_message_id: 'wamid.image' }),
+    }));
+
+    const pending = {
+      id: 'pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
+      contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
+      next_step_position: 1, context: h.state.pendingInserts[0].context as { conversation_id: string },
+    };
+    await resumePendingExecution(pending);
+    expect(engineSendInteractive).not.toHaveBeenCalled();
+
+    h.state.messageStatus = 'delivered';
+    await resumePendingExecution(pending);
+    expect(engineSendInteractive).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues after media spacing when a delivered webhook is missing', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [
+      { id: 'image', automation_id: 'a1', step_type: 'send_media', position: 0,
+        parent_step_id: null, step_config: { media_type: 'image', url: 'https://example.org/image.png' } },
+      { id: 'buttons', automation_id: 'a1', step_type: 'send_buttons', position: 1,
+        parent_step_id: null, step_config: { kind: 'buttons', body: 'Continua', buttons: [{ id: 'one', title: 'Seguir' }] } },
+    ];
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    const context = { ...h.state.pendingInserts[0].context as Record<string, unknown>,
+      await_delivery_started_at: new Date(Date.now() - 120_000).toISOString() };
+    await resumePendingExecution({
+      id: 'pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
+      contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
+      next_step_position: 1, context: context as { conversation_id: string },
+    });
+    expect(engineSendInteractive).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the configured wait and holds its next block while delivery is unconfirmed', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [
+      { id: 'image', automation_id: 'a1', step_type: 'send_media', position: 0,
+        parent_step_id: null, step_config: { media_type: 'image', url: 'https://example.org/image.png' } },
+      { id: 'wait', automation_id: 'a1', step_type: 'wait', position: 1,
+        parent_step_id: null, step_config: { amount: 1, unit: 'minutes' } },
+      { id: 'buttons', automation_id: 'a1', step_type: 'send_buttons', position: 2,
+        parent_step_id: null, step_config: { kind: 'buttons', body: 'Continua', buttons: [{ id: 'one', title: 'Seguir' }] } },
+    ];
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(h.state.pendingInserts).toHaveLength(1);
+    expect(h.state.pendingInserts[0]).toEqual(expect.objectContaining({ next_step_position: 2 }));
+    const pending = {
+      id: 'pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
+      contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
+      next_step_position: 2, context: h.state.pendingInserts[0].context as { conversation_id: string },
+    };
+    await resumePendingExecution(pending);
+    expect(engineSendInteractive).not.toHaveBeenCalled();
+    h.state.messageStatus = 'delivered';
+    await resumePendingExecution(pending);
+    expect(engineSendInteractive).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('confirmed complete delivery', () => {
