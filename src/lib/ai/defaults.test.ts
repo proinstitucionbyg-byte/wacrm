@@ -14,4 +14,12 @@ describe('registration claims in AI responses',()=>{
     expect(prompt.lastIndexOf('Enrollment status must come from a completed registration operation')).toBeGreaterThan(prompt.lastIndexOf('KNOWLEDGE'));
     expect(prompt).toContain('A payment review approval alone does not prove registration or document delivery');
   });
+  it('requires greeting continuity and a response for unknown messages',()=>{
+    const prompt=buildSystemPrompt({mode:'auto_reply',userPrompt:null});
+    expect(prompt).toContain('SALUDO Y CONTINUIDAD');
+    expect(prompt).toContain('Continuar');
+    expect(prompt).toContain('2 horas 59 minutos');
+    expect(prompt).toContain('UNKNOWN REQUESTS');
+    expect(prompt).toContain('Never end with silence');
+  });
 });
