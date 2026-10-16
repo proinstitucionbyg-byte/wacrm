@@ -60,6 +60,8 @@ export interface AutomationContext {
   await_delivery_message_id?: string
   await_delivery_started_at?: string
   await_delivery_fallback_ms?: number
+  /** Only the delivery barrier may be resumed early by a Meta status webhook. */
+  await_delivery_only?: boolean
   /** The tag id that was added, for tag_added trigger. */
   tag_id?: string
   /** Agent the conversation was assigned to, for conversation_assigned. */
@@ -428,7 +430,7 @@ export async function resumePendingExecution(pending: {
       contactId: pending.contact_id,
       context: { ...(pending.context ?? {}), await_child_log_id: undefined,
         await_delivery_message_id: undefined, await_delivery_started_at: undefined,
-        await_delivery_fallback_ms: undefined },
+        await_delivery_fallback_ms: undefined, await_delivery_only: undefined },
       parentStepId: pending.parent_step_id,
       branch: pending.branch,
       startPosition: pending.next_step_position,
@@ -460,13 +462,15 @@ export async function resumeDeliveredMessage(messageId: string, conversationId: 
 
     const { data: pending, error } = await db.from('automation_pending_executions')
       .select('*').eq('account_id', accountId).eq('status', 'pending')
-      .contains('context', { conversation_id: conversationId, await_delivery_message_id: messageId })
+      .contains('context', { conversation_id: conversationId,
+        await_delivery_message_id: messageId, await_delivery_only: true })
       .limit(10)
     if (error) {
       console.error('[automations] delivery resume lookup failed:', error)
       return
     }
     for (const row of pending ?? []) {
+      if (row.context?.await_delivery_only !== true) continue
       const { data: claim, error: claimError } = await db.from('automation_pending_executions')
         .update({ status: 'running' }).eq('id', row.id).eq('status', 'pending')
         .select('id').maybeSingle()
@@ -474,7 +478,9 @@ export async function resumeDeliveredMessage(messageId: string, conversationId: 
         console.error('[automations] delivery resume claim failed:', claimError)
         continue
       }
-      if (claim) await resumePendingExecution(row as Parameters<typeof resumePendingExecution>[0])
+      if (claim) {
+        await resumePendingExecution(row as Parameters<typeof resumePendingExecution>[0])
+      }
     }
   } catch (error) {
     // The existing cron remains the recovery path if webhook handling fails.
@@ -494,6 +500,7 @@ async function hasActiveDeliveryWait(
     return false
   }
   return (data ?? []).some((row) => row.context?.conversation_id === conversationId
+    && row.context?.await_delivery_only === true
     && typeof row.context?.await_delivery_message_id === 'string')
 }
 
@@ -635,7 +642,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         parent_step_id: args.parentStepId,
         branch: args.branch,
         next_step_position: step.position + 1,
-        context: args.context,
+        context: { ...args.context, await_delivery_only: undefined },
         run_at: dueAt,
         status: 'pending',
       })
@@ -725,7 +732,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
           parent_step_id: args.parentStepId,
           branch: args.branch,
           next_step_position: nextStep.position,
-          context: args.context,
+          context: { ...args.context, await_delivery_only: true },
           run_at: new Date(Date.now() + 30_000).toISOString(),
           status: 'pending',
         })

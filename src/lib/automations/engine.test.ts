@@ -200,7 +200,7 @@ describe('WhatsApp delivery order', () => {
     h.state.pendingRows = [{
       id: 'pending', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1',
       contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
-      next_step_position: 1, context: { conversation_id: 'chat', await_delivery_message_id: 'wamid.text' },
+      next_step_position: 1, context: { conversation_id: 'chat', await_delivery_message_id: 'wamid.text', await_delivery_only: true },
     }];
     await resumeDeliveredMessage('wamid.text', 'chat', ACCOUNT);
     expect(engineSendInteractive).toHaveBeenCalledTimes(1);
@@ -210,7 +210,7 @@ describe('WhatsApp delivery order', () => {
     h.state.owned = { id: 'c1' };
     h.state.automations = [{ ...automationWithUpdateStep(), trigger_type: 'keyword_match',
       trigger_config: { keywords: ['matricularme'] } }];
-    h.state.pendingRows = [{ context: { conversation_id: 'chat', await_delivery_message_id: 'wamid.text' } }];
+    h.state.pendingRows = [{ context: { conversation_id: 'chat', await_delivery_message_id: 'wamid.text', await_delivery_only: true } }];
     const matched = await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match',
       contactId: 'c1', context: { conversation_id: 'chat', message_text: 'Cómo matricularme' } });
     expect(matched).toBe(true);
@@ -289,6 +289,12 @@ describe('WhatsApp delivery order', () => {
       contact_id: 'c1', log_id: 'log1', parent_step_id: null, branch: null,
       next_step_position: 2, context: h.state.pendingInserts[0].context as { conversation_id: string },
     };
+    expect((pending.context as { await_delivery_only?: boolean }).await_delivery_only).not.toBe(true);
+    h.state.pendingRows = [pending];
+    h.state.messageStatus = 'delivered';
+    await resumeDeliveredMessage('wamid.image', 'chat', ACCOUNT);
+    expect(engineSendInteractive).not.toHaveBeenCalled();
+    h.state.messageStatus = 'sent';
     await resumePendingExecution(pending);
     expect(engineSendInteractive).not.toHaveBeenCalled();
     h.state.messageStatus = 'delivered';
