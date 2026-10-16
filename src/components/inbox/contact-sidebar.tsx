@@ -15,12 +15,14 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
 import { ConversationCases } from "./conversation-cases";
+import { toast } from "sonner";
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -39,6 +41,15 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+
+  const fetchNotes = useCallback(async () => {
+    if (!contact || !accountId) return;
+    const { data } = await createClient().from("contact_notes")
+      .select("*").eq("account_id", accountId).eq("contact_id", contact.id)
+      .order("created_at", { ascending: false });
+    if (data) setNotes(data);
+  }, [contact, accountId]);
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
@@ -83,6 +94,18 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
     fetchContactData();
   }, [fetchContactData]);
 
+  useEffect(() => {
+    const refresh = () => { void fetchNotes(); };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 30_000);
+    window.addEventListener("wacrm:contact-notes-updated", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("wacrm:contact-notes-updated", refresh);
+    };
+  }, [fetchNotes]);
+
   const handleCopyPhone = useCallback(async () => {
     if (!contact?.phone) return;
     await navigator.clipboard.writeText(contact.phone);
@@ -121,6 +144,17 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
     }
     setAddingNote(false);
   }, [contact, newNote, accountId]);
+
+  const handleDeleteAutoNote = useCallback(async (note: ContactNote) => {
+    if (!contact || !accountId || !note.note_text.startsWith("RESUMEN AUTOMÁTICO DE DERIVACIÓN")) return;
+    if (!window.confirm("¿Eliminar este resumen automático?")) return;
+    setDeletingNoteId(note.id);
+    const { error } = await createClient().from("contact_notes").delete()
+      .eq("account_id", accountId).eq("contact_id", contact.id).eq("id", note.id);
+    if (error) toast.error("No se pudo eliminar el resumen.");
+    else setNotes((prev) => prev.filter((item) => item.id !== note.id));
+    setDeletingNoteId(null);
+  }, [contact, accountId]);
 
   if (!contact) {
     return (
@@ -290,6 +324,13 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
                     key={note.id}
                     className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 light:border-border light:bg-card-2"
                   >
+                    {note.note_text.startsWith("RESUMEN AUTOMÁTICO DE DERIVACIÓN") && (
+                      <button type="button" className="float-right ml-2 text-muted-foreground hover:text-destructive"
+                        aria-label="Eliminar resumen automático" disabled={deletingNoteId === note.id}
+                        onClick={() => void handleDeleteAutoNote(note)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <p className="whitespace-pre-wrap text-xs text-muted-foreground">
                       {note.note_text}
                     </p>

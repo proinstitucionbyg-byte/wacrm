@@ -1076,6 +1076,7 @@ export function MessageThread({
         data = await res.json();
       if (!res.ok) throw Error(data.error);
       onAssignChange(conversation.id, transfer.agent);
+      window.dispatchEvent(new Event('wacrm:contact-notes-updated'));
       setTransfer(null);
       setTransferPicker(false);
       onRefresh?.();
