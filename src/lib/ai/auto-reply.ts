@@ -23,6 +23,7 @@ import { academicContext } from '@/lib/matriculas/calendar'
 import { studentSupportArea } from './student-support'
 import { sentOfferPriceReply } from './sent-offer'
 import { isLikelyAutomatedInbound } from './automated-inbound'
+import { hasRepeatedUnresolvedMessage, isWaitingForRepetitionHandoff, repetitionHandoffArea, REPETITION_HANDOFF_MARKER } from './repetition'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -82,16 +83,13 @@ export async function dispatchInboundToAiReply(
     const { data: conv, error: convErr } = await db
       .from('conversations')
       .select(
-        'assigned_agent_id, ai_autoreply_disabled, ai_reply_count, ai_enabled, ai_handed_off_at, ai_handoff_area',
+        'assigned_agent_id, ai_autoreply_disabled, ai_reply_count, ai_enabled, ai_handed_off_at, ai_handoff_area, ai_handoff_summary, last_human_message_at',
       )
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
     if (conv.ai_autoreply_disabled) return
     if (conv.ai_enabled === false) return // turned off here
-    // Cheap early-out; the authoritative cap check is the atomic claim
-    // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
 
     const handedOffAt = conv.ai_handed_off_at
       ? new Date(conv.ai_handed_off_at).getTime()
@@ -102,6 +100,13 @@ export async function dispatchInboundToAiReply(
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
     if (isLikelyAutomatedInbound(latestUserMessage(messages))) return
+    // A repetition handoff stays with its area until a human answers. Further
+    // inbounds get reassurance without another model call or reassignment.
+    if (isWaitingForRepetitionHandoff(conv.ai_handoff_summary, conv.ai_handed_off_at, conv.last_human_message_at)) {
+      await engineSendText({ accountId, userId: configOwnerUserId, conversationId, contactId,
+        text: waitingReminder(), aiGenerated: true })
+      return
+    }
     const requestedArea = explicitlyRequestedArea(latestUserMessage(messages)) ?? studentSupportArea(latestUserMessage(messages), messages);
     if (requestedArea && requestedArea.toUpperCase() !== conv.ai_handoff_area) handedOff = false;
 
@@ -137,6 +142,41 @@ export async function dispatchInboundToAiReply(
       await runAutomationById({ accountId, automationId: directAutomation, contactId, conversationId, messageText: latestUserMessage(messages) })
       return
     }
+
+    if (hasRepeatedUnresolvedMessage(messages)) {
+      const area = repetitionHandoffArea(messages, conv.ai_handoff_area)
+      const summary = `${REPETITION_HANDOFF_MARKER} Cinco mensajes iguales sin resolver.\n${buildHandoffSummary({ messages, replyCount: conv.ai_reply_count ?? 0 })}`
+      // Compare-and-set prevents concurrent arrivals from routing twice.
+      const claimedAt = new Date().toISOString()
+      let claim = db.from('conversations').update({ ai_handoff_summary: summary,
+        ai_handed_off_at: claimedAt }).eq('id', conversationId).eq('account_id', accountId)
+      claim = conv.ai_handed_off_at ? claim.eq('ai_handed_off_at', conv.ai_handed_off_at) : claim.is('ai_handed_off_at', null)
+      const { data: claimed, error } = await claim.select('id').maybeSingle()
+      if (error || !claimed) return
+      if (conv.ai_handed_off_at && (!conv.last_human_message_at || Date.parse(conv.last_human_message_at) <= handedOffAt)) {
+        await engineSendText({ accountId, userId: configOwnerUserId, conversationId, contactId,
+          text: waitingReminder(), aiGenerated: true })
+        return
+      }
+      let agentId: string | null
+      try {
+        const routed = await routeConversationToArea(db, accountId, conversationId, area)
+        agentId = routed.agentId
+      } catch (error) {
+        // A failed route must remain retryable rather than falsely claiming
+        // the user has already reached a person.
+        await db.from('conversations').update({ ai_handoff_summary: conv.ai_handoff_summary ?? null,
+          ai_handed_off_at: conv.ai_handed_off_at ?? null }).eq('id', conversationId)
+          .eq('account_id', accountId).eq('ai_handed_off_at', claimedAt)
+        throw error
+      }
+      await engineSendText({ accountId, userId: configOwnerUserId, conversationId, contactId,
+        text: buildHandoffNotice({ area, agentConnected: Boolean(agentId) }), aiGenerated: true })
+      return
+    }
+
+    // Repetitions still reach a person even if the AI reply budget is spent.
+    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
 
     // Ground the reply in the account's knowledge base (best-effort).
     const knowledge = await retrieveKnowledge(

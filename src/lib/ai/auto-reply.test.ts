@@ -49,7 +49,14 @@ vi.mock('./admin-client', () => ({
         }),
         update: (payload: Record<string, unknown>) => {
           h.state.updatePayload = payload
-          return { eq: () => Promise.resolve({ error: null }) }
+          const mutation = {
+            eq: () => mutation,
+            is: () => mutation,
+            select: () => mutation,
+            maybeSingle: () => Promise.resolve({ data: h.state.claim ? { id: 'conv-1' } : null, error: null }),
+            then: (resolve: (value: unknown) => unknown) => Promise.resolve({error:null}).then(resolve),
+          }
+          return mutation
         },
       }
     },
@@ -243,6 +250,63 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
 })
 
 describe('dispatchInboundToAiReply — handoff', () => {
+  it('routes five unresolved identical messages once without calling the model', async () => {
+    h.buildConversationContext.mockResolvedValue(Array.from({length:5},()=>[
+      {role:'user',content:'Necesito el proceso especial XYZ'},
+      {role:'assistant',content:'¿Me puedes explicar tu consulta?'},
+    ]).flat().slice(0,-1))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.routeArea).toHaveBeenCalledTimes(1)
+    expect(h.routeArea).toHaveBeenCalledWith(expect.anything(),'acct-1','conv-1','ventas')
+    expect(h.state.updatePayload?.ai_handoff_summary).toContain('[REPETICION_SIN_RESOLVER]')
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+    expect(h.retrieveKnowledge).not.toHaveBeenCalled()
+  })
+
+  it('still hands off repeated unresolved messages after the AI reply cap', async () => {
+    h.state.conv = { ai_reply_count:99, ai_handoff_area:'FIDELIZACION' }
+    h.buildConversationContext.mockResolvedValue(Array.from({length:5},()=>({role:'user',content:'Expediente XYZ'})))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.routeArea).toHaveBeenCalledWith(expect.anything(),'acct-1','conv-1','fidelizacion')
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
+
+  it('keeps an existing repetition handoff in fidelity and only reassures on further messages', async () => {
+    h.state.conv = {ai_reply_count:99,ai_handed_off_at:new Date().toISOString(),ai_handoff_area:'FIDELIZACION',
+      ai_handoff_summary:'[REPETICION_SIN_RESOLVER] Cinco mensajes iguales.'}
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'Sigo esperando'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.routeArea).not.toHaveBeenCalled()
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('ya está derivado')}))
+  })
+
+  it('does not reassign an unresolved repeated question already handed off', async () => {
+    h.state.conv = {ai_reply_count:0,ai_handed_off_at:new Date().toISOString(),ai_handoff_area:'FIDELIZACION'}
+    h.buildConversationContext.mockResolvedValue(Array.from({length:5},()=>({role:'user',content:'Expediente XYZ'})))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.routeArea).not.toHaveBeenCalled()
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
+
+  it('does not route if another inbound already claimed the repetition handoff', async () => {
+    h.state.claim = false
+    h.buildConversationContext.mockResolvedValue(Array.from({length:5},()=>({role:'user',content:'Expediente XYZ'})))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.routeArea).not.toHaveBeenCalled()
+    expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
+
+  it('does not answer the outbound-only service even when its support link changes', async () => {
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'Este número es exclusivo para enviar comunicaciones a nuestros clientes. Para cualquier consulta sobre tu servicio escríbenos a nuestro WhatsApp https://botm.cc/l/nuevo, LucIA te atenderá.'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.routeArea).not.toHaveBeenCalled()
+  })
+
   it('writes a summary and sends a single handoff notice', async () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)

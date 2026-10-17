@@ -7,6 +7,8 @@ describe('isLikelyAutomatedInbound', () => {
     'Hola, soy el asistente virtual de la universidad.',
     'This is an automated message. Do not reply.',
     'Gracias por comunicarte. Selecciona una opción. Nuestro horario de atención es de lunes a viernes.',
+    '¡Hola! Este número es exclusivo para enviar comunicaciones ✉️ a nuestros clientes. Para cualquier consulta sobre tu servicio escríbenos a nuestro WhatsApp https://botm.cc/l/209DiWhm, LucIA te atenderá. Gracias por elegirnos 💙',
+    'Soy una inteligencia artificial de atención al cliente.',
   ])('blocks an explicit automated response: %s', (text) => {
     expect(isLikelyAutomatedInbound(text)).toBe(true)
   })
@@ -17,6 +19,8 @@ describe('isLikelyAutomatedInbound', () => {
     '¿Tienen un asistente virtual?',
     'No me respondió la asesora',
     '¿Qué opción debo seleccionar?',
+    '¿Este número es exclusivo para enviar comunicaciones? Necesito información del curso.',
+    'Soy estudiante de inteligencia artificial',
   ])('keeps normal student messages active: %s', (text) => {
     expect(isLikelyAutomatedInbound(text)).toBe(false)
   })

@@ -11,6 +11,7 @@ import { buildHandoffNotice } from './business-hours'
 import { isLikelyAutomatedInbound } from './automated-inbound'
 import { courseKey } from '@/lib/matriculas/calendar'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
+import { isWaitingForRepetitionHandoff } from './repetition'
 
 const IDLE_MS = 10 * 60 * 1000
 const HUMAN_PAUSE_MS = 5 * 60 * 1000
@@ -243,7 +244,7 @@ export async function runIdleFollowups(): Promise<number> {
     const { data: convs, error } = await db
       .from('conversations')
       .select(
-        'id, account_id, user_id, contact_id, last_message_at, followup_sent_at, last_human_message_at',
+        'id, account_id, user_id, contact_id, last_message_at, followup_sent_at, last_human_message_at, ai_handoff_summary, ai_handed_off_at',
       )
       .lt('last_message_at', new Date(now - IDLE_MS).toISOString())
       .gt('last_message_at', new Date(now - WINDOW_MS).toISOString())
@@ -255,6 +256,7 @@ export async function runIdleFollowups(): Promise<number> {
     if (error || !convs) return 0
 
     for (const c of convs) {
+      if (isWaitingForRepetitionHandoff(c.ai_handoff_summary, c.ai_handed_off_at, c.last_human_message_at)) continue
       const lastMsg = new Date(c.last_message_at).getTime()
       if (c.followup_sent_at && new Date(c.followup_sent_at).getTime() >= lastMsg) continue
       const lastHuman = c.last_human_message_at
