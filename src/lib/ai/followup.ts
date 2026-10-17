@@ -13,7 +13,7 @@ import { courseKey } from '@/lib/matriculas/calendar'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
 import { isWaitingForRepetitionHandoff } from './repetition'
 import { HUMAN_PAUSE_MS } from './human-pause'
-import { idleFollowupArea } from './followup-policy'
+import { idleFollowupArea, promisedHumanSupport } from './followup-policy'
 
 const IDLE_MS = 10 * 60 * 1000
 const WINDOW_MS = 24 * 60 * 60 * 1000
@@ -348,7 +348,8 @@ export async function runIdleFollowups(): Promise<number> {
         const claim = await claimFollowup(db, c)
         if (!claim) continue
         // A resolved support answer needs no sales follow-up or new handoff.
-        if (!c.ai_handed_off_at && !canFollowUpAfterLastMessage(last.sender_type,last.content_text)) continue
+        if (!c.ai_handed_off_at && !promisedHumanSupport(messages)
+          && !canFollowUpAfterLastMessage(last.sender_type,last.content_text)) continue
         // A case already promised to fidelity stays with that team. Do not
         // launch sales or assign a second adviser after another silence.
         if (c.ai_handoff_area === 'FIDELIZACION' && c.ai_handed_off_at) continue

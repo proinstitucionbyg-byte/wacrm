@@ -113,6 +113,16 @@ describe('idle follow-up dispatch', () => {
     expect(h.route).not.toHaveBeenCalled()
     expect(h.run).not.toHaveBeenCalled()
   })
+  it('tags fidelity when human support was promised in text without a formal handoff yet', async () => {
+    h.conv.ai_handoff_area = 'FIDELIZACION'
+    h.conv.followup_sent_at = null
+    h.last = {sender_type:'bot',content_type:'text',content_text:'Una asesora te atenderá en breve.',created_at:'2026-10-17T19:40:00Z'}
+    h.context.mockResolvedValue([{role:'user',content:'No puedo ingresar a mi clase'},
+      {role:'assistant',content:'Una asesora te atenderá en breve.'}])
+    expect(await runIdleFollowups()).toBe(1)
+    expect(h.route).toHaveBeenCalledWith(expect.anything(),'account','chat','fidelizacion')
+    expect(h.run).not.toHaveBeenCalled()
+  })
   it('uses the matching course block instead of general courses when the context is specific', async () => {
     h.conv.followup_sent_at = null
     h.last = {...h.customer}
