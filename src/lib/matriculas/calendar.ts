@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-export interface AcademicModule { course: string; module: string; start_date: string; class_dates: string[]; hour: string }
+export interface AcademicModule { course: string; module: string; start_date: string; class_dates: string[]; hour: string; group_url?: string; change_reason?: string }
 const normalize = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 export function courseKey(text: string): string | null {
   const value = normalize(text);
@@ -14,7 +14,9 @@ export function parseAcademicModules(input: unknown): AcademicModule[] | null {
   for (const row of input) {
     if (!row || typeof row.course !== 'string' || !courseKey(row.course) || typeof row.module !== 'string' || !row.module.trim() || row.module.length > 250 || !isDate(row.start_date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(row.hour) || !Array.isArray(row.class_dates) || row.class_dates.length !== 8 || row.class_dates.some((day: unknown) => !isDate(day)) || row.class_dates[0] !== row.start_date || new Set(row.class_dates).size !== 8) return null;
     if (row.class_dates.some((day: string, index: number) => index > 0 && day <= row.class_dates[index - 1])) return null;
-    output.push({ course: courseKey(row.course)!, module: normalize(row.module), start_date: row.start_date, class_dates: row.class_dates, hour: row.hour });
+    if(row.group_url!==undefined&&(typeof row.group_url!=='string'||!/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]+\/edit#gid=\d+$/.test(row.group_url)))return null;
+    if(row.change_reason!==undefined&&(typeof row.change_reason!=='string'||!row.change_reason.trim()||row.change_reason.length>1500))return null;
+    output.push({ course: courseKey(row.course)!, module: normalize(row.module), start_date: row.start_date, class_dates: row.class_dates, hour: row.hour, ...(row.group_url?{group_url:row.group_url}:{}),...(row.change_reason?{change_reason:row.change_reason.trim()}: {}) });
   }
   const grouped = new Map<string, AcademicModule[]>();
   for (const row of output) grouped.set(row.course, [...(grouped.get(row.course) ?? []), row]);

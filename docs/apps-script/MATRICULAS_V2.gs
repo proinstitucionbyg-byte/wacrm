@@ -82,6 +82,7 @@ function SIGUIENTE_INICIO_CICLICO_(inicio, dias, canceladas) {
 }
 /** La vista conserva dos fechas; el historial queda en propiedades del programa. */
 function RENOVAR_CUADROS_INICIOS_(hoy) {
+  if(typeof F_RECUPERAR_VIGENTE_==='function')F_RECUPERAR_VIGENTE_(HOJA_('CUADRO DE INICIOS'),hoy);
   const s=HOJA_('CUADRO DE INICIOS'), filas=s.getRange(1,1,s.getLastRow(),9).getValues();
   LEER_CUADROS_INICIOS_(filas);
   const props=PropertiesService.getScriptProperties(), cambios=[]; let titulo='', modulos=[];
@@ -99,7 +100,7 @@ function RENOVAR_CUADROS_INICIOS_(hoy) {
       let actual=vigentes[0], indice=modulos.indexOf(actual), inicio=actual.dia;
       const canceladas=JSON.parse(props.getProperty('CANCELACIONES:'+titulo)||'[]');
       if((titulo.indexOf('ADMINISTRATIVO')!==-1||titulo.indexOf('EDUCACION INICIAL')!==-1)&&canceladas.indexOf('2026-10-07')===-1)canceladas.push('2026-10-07');
-      let proximo=modulos[(indice+1)%6], fecha=proximo.dia && proximo.dia>inicio?proximo.dia:SIGUIENTE_INICIO_CICLICO_(inicio,dias,canceladas), vueltas=0;
+      let proximo=modulos[(indice+1)%6], fecha=proximo.dia && proximo.dia>inicio?proximo.dia:(typeof F_FECHA_FUTURA_==='function'&&F_FECHA_FUTURA_(titulo,proximo.numero,inicio))||SIGUIENTE_INICIO_CICLICO_(inicio,dias,canceladas), vueltas=0;
       while(fecha<=DIA_(hoy)) {
         if(++vueltas>120)throw new Error('REVISAR ANTIGUEDAD DEL CUADRO '+titulo);
         indice=(indice+1)%6;inicio=fecha;actual=modulos[indice];
@@ -115,6 +116,7 @@ function RENOVAR_CUADROS_INICIOS_(hoy) {
     c.modulos.forEach(function(m){const celda=s.getRange(m.fila,9);if(m.fila!==c.actual.fila&&m.fila!==c.proximo.fila){if(m.dia)celda.clearContent().clearNote();return;}const dia=m.fila===c.actual.fila?c.inicio:c.fecha;if(m.dia!==dia)celda.setValue(new Date(dia+'T12:00:00-05:00'));celda.setNumberFormat('dd/MM/yyyy');});
   });
   RESALTAR_CUADROS_INICIOS_(hoy);
+  if(typeof F_BASES_==='function')F_BASES_();
 }
 function ACTUALIZAR_RESALTADO_INICIOS() { BLOQUEO_(function () { RENOVAR_CUADROS_INICIOS_(new Date()); console.log('CICLOS RENOVADOS: DOS FECHAS POR CURSO, MODULO ACTUAL EN VERDE'); }); }
 function INSTALAR_RENOVACION_INICIOS() {
@@ -286,6 +288,7 @@ function PROCESAR_FILAS_V2_(s, desde, cantidad, c1, c2, ahora) {
 // La edicion entre libros necesita un activador autorizado, no un onEdit simple.
 function onEdit(e) { return; }
 function EDITAR_MATRICULAS_AUTORIZADO(e) {
+  if(e&&e.range&&e.source.getId()===V2.id&&e.range.getSheet().getName()==='CUADRO DE INICIOS')return BLOQUEO_(function(){F_EDITAR_(e);});
   if (!e || !e.range || e.source.getId() !== V2.id || e.range.getSheet().getName() !== 'MATRICULAS' || e.range.getLastRow() < 2) return;
   const ahora = new Date();
   BLOQUEO_(function () { PROCESAR_FILAS_V2_(e.range.getSheet(), Math.max(2, e.range.getRow()), e.range.getLastRow() - Math.max(2, e.range.getRow()) + 1, e.range.getColumn(), e.range.getLastColumn(), ahora); });

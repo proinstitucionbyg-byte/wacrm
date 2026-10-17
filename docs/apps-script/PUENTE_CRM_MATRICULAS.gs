@@ -115,7 +115,10 @@ function C_SINCRONIZAR_CUADRO_(appliedCancellations) {
     let canceladas=[]; Object.keys(props).filter(function(k){return k.indexOf('CANCELACIONES:')===0;}).forEach(function(k){const nombre=CLAVE_(k);if((curso.indexOf('NUTRICION')!==-1&&nombre.indexOf('NUTRICION')!==-1)||(curso.indexOf('FARMACIA')!==-1&&nombre.indexOf('FARMACIA')!==-1)||(curso.indexOf('RECURSOS')!==-1&&nombre.indexOf('RECURSOS')!==-1)||(curso.indexOf('ADMIN')!==-1&&nombre.indexOf('ADMIN')!==-1)||(curso.indexOf('EDUCACION')!==-1&&nombre.indexOf('EDUCACION')!==-1))canceladas=canceladas.concat(JSON.parse(props[k]));});
     if(curso.indexOf('ADMIN')!==-1||curso.indexOf('EDUCACION')!==-1)canceladas.push('2026-10-07');
     const clases=[];let fecha=new Date(inicio+'T12:00:00Z');for(let n=0;n<365&&clases.length<8;n++,fecha=new Date(fecha.getTime()+86400000)){const iso=fecha.toISOString().slice(0,10);if(dias.indexOf(fecha.getUTCDay())!==-1&&!FERIADO_PERU_(iso)&&canceladas.indexOf(iso)===-1)clases.push(iso);}
-    return {course:curso,module:CLAVE_(r[2]),start_date:inicio,class_dates:clases,hour:hora};
+    const destino=O_CURSO_(curso),sheet=destino&&LIBRO_().getSheetByName(destino[1]);
+    const row=typeof F_BLOQUES_==='function'?F_BLOQUES_(HOJA_('CUADRO DE INICIOS')).filter(function(b){return b.nombre===CLAVE_(r[2])&&O_CURSO_(b.titulo)&&O_CURSO_(b.titulo)[0]===destino[0];})[0]:null;
+    const cambio=row?JSON.parse(PropertiesService.getScriptProperties().getProperty('FECHA CAMBIO:'+row.row)||'null'):null;
+    return Object.assign({course:curso,module:CLAVE_(r[2]),start_date:inicio,class_dates:clases,hour:hora},sheet?{group_url:'https://docs.google.com/spreadsheets/d/'+V2.id+'/edit#gid='+sheet.getSheetId()}: {},cambio&&cambio.next===inicio?{change_reason:cambio.reason}:{});
   });
   return C_API_('/calendar',{modules:modules,source_url:'https://docs.google.com/spreadsheets/d/'+V2.id+'/edit#gid='+HOJA_('CUADRO DE INICIOS').getSheetId(),applied_cancellations:appliedCancellations||[]});
 }

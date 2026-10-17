@@ -3,6 +3,12 @@ import { academicContext, academicOffer, parseAcademicModules } from './calendar
 const courses=['NUTRICION Y DIETETICA','AUXILIAR DE FARMACIA','RECURSOS HUMANOS','ASISTENTE ADMINISTRATIVO','AUXILIAR DE EDUCACION INICIAL'];
 const input=()=>courses.flatMap(course=>[10,11].map(month=>({course,module:'MODULO',start_date:`2026-${month}-01`,class_dates:Array.from({length:8},(_,i)=>`2026-${month}-${String(i*2+1).padStart(2,'0')}`),hour:'20:00'})));
 describe('academic calendar snapshot',()=>{
+  it('preserves the exact WhatsApp tab and the explanation without allowing arbitrary links',()=>{
+    const rows=input().map(r=>({...r,group_url:'https://docs.google.com/spreadsheets/d/book/edit#gid=10081013',change_reason:'Solicitud del docente'}));
+    expect(parseAcademicModules(rows)?.[0].group_url).toContain('#gid=10081013');
+    expect(parseAcademicModules(rows)?.[0].change_reason).toBe('Solicitud del docente');
+    rows[0].group_url='https://example.com';expect(parseAcademicModules(rows)).toBeNull();
+  });
   it('states the class date to the student while retaining the official start internally',async()=>{
     vi.useFakeTimers();
     try {
