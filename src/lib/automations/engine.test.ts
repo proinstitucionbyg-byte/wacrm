@@ -15,7 +15,7 @@ const h = vi.hoisted(() => ({
     upsertCalls: [] as { table: string; payload: unknown }[],
     logAutomationIds: [] as string[],
     latestGreetingAutomationId: null as string | null,
-    greetingHistory: [] as { automation_id: string; status: string }[],
+    greetingHistory: [] as { automation_id: string; status: string; created_at?: string }[],
     pendingCancels: 0,
     pendingInserts: [] as Record<string, unknown>[],
     pendingRows: [] as Record<string, unknown>[],
@@ -70,8 +70,10 @@ vi.mock("./admin-client", () => {
         if (state.greetingHistory.length > 0) {
           const statuses = ops.filters.find(([operator, key]) => operator === 'in' && key === 'status')?.[2] as string[] | undefined;
           const exactStatus = ops.filters.find(([operator, key]) => operator === 'eq' && key === 'status')?.[2];
+          const since = ops.filters.find(([operator, key]) => operator === 'gte' && key === 'created_at')?.[2] as string | undefined;
           return { data: state.greetingHistory.filter((entry) =>
-            statuses ? statuses.includes(entry.status) : exactStatus === undefined || entry.status === exactStatus,
+            (statuses ? statuses.includes(entry.status) : exactStatus === undefined || entry.status === exactStatus)
+            && (!since || !entry.created_at || entry.created_at >= since),
           ).slice(0, 1), error: null };
         }
         return { data: state.latestGreetingAutomationId
@@ -591,6 +593,30 @@ describe('greeting continuity dispatch', () => {
       context: { message_text: 'Hola!', conversation_id: 'chat', previous_inbound_at: '2026-10-12T14:00:00.000Z',
         inbound_at: '2026-10-12T15:00:00.000Z' } });
     expect(h.state.logAutomationIds).toEqual([RETURN_GREETING_ID]);
+  });
+
+  it('does not let a return greeting from yesterday silence a new inbound greeting', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = greetings;
+    h.state.greetingHistory = [{ automation_id: RETURN_GREETING_ID, status: 'success',
+      created_at: '2026-10-16T18:04:30.061Z' }];
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'hOLA', conversation_id: 'chat', previous_inbound_at: '2026-10-17T15:30:38.000Z',
+        inbound_at: '2026-10-17T16:17:56.000Z' } });
+    expect(h.state.logAutomationIds).toEqual([RETURN_GREETING_ID]);
+    expect(h.state.pendingCancels).toBe(0);
+  });
+
+  it('still suppresses the same menu when it was sent within the current three-hour window', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = greetings;
+    h.state.greetingHistory = [{ automation_id: RETURN_GREETING_ID, status: 'success',
+      created_at: '2026-10-17T16:17:56.000Z' }];
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Hola', conversation_id: 'chat', previous_inbound_at: '2026-10-17T16:17:56.000Z',
+        inbound_at: '2026-10-17T16:18:47.000Z' } });
+    expect(h.state.logAutomationIds).toEqual([]);
+    expect(h.state.pendingCancels).toBe(0);
   });
 
   it('starts a new cycle after three hours without a customer message', async () => {

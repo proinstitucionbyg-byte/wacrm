@@ -182,6 +182,11 @@ export async function runAutomationsForTrigger(
         .in('automation_id', [INITIAL_GREETING_ID, RETURN_GREETING_ID])
         // A greeting with a scheduled wait is partial after its message was sent.
         .in('status', ['success', 'partial'])
+        // Only greetings in this three-hour window can suppress this menu.
+        // An old return greeting must not silence a later conversation.
+        .gte('created_at', new Date(
+          Date.parse(input.context?.inbound_at ?? new Date().toISOString()) - 3 * 60 * 60 * 1000,
+        ).toISOString())
         .order('created_at', { ascending: false })
         .limit(1);
       if (greetingHistoryError) {
