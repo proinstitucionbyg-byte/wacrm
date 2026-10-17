@@ -12,14 +12,26 @@ import { isLikelyAutomatedInbound } from './automated-inbound'
 import { courseKey } from '@/lib/matriculas/calendar'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
 import { isWaitingForRepetitionHandoff } from './repetition'
+import { HUMAN_PAUSE_MS } from './human-pause'
 
 const IDLE_MS = 10 * 60 * 1000
-const HUMAN_PAUSE_MS = 5 * 60 * 1000
 const WINDOW_MS = 24 * 60 * 60 * 1000
 const REFUSAL = /no me interesa|no gracias|ya no|no quiero/i
 export const FOLLOWUP_CONTINUE_ID = 'vortex_followup_continue'
 export const FOLLOWUP_SALES_ID = 'vortex_followup_ventas'
 export const FOLLOWUP_LOYALTY_ID = 'vortex_followup_fidelizacion'
+export const IDLE_FOLLOWUP_TEXT = 'Para ayudarte, escríbenos qué necesitas: información de cursos o apoyo con tus clases.'
+const IDLE_FOLLOWUP_BUTTON_TEXT = '¿Quieres que retomemos la conversación? Pulsa continuar y te ayudamos a elegir el área.'
+
+export function needsIdleTextFallback(last: { sender_type: string; content_type?: string; content_text: string | null; status?: string; created_at?: string }, followedUpAt?: string | null): boolean {
+  return last.sender_type === 'bot' && last.content_type === 'interactive'
+    && last.status === 'failed' && last.content_text === IDLE_FOLLOWUP_BUTTON_TEXT
+    && (!last.created_at || !followedUpAt || Date.parse(followedUpAt) < Date.parse(last.created_at))
+}
+
+export function alreadyFollowedUp(customerAt: string, followedUpAt: string | null): boolean {
+  return Boolean(followedUpAt && Date.parse(followedUpAt) >= Date.parse(customerAt))
+}
 
 /** A saved block already owns this question, even if its run started hours ago. */
 export function isSavedAutomationMessage(messageId: string | null, runs: Array<{
@@ -37,7 +49,7 @@ export function canFollowUpAfterLastMessage(
   senderType: string,
   text: string | null,
 ): boolean {
-  if (senderType === 'customer') return true
+  if (senderType === 'customer' || senderType === 'agent') return true
   return senderType === 'bot' && /[?¿]/.test(text ?? '')
 }
 
@@ -150,7 +162,7 @@ export async function handleIdleFollowupReply(args: {
   }
 }
 
-/** Re-enable only controls that were manually turned off at least 5 minutes ago. */
+/** Re-enable only controls that were manually turned off at least ten minutes ago. */
 export async function reactivateExpiredManualControls(): Promise<number> {
   const db = supabaseAdmin()
   const cutoff = new Date(Date.now() - HUMAN_PAUSE_MS).toISOString()
@@ -257,8 +269,6 @@ export async function runIdleFollowups(): Promise<number> {
 
     for (const c of convs) {
       if (isWaitingForRepetitionHandoff(c.ai_handoff_summary, c.ai_handed_off_at, c.last_human_message_at)) continue
-      const lastMsg = new Date(c.last_message_at).getTime()
-      if (c.followup_sent_at && new Date(c.followup_sent_at).getTime() >= lastMsg) continue
       const lastHuman = c.last_human_message_at
         ? new Date(c.last_human_message_at).getTime()
         : 0
@@ -266,7 +276,7 @@ export async function runIdleFollowups(): Promise<number> {
 
       const { data: last } = await db
         .from('messages')
-        .select('sender_type, content_text, created_at, message_id')
+        .select('sender_type, content_type, content_text, created_at, message_id, status')
         .eq('conversation_id', c.id)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -297,6 +307,12 @@ export async function runIdleFollowups(): Promise<number> {
             .limit(1)
             .maybeSingle()
       if (!customer || now - Date.parse(customer.created_at) >= WINDOW_MS) continue
+      const textFallback = needsIdleTextFallback(last, c.followup_sent_at)
+      // Sending our own follow-up changes last_message_at. It must never
+      // count as a new customer request and schedule another follow-up.
+      const activityAt = lastHuman > Date.parse(customer.created_at)
+        ? c.last_human_message_at : customer.created_at
+      if (alreadyFollowedUp(activityAt, c.followup_sent_at) && !textFallback) continue
       if (isLikelyAutomatedInbound(customer.content_text)) {
         await claimFollowup(db, c)
         continue
@@ -319,12 +335,12 @@ export async function runIdleFollowups(): Promise<number> {
       const config = await loadAiConfig(db, c.account_id)
       if (!config || !config.autoReplyEnabled) continue
 
-      const messages = await buildConversationContext(db, c.id)
-      let candidates = messages.length > 0
+      const messages = await buildConversationContext(db, c.id, 5)
+      let candidates = !textFallback && messages.length > 0
         ? await findCandidateAutomations(db, c.account_id, messages, 3)
         : []
       const customerText = customer.content_text ?? ''
-      if (/\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText)) {
+      if (!textFallback && /\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText)) {
         const { data: general } = await db.from('automations')
           .select('id, name, trigger_config')
           .eq('account_id', c.account_id)
@@ -357,7 +373,11 @@ export async function runIdleFollowups(): Promise<number> {
       if (!claim) continue
 
       try {
-        if (candidates.length > 0) {
+        if (textFallback) {
+          await engineSendText({ accountId:c.account_id, userId:c.user_id,
+            conversationId:c.id, contactId:c.contact_id, text:IDLE_FOLLOWUP_TEXT, aiGenerated:true })
+          launched++
+        } else if (candidates.length > 0) {
           const ok = await runAutomationById({
             accountId: c.account_id,
             automationId: candidates[0].id,
@@ -366,7 +386,6 @@ export async function runIdleFollowups(): Promise<number> {
             messageText: '',
           })
           if (ok) launched++
-          else await releaseFollowupClaim(db, c, claim)
         } else {
           await engineSendInteractive({
             accountId: c.account_id,
@@ -375,15 +394,26 @@ export async function runIdleFollowups(): Promise<number> {
             conversationId: c.id,
             payload: {
               kind: 'buttons',
-              body: '¿Quieres que retomemos la conversación? Pulsa continuar y te ayudamos a elegir el área.',
+              body: IDLE_FOLLOWUP_BUTTON_TEXT,
               buttons: [{ id: FOLLOWUP_CONTINUE_ID, title: 'Continuar' }],
             },
           })
           launched++
         }
       } catch (err) {
-        await releaseFollowupClaim(db, c, claim)
+        // Keep the claim on failure too: retrying every ten minutes without
+        // another customer message creates an endless delivery-error loop.
         console.error('[followup] failed to send idle follow-up:', err)
+        if (!textFallback && candidates.length === 0
+          && !(err instanceof Error && err.message.includes('sent to Meta but DB insert failed'))) {
+          try {
+            await engineSendText({ accountId:c.account_id, userId:c.user_id,
+              conversationId:c.id, contactId:c.contact_id, text:IDLE_FOLLOWUP_TEXT, aiGenerated:true })
+            launched++
+          } catch (fallbackError) {
+            console.error('[followup] plain-text fallback failed; awaiting new inbound:', fallbackError)
+          }
+        }
       }
     }
   } catch (err) {
@@ -417,19 +447,4 @@ async function claimFollowup(
     return null
   }
   return data ? claimedAt : null
-}
-
-async function releaseFollowupClaim(
-  db: ReturnType<typeof supabaseAdmin>,
-  conversation: {
-    id: string
-    followup_sent_at: string | null
-  },
-  claimedAt: string,
-) {
-  await db
-    .from('conversations')
-    .update({ followup_sent_at: conversation.followup_sent_at })
-    .eq('id', conversation.id)
-    .eq('followup_sent_at', claimedAt)
 }

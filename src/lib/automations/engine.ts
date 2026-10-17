@@ -30,6 +30,7 @@ import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 import { automationAudioEvidence } from './audio-evidence'
 import { greetingAutomationId, INITIAL_GREETING_ID, isGreetingAutomation, matchesGreeting, RETURN_GREETING_ID, shouldShowGreeting } from './greeting-continuity'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
+import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 
 // ------------------------------------------------------------
 // Public API
@@ -372,7 +373,7 @@ export async function resumePendingExecution(pending: {
     const lastHuman = conv?.last_human_message_at
       ? new Date(conv.last_human_message_at).getTime()
       : 0
-    const humanActive = Date.now() - lastHuman < 5 * 60 * 1000
+    const humanActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
     if (conv && (conv.automation_enabled === false || humanActive)) {
       await markPending(pending.id, 'cancelled')
       return

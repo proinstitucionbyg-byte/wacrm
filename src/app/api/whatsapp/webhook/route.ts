@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl } from '@/lib/whatsapp/meta-api'
+import { deliveryStatusPatch, type WhatsAppDeliveryStatus } from '@/lib/whatsapp/delivery-status'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { findContactByBsuid } from '@/lib/contacts/dedupe'
@@ -9,6 +10,7 @@ import { isBsuid } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { resumeDeliveredMessage, runAutomationsForTrigger } from '@/lib/automations/engine'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
+import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { handleTeacherInbound } from '@/lib/matriculas/teachers'
@@ -91,12 +93,7 @@ interface WhatsAppWebhookEntry {
         wa_id: string
       }>
       messages?: WhatsAppMessage[]
-      statuses?: Array<{
-        id: string
-        status: string
-        timestamp: string
-        recipient_id: string
-      }>
+      statuses?: WhatsAppDeliveryStatus[]
     }
     field: string
   }>
@@ -365,12 +362,7 @@ function isValidStatusTransition(current: string, incoming: string): boolean {
   return ii > ci
 }
 
-async function handleStatusUpdate(status: {
-  id: string
-  status: string
-  timestamp: string
-  recipient_id: string
-}) {
+async function handleStatusUpdate(status: WhatsAppDeliveryStatus) {
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
   //    already match the CHECK constraint on messages.status. No
   //    `.select()`: message_id is NOT unique (migration 009 — Meta ids
@@ -378,7 +370,7 @@ async function handleStatusUpdate(status: {
   //    assume a single row.
   const { error: msgErr } = await supabaseAdmin()
     .from('messages')
-    .update({ status: status.status })
+    .update(deliveryStatusPatch(status))
     .eq('message_id', status.id)
 
   if (msgErr) {
@@ -839,7 +831,6 @@ async function processMessage(
   
   // Semáforo: pausa IA y automatización durante 5 minutos después
 // de que una asesora haya enviado un mensaje.
-const HUMAN_PAUSE_MS = 5 * 60 * 1000
 const lastHuman = conversation.last_human_message_at
   ? new Date(conversation.last_human_message_at).getTime()
   : 0
