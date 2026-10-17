@@ -10,6 +10,7 @@ import { buildHandoffSummary } from './handoff'
 import { buildHandoffNotice } from './business-hours'
 import { isLikelyAutomatedInbound } from './automated-inbound'
 import { courseKey } from '@/lib/matriculas/calendar'
+import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
 
 const IDLE_MS = 10 * 60 * 1000
 const HUMAN_PAUSE_MS = 5 * 60 * 1000
@@ -18,6 +19,18 @@ const REFUSAL = /no me interesa|no gracias|ya no|no quiero/i
 export const FOLLOWUP_CONTINUE_ID = 'vortex_followup_continue'
 export const FOLLOWUP_SALES_ID = 'vortex_followup_ventas'
 export const FOLLOWUP_LOYALTY_ID = 'vortex_followup_fidelizacion'
+
+/** A saved block already owns this question, even if its run started hours ago. */
+export function isSavedAutomationMessage(messageId: string | null, runs: Array<{
+  automation_id: string
+  steps_executed: unknown
+}>): boolean {
+  if (!messageId) return false
+  return runs.some(run => !isGreetingAutomation(run.automation_id)
+    && Array.isArray(run.steps_executed)
+    && run.steps_executed.some(step => typeof step?.detail === 'string'
+      && step.detail.includes(`(${messageId})`)))
+}
 
 export function canFollowUpAfterLastMessage(
   senderType: string,
@@ -251,12 +264,26 @@ export async function runIdleFollowups(): Promise<number> {
 
       const { data: last } = await db
         .from('messages')
-        .select('sender_type, content_text, created_at')
+        .select('sender_type, content_text, created_at, message_id')
         .eq('conversation_id', c.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
       if (!last || !canFollowUpAfterLastMessage(last.sender_type, last.content_text)) continue
+
+      if (last.sender_type === 'bot' && last.message_id) {
+        const { data: recentRuns, error: runsError } = await db.from('automation_logs')
+          .select('automation_id, steps_executed')
+          .eq('account_id', c.account_id)
+          .eq('contact_id', c.contact_id)
+          .order('created_at', { ascending: false })
+          .limit(100)
+        if (runsError) continue
+        if (isSavedAutomationMessage(last.message_id, recentRuns ?? [])) {
+          await claimFollowup(db, c)
+          continue
+        }
+      }
 
       const { data: customer } = last.sender_type === 'customer'
         ? { data: last }
