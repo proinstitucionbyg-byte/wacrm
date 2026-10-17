@@ -5,7 +5,7 @@ import { findCandidateAutomations } from './automation-match'
 import { runAutomationById } from '@/lib/automations/engine'
 import { engineSendInteractive } from '@/lib/automations/meta-send'
 import { engineSendText } from '@/lib/flows/meta-send'
-import { findConnectedAgentForArea } from './handoff-routing'
+import { findConnectedAgentForArea, routeConversationToArea } from './handoff-routing'
 import { buildHandoffSummary } from './handoff'
 import { buildHandoffNotice } from './business-hours'
 import { isLikelyAutomatedInbound } from './automated-inbound'
@@ -13,6 +13,7 @@ import { courseKey } from '@/lib/matriculas/calendar'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
 import { isWaitingForRepetitionHandoff } from './repetition'
 import { HUMAN_PAUSE_MS } from './human-pause'
+import { idleFollowupArea } from './followup-policy'
 
 const IDLE_MS = 10 * 60 * 1000
 const WINDOW_MS = 24 * 60 * 60 * 1000
@@ -256,7 +257,7 @@ export async function runIdleFollowups(): Promise<number> {
     const { data: convs, error } = await db
       .from('conversations')
       .select(
-        'id, account_id, user_id, contact_id, last_message_at, followup_sent_at, last_human_message_at, ai_handoff_summary, ai_handed_off_at',
+        'id, account_id, user_id, contact_id, last_message_at, followup_sent_at, last_human_message_at, ai_handoff_summary, ai_handed_off_at, ai_handoff_area, assigned_agent_id',
       )
       .lt('last_message_at', new Date(now - IDLE_MS).toISOString())
       .gt('last_message_at', new Date(now - WINDOW_MS).toISOString())
@@ -281,8 +282,9 @@ export async function runIdleFollowups(): Promise<number> {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (!last || !canFollowUpAfterLastMessage(last.sender_type, last.content_text)) continue
+      if (!last) continue
 
+      const completedMessageOwners = new Set<string>()
       if (last.sender_type === 'bot' && last.message_id) {
         const { data: recentRuns, error: runsError } = await db.from('automation_logs')
           .select('automation_id, steps_executed')
@@ -291,9 +293,8 @@ export async function runIdleFollowups(): Promise<number> {
           .order('created_at', { ascending: false })
           .limit(100)
         if (runsError) continue
-        if (isSavedAutomationMessage(last.message_id, recentRuns ?? [])) {
-          await claimFollowup(db, c)
-          continue
+        for (const run of recentRuns ?? []) {
+          if (isSavedAutomationMessage(last.message_id, [run])) completedMessageOwners.add(run.automation_id)
         }
       }
 
@@ -336,11 +337,35 @@ export async function runIdleFollowups(): Promise<number> {
       if (!config || !config.autoReplyEnabled) continue
 
       const messages = await buildConversationContext(db, c.id, 5)
+      let storedArea = c.ai_handoff_area
+      if (!storedArea && c.assigned_agent_id) {
+        const { data: adviser } = await db.from('profiles').select('area')
+          .eq('account_id',c.account_id).eq('user_id',c.assigned_agent_id).maybeSingle()
+        storedArea = adviser?.area
+      }
+      const area = idleFollowupArea(messages, storedArea)
+      if (!textFallback && area === 'fidelizacion') {
+        const claim = await claimFollowup(db, c)
+        if (!claim) continue
+        // A resolved support answer needs no sales follow-up or new handoff.
+        if (!c.ai_handed_off_at && !canFollowUpAfterLastMessage(last.sender_type,last.content_text)) continue
+        // A case already promised to fidelity stays with that team. Do not
+        // launch sales or assign a second adviser after another silence.
+        if (c.ai_handoff_area === 'FIDELIZACION' && c.ai_handed_off_at) continue
+        const {agentId} = await routeConversationToArea(db,c.account_id,c.id,'fidelizacion')
+        await db.from('conversations').update({ ai_handed_off_at:new Date().toISOString(),
+          ai_handoff_summary:buildHandoffSummary({messages,replyCount:0}) }).eq('id',c.id).eq('account_id',c.account_id)
+        await engineSendText({accountId:c.account_id,userId:c.user_id,conversationId:c.id,
+          contactId:c.contact_id,text:buildHandoffNotice({area:'fidelizacion',agentConnected:Boolean(agentId)}),aiGenerated:true})
+        launched++
+        continue
+      }
       let candidates = !textFallback && messages.length > 0
         ? await findCandidateAutomations(db, c.account_id, messages, 3)
         : []
+      candidates = candidates.filter(candidate => !completedMessageOwners.has(candidate.id))
       const customerText = customer.content_text ?? ''
-      if (!textFallback && /\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText)) {
+      if (!textFallback && (candidates.length === 0 || /\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText))) {
         const { data: general } = await db.from('automations')
           .select('id, name, trigger_config')
           .eq('account_id', c.account_id)
@@ -348,29 +373,31 @@ export async function runIdleFollowups(): Promise<number> {
           .eq('name', 'CURSOS GENERALES')
           .limit(1)
           .maybeSingle()
-        if (general && (general.trigger_config as Record<string, unknown> | null)?.internal_only !== true) {
+        if (general && !completedMessageOwners.has(general.id) && (general.trigger_config as Record<string, unknown> | null)?.internal_only !== true) {
           candidates = [{ id: general.id, name: general.name }]
         }
       }
       if (last.sender_type === 'bot' && candidates.length > 0) {
-        // A greeting block may have run already; that does not mean the
-        // selected course block was sent. Compare only the selected block.
+        // Continue with an unused relevant block; never restart a block
+        // already sent for this customer request.
         const { data: priorRuns, error: logError } = await db
           .from('automation_logs')
           .select('automation_id')
           .eq('account_id', c.account_id)
           .eq('contact_id', c.contact_id)
-          .eq('automation_id', candidates[0].id)
+          .in('automation_id', candidates.map(candidate => candidate.id))
           .gte('created_at', customer.created_at)
-          .limit(1)
+          .limit(3)
         if (logError) continue
-        if (priorRuns?.length) {
-          await claimFollowup(db, c)
-          continue
-        }
+        const used = new Set((priorRuns ?? []).map(run => run.automation_id))
+        candidates = candidates.filter(candidate => !used.has(candidate.id))
       }
       const claim = await claimFollowup(db, c)
       if (!claim) continue
+
+      // Sales must use a saved automation, not repeatedly ask which area.
+      // No available block is safer than restarting one already delivered.
+      if (!textFallback && candidates.length === 0) continue
 
       try {
         if (textFallback) {
@@ -386,34 +413,11 @@ export async function runIdleFollowups(): Promise<number> {
             messageText: '',
           })
           if (ok) launched++
-        } else {
-          await engineSendInteractive({
-            accountId: c.account_id,
-            userId: c.user_id,
-            contactId: c.contact_id,
-            conversationId: c.id,
-            payload: {
-              kind: 'buttons',
-              body: IDLE_FOLLOWUP_BUTTON_TEXT,
-              buttons: [{ id: FOLLOWUP_CONTINUE_ID, title: 'Continuar' }],
-            },
-          })
-          launched++
         }
       } catch (err) {
         // Keep the claim on failure too: retrying every ten minutes without
         // another customer message creates an endless delivery-error loop.
         console.error('[followup] failed to send idle follow-up:', err)
-        if (!textFallback && candidates.length === 0
-          && !(err instanceof Error && err.message.includes('sent to Meta but DB insert failed'))) {
-          try {
-            await engineSendText({ accountId:c.account_id, userId:c.user_id,
-              conversationId:c.id, contactId:c.contact_id, text:IDLE_FOLLOWUP_TEXT, aiGenerated:true })
-            launched++
-          } catch (fallbackError) {
-            console.error('[followup] plain-text fallback failed; awaiting new inbound:', fallbackError)
-          }
-        }
       }
     }
   } catch (err) {
