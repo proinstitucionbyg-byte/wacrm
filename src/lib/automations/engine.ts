@@ -350,8 +350,7 @@ export async function resumePendingExecution(pending: {
     await markPending(pending.id, 'failed')
     return
   }
-  // Si la asesora escribió hace menos de 5 min, o la automatización
-  // está apagada en este chat, el paso no se envía.
+  // Human attention pauses the existing position; it must not discard it.
   if (pending.context?.enrollment_sequence_id) {
     const {data:sequence,error:sequenceError}=await db.from('enrollment_sequence_runs').select('completed_at,conversation_id,automation_id,stage,status').eq('id',pending.context.enrollment_sequence_id).eq('account_id',pending.account_id).maybeSingle()
     if(sequenceError){await markPending(pending.id,'failed');return}
@@ -367,7 +366,7 @@ export async function resumePendingExecution(pending: {
   } else if (pending.context?.conversation_id) {
     const { data: conv } = await db
       .from('conversations')
-      .select('automation_enabled, last_human_message_at')
+      .select('automation_enabled, last_human_message_at, automation_disabled_at')
       .eq('id', pending.context.conversation_id)
       .maybeSingle()
     const lastHuman = conv?.last_human_message_at
@@ -375,7 +374,13 @@ export async function resumePendingExecution(pending: {
       : 0
     const humanActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
     if (conv && (conv.automation_enabled === false || humanActive)) {
-      await markPending(pending.id, 'cancelled')
+      const disabledAt = Date.parse(conv.automation_disabled_at ?? '')
+      const retryAt = Math.max(Date.now() + 60_000,
+        humanActive ? lastHuman + HUMAN_PAUSE_MS : 0,
+        Number.isFinite(disabledAt) ? disabledAt + HUMAN_PAUSE_MS : 0)
+      await db.from('automation_pending_executions')
+        .update({status:'pending',run_at:new Date(retryAt).toISOString()})
+        .eq('id',pending.id).eq('status','running')
       return
     }
   }

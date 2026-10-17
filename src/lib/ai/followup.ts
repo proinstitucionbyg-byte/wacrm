@@ -13,7 +13,7 @@ import { courseKey } from '@/lib/matriculas/calendar'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
 import { isWaitingForRepetitionHandoff } from './repetition'
 import { HUMAN_PAUSE_MS } from './human-pause'
-import { idleFollowupArea, promisedHumanSupport } from './followup-policy'
+import { idleFollowupArea, latestCourseSequenceFinished, promisedHumanSupport } from './followup-policy'
 
 const IDLE_MS = 10 * 60 * 1000
 const WINDOW_MS = 24 * 60 * 60 * 1000
@@ -285,14 +285,12 @@ export async function runIdleFollowups(): Promise<number> {
       if (!last) continue
 
       const completedMessageOwners = new Set<string>()
+      const { data: recentRuns, error: runsError } = await db.from('automation_logs')
+        .select('automation_id, status, steps_executed')
+        .eq('account_id', c.account_id).eq('contact_id', c.contact_id)
+        .order('created_at', { ascending: false }).limit(100)
+      if (runsError) continue
       if (last.sender_type === 'bot' && last.message_id) {
-        const { data: recentRuns, error: runsError } = await db.from('automation_logs')
-          .select('automation_id, steps_executed')
-          .eq('account_id', c.account_id)
-          .eq('contact_id', c.contact_id)
-          .order('created_at', { ascending: false })
-          .limit(100)
-        if (runsError) continue
         for (const run of recentRuns ?? []) {
           if (isSavedAutomationMessage(last.message_id, [run])) completedMessageOwners.add(run.automation_id)
         }
@@ -329,7 +327,7 @@ export async function runIdleFollowups(): Promise<number> {
         .select('id')
         .eq('account_id', c.account_id)
         .eq('contact_id', c.contact_id)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'running'])
         .limit(1)
         .maybeSingle()
       if (pendingError || pending) continue
@@ -360,6 +358,16 @@ export async function runIdleFollowups(): Promise<number> {
           contactId:c.contact_id,text:buildHandoffNotice({area:'fidelizacion',agentConnected:Boolean(agentId)}),aiGenerated:true})
         launched++
         continue
+      }
+      if (!textFallback && recentRuns?.length) {
+        const {data: runAutomations,error: runAutomationsError} = await db.from('automations')
+          .select('id,name').eq('account_id',c.account_id)
+          .in('id',[...new Set(recentRuns.map(run => run.automation_id))])
+        if (runAutomationsError) continue
+        if (latestCourseSequenceFinished(recentRuns,runAutomations ?? [])) {
+          await claimFollowup(db,c)
+          continue
+        }
       }
       let candidates = !textFallback && messages.length > 0
         ? await findCandidateAutomations(db, c.account_id, messages, 3)

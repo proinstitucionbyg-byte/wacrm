@@ -24,6 +24,7 @@ import { studentSupportArea } from './student-support'
 import { sentOfferPriceReply } from './sent-offer'
 import { isLikelyAutomatedInbound } from './automated-inbound'
 import { hasRepeatedUnresolvedMessage, isWaitingForRepetitionHandoff, repetitionHandoffArea, REPETITION_HANDOFF_MARKER } from './repetition'
+import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -178,6 +179,16 @@ export async function dispatchInboundToAiReply(
     // Repetitions still reach a person even if the AI reply budget is spent.
     if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
 
+    const {data: pendingSequence,error: pendingSequenceError} = await db.from('automation_pending_executions')
+      .select('automation_id,context').eq('account_id',accountId).eq('contact_id',contactId)
+      .in('status',['pending','running']).limit(20)
+    if (pendingSequenceError) return
+    const continuingSequence = (pendingSequence ?? []).some(row => !isGreetingAutomation(row.automation_id)
+      && !row.context?.enrollment_sequence_id && !row.context?.manual_agent_id)
+    // Explicit saved requests were handled above. For an off-script question,
+    // answer without replacing the sequence that already owns its next step.
+    const offeredAutomations = continuingSequence && !requestedArea ? [] : candidates
+
     // Ground the reply in the account's knowledge base (best-effort).
     const knowledge = await retrieveKnowledge(
       db,
@@ -186,6 +197,7 @@ export async function dispatchInboundToAiReply(
       latestUserMessage(messages),
     )
     knowledge.push(...await academicContext(db, accountId));
+    if (continuingSequence && !requestedArea) knowledge.push('CONTINUIDAD: hay una automatizacion en curso con su siguiente bloque guardado. Responde la consulta puntual por texto y conserva esa secuencia; no reinicies el curso ni propongas ejecutar otra automatizacion. El motor continuara desde el punto guardado respetando sus esperas.')
     knowledge.push('REGISTRO: si la fecha de nacimiento indica que el estudiante es menor de 18 anos, solicita tambien "DNI DEL TUTOR O PADRES". Pide que envie esa foto con la descripcion "DOCUMENTO DEL TUTOR" para identificarla. Si falta la foto del estudiante, solicita NOMBRE COMPLETO, DNI o CARNE DE EXTRANJERIA o PASAPORTE y CORREO ELECTRONICO por escrito; se conservara ese texto como respaldo y se dejara FOTO DEL DOCUMENTO PENDIENTE. Nunca declares verificada una identidad sin foto. Todos los comprobantes requieren validacion humana del CEO.');
 
     // Automations the model may launch (best-effort, never throws).
@@ -193,7 +205,7 @@ export async function dispatchInboundToAiReply(
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
-      automations: candidates,
+      automations: offeredAutomations,
       handedOff,
       scheduleNote: scheduleContext(),
     })
@@ -218,7 +230,7 @@ export async function dispatchInboundToAiReply(
 
     // Only accept an automation id the model was actually offered.
     const chosenAutomationId =
-      !handoff && automationId && candidates.some((c) => c.id === automationId)
+      !handoff && automationId && offeredAutomations.some((c) => c.id === automationId)
         ? automationId
         : null
 

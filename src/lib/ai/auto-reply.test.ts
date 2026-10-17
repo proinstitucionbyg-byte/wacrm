@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string; name?: string }[],
+    pendingSequence: [] as Array<{automation_id:string;context:Record<string,unknown>}>,
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
@@ -28,6 +29,11 @@ vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
+      if (table === 'automation_pending_executions') {
+        const chain = { select:()=>chain,eq:()=>chain,in:()=>chain,
+          limit:async()=>({data:h.state.pendingSequence,error:null}) }
+        return chain
+      }
       if (table === 'automations') {
         // .select().eq().eq().in().limit() → active auto-responders
         const chain = {
@@ -102,6 +108,7 @@ beforeEach(() => {
     ai_reply_count: 0,
   }
   h.state.autoResponders = []
+  h.state.pendingSequence = []
   h.state.claim = true
   h.state.updatePayload = null
   h.state.rpcCalls = []
@@ -115,6 +122,16 @@ beforeEach(() => {
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
+  it('answers an off-script question without replacing the active course sequence', async () => {
+    h.state.pendingSequence = [{automation_id:'education',context:{conversation_id:'conv-1'}}]
+    h.state.autoResponders = [{id:'other',name:'OTRA INFORMACION'}]
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'¿Puedo estudiar desde mi celular?'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply).toHaveBeenCalledTimes(1)
+    expect(h.generateReply.mock.calls[0][0].systemPrompt).toContain('siguiente bloque guardado')
+    expect(h.runAutomation).not.toHaveBeenCalled()
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+  })
   it('answers prices from the sent audio without spending another generation call',async()=>{
     h.buildConversationContext.mockResolvedValue([{role:'assistant',content:'[AUDIO ENVIADO: NUTRICION 19.90]\nMensualidad en 79.90. Primer mes 19.90. Seis meses.'},{role:'user',content:'Cuanto pagare cada mes?'}])
     await dispatchInboundToAiReply(ARGS)

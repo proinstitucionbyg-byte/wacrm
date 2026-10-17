@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
     pendingCancels: 0,
     pendingInserts: [] as Record<string, unknown>[],
     pendingRows: [] as Record<string, unknown>[],
+    pendingUpdates: [] as Record<string, unknown>[],
+    conversationState: null as Record<string, unknown> | null,
     messageStatus: 'sent' as 'sent' | 'delivered' | 'read' | 'failed',
   },
 }));
@@ -82,6 +84,7 @@ vi.mock("./admin-client", () => {
       return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
     if (table === "messages") return { data: { status: state.messageStatus }, error: null };
+    if (table === "conversations") return { data: state.conversationState, error: null };
     if (table === "automation_steps") {
       const automationId = ops.filters.find(
         ([operator, key]) => operator === 'eq' && key === 'automation_id',
@@ -109,6 +112,7 @@ vi.mock("./admin-client", () => {
       return { data: null, error: null };
     }
     if (table === "automation_pending_executions" && type === "update") {
+      state.pendingUpdates.push(ops.payload as Record<string, unknown>);
       state.pendingCancels++;
       return { data: (ops.payload as { status?: string })?.status === 'running'
         ? { id: ops.filters.find(([, key]) => key === 'id')?.[2] } : null, error: null };
@@ -188,10 +192,23 @@ beforeEach(() => {
   h.state.pendingCancels = 0;
   h.state.pendingInserts = [];
   h.state.pendingRows = [];
+  h.state.pendingUpdates = [];
+  h.state.conversationState = null;
   h.state.messageStatus = 'sent';
 });
 
 describe('WhatsApp delivery order', () => {
+  it('keeps the exact pending position when an adviser is still active', async () => {
+    h.state.automations = [automationWithUpdateStep()];
+    const humanAt = Date.now() - 2 * 60_000;
+    h.state.conversationState = {automation_enabled:true,last_human_message_at:new Date(humanAt).toISOString()};
+    await resumePendingExecution({id:'pending',automation_id:'a1',account_id:ACCOUNT,user_id:'u1',contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,next_step_position:48,context:{conversation_id:'chat'}});
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'pending',run_at:expect.any(String)}));
+    expect(Date.parse(String(h.state.pendingUpdates.at(-1)?.run_at))).toBeGreaterThanOrEqual(humanAt + 10 * 60_000);
+    expect(h.state.pendingUpdates.some(update => update.status === 'cancelled')).toBe(false);
+    expect(h.state.logAutomationIds).toEqual([]);
+    expect(engineSendInteractive).not.toHaveBeenCalled();
+  });
   it('resumes the next block immediately when Meta confirms delivery', async () => {
     h.state.automations = [automationWithUpdateStep()];
     h.state.steps = [

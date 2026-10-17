@@ -5,18 +5,19 @@ const h = vi.hoisted(() => ({
   customer: {} as Record<string, unknown>, pending: [] as unknown[],
   text: vi.fn(), interactive: vi.fn(), context: vi.fn(), candidates: vi.fn(),
   run:vi.fn(), route:vi.fn(), general:null as null | {id:string;name:string;trigger_config:object},
-  runs:[] as Array<{automation_id:string;steps_executed:Array<{detail:string}>}>,
+  runs:[] as Array<{automation_id:string;status?:string;steps_executed:Array<{detail:string}>}>,
+  runAutomations:[] as Array<{id:string;name:string}>,
 }))
 vi.mock('./admin-client', () => ({ supabaseAdmin: () => ({ from: (table: string) => {
   let update = false
   const filters: Array<[string,unknown]> = []
   const result = () => ({error:null,data: table === 'conversations' ? (update ? {id:'chat'} : [h.conv])
     : table === 'messages' ? (filters.some(([key,value]) => key === 'sender_type' && value === 'customer') ? h.customer : h.last)
-    : table === 'automation_pending_executions' ? null : table === 'automations' ? h.general : table === 'automation_logs' ? h.runs : []})
+    : table === 'automation_pending_executions' ? null : table === 'automations' ? (filters.some(([key]) => key === 'id') ? h.runAutomations : h.general) : table === 'automation_logs' ? h.runs : []})
   const chain = {
     select: () => chain, update: () => { update = true; return chain },
     eq: (key:string,value:unknown) => {filters.push([key,value]); return chain},
-    lt: () => chain, gt: () => chain, gte: () => chain, neq: () => chain, in: () => chain,
+    lt: () => chain, gt: () => chain, gte: () => chain, neq: () => chain, in: (key:string,value:unknown) => {filters.push([key,value]); return chain},
     is: () => chain, order: () => chain, limit: () => chain,
     maybeSingle: async () => table === 'automation_pending_executions'
       ? {data:h.pending[0] ?? null,error:null} : result(),
@@ -44,6 +45,7 @@ beforeEach(() => {
     status:'sent',created_at:'2026-10-17T19:40:02Z'}
   h.pending = []
   h.runs = []
+  h.runAutomations = []
   h.general = {id:'general',name:'CURSOS GENERALES',trigger_config:{}}
   h.run.mockResolvedValue(true)
   h.route.mockResolvedValue({agentId:'adviser'})
@@ -54,6 +56,16 @@ beforeEach(() => {
 })
 
 describe('idle follow-up dispatch', () => {
+  it('does not reopen a completed course after an off-script AI answer', async () => {
+    h.conv.followup_sent_at = null
+    h.last = {sender_type:'bot',content_type:'text',content_text:'Sí, puedes estudiar desde tu celular.',created_at:'2026-10-17T19:40:00Z'}
+    h.runs = [{automation_id:'education',status:'success',steps_executed:[]}]
+    h.runAutomations = [{id:'education',name:'EDUCACION INICIAL'}]
+    h.candidates.mockResolvedValue([{id:'education',name:'EDUCACION INICIAL'}])
+    expect(await runIdleFollowups()).toBe(0)
+    expect(h.run).not.toHaveBeenCalled()
+    expect(h.text).not.toHaveBeenCalled()
+  })
   it('does not repeat a follow-up when our outgoing updated the conversation time', async () => {
     expect(await runIdleFollowups()).toBe(0)
     expect(h.interactive).not.toHaveBeenCalled()

@@ -1,6 +1,14 @@
 import type { ChatMessage } from './types'
 import { explicitlyRequestedArea } from './handoff-routing'
 import { studentSupportArea } from './student-support'
+import { courseKey } from '@/lib/matriculas/calendar'
+
+/** Runs arrive newest first. A completed course must never be restarted by silence. */
+export function latestCourseSequenceFinished(runs: Array<{automation_id:string;status:string}>, automations: Array<{id:string;name:string}>): boolean {
+  const courses = new Set(automations.filter(automation => courseKey(automation.name)).map(automation => automation.id))
+  const latest = runs.find(run => courses.has(run.automation_id))
+  return latest?.status === 'success'
+}
 
 export function promisedHumanSupport(messages: ChatMessage[]): boolean {
   const latest = messages.filter(message => message.role === 'assistant').at(-1)?.content ?? ''
