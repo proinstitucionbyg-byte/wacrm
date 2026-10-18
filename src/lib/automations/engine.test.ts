@@ -22,6 +22,7 @@ const h = vi.hoisted(() => ({
     pendingUpdates: [] as Record<string, unknown>[],
     conversationState: null as Record<string, unknown> | null,
     messageStatus: 'sent' as 'sent' | 'delivered' | 'read' | 'failed',
+    newerCustomer: false,
   },
 }));
 
@@ -83,7 +84,9 @@ vi.mock("./admin-client", () => {
       }
       return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
-    if (table === "messages") return { data: { status: state.messageStatus }, error: null };
+    if (table === "messages") return { data: ops.filters.some(([operator,key,value]) =>
+      operator === 'eq' && key === 'sender_type' && value === 'customer')
+      ? (state.newerCustomer ? {id:'newer-customer'} : null) : { status: state.messageStatus }, error: null };
     if (table === "conversations") return { data: state.conversationState, error: null };
     if (table === "automation_steps") {
       const automationId = ops.filters.find(
@@ -114,10 +117,16 @@ vi.mock("./admin-client", () => {
     if (table === "automation_pending_executions" && type === "update") {
       state.pendingUpdates.push(ops.payload as Record<string, unknown>);
       state.pendingCancels++;
-      return { data: (ops.payload as { status?: string })?.status === 'running'
+      return { data: ['running','pending'].includes((ops.payload as { status?: string })?.status ?? '')
         ? { id: ops.filters.find(([, key]) => key === 'id')?.[2] } : null, error: null };
     }
-    if (table === "automation_pending_executions") return { data: state.pendingRows, error: null };
+    if (table === "automation_pending_executions") {
+      const byId = ops.filters.find(([operator,key]) => operator === 'eq' && key === 'id')?.[2];
+      if (byId) return { data: state.pendingRows.find(row => row.id === byId) ?? null, error: null };
+      if (ops.filters.some(([operator,key]) => operator === 'neq' && key === 'id'))
+        return { data: state.pendingRows.find(row => row.status === 'pending' || row.status === 'running') ?? null,error:null };
+      return { data: state.pendingRows, error: null };
+    }
     return { data: null, error: null };
   }
 
@@ -137,7 +146,9 @@ vi.mock("./admin-client", () => {
       eq: (k: string, v: unknown) => (ops.filters.push(["eq", k, v]), b),
       in: (k: string, v: unknown) => (ops.filters.push(["in", k, v]), b),
       gte: (k: string, v: unknown) => (ops.filters.push(['gte', k, v]), b),
+      gt: (k: string, v: unknown) => (ops.filters.push(['gt', k, v]), b),
       lte: (k: string, v: unknown) => (ops.filters.push(['lte', k, v]), b),
+      neq: (k: string, v: unknown) => (ops.filters.push(['neq', k, v]), b),
       is: () => b,
       contains: () => b,
       order: () => b,
@@ -195,9 +206,53 @@ beforeEach(() => {
   h.state.pendingUpdates = [];
   h.state.conversationState = null;
   h.state.messageStatus = 'sent';
+  h.state.newerCustomer = false;
 });
 
 describe('WhatsApp delivery order', () => {
+  it('keeps the exact interrupted course wait when starting the payment flow', async () => {
+    h.state.owned = {id:'c1'}
+    h.state.automations = [
+      {...automationWithUpdateStep(),id:'payment',name:'YAPE O PLIN',trigger_type:'keyword_match',
+        trigger_config:{keywords:['Activar promoción']}},
+      {...automationWithUpdateStep(),id:'course',name:'FARMACIA A 19.90',trigger_type:'tag_added'},
+    ]
+    h.state.pendingRows = [{id:'prior-course',automation_id:'course',status:'pending',
+      context:{conversation_id:'chat'}}]
+    h.state.stepsByAutomationId.payment = [{id:'payment-wait',automation_id:'payment',
+      step_type:'wait',position:0,parent_step_id:null,step_config:{unit:'minutes',amount:15}}]
+    await runAutomationsForTrigger({accountId:ACCOUNT,triggerType:'keyword_match',contactId:'c1',
+      context:{conversation_id:'chat',message_text:'Activar promoción',inbound_at:'2026-10-18T16:00:00Z'}})
+    expect(h.state.pendingInserts).toContainEqual(expect.objectContaining({
+      automation_id:'payment',context:expect.objectContaining({payment_resume_pending_id:'prior-course',
+        payment_activation_at:'2026-10-18T16:00:00Z'})}))
+  })
+  it('cancels a scheduled payment reminder when the student has replied', async () => {
+    h.state.automations = [{...automationWithUpdateStep(), id:'payment', name:'YAPE O PLIN'}]
+    h.state.conversationState = {automation_enabled:true,last_human_message_at:null}
+    h.state.newerCustomer = true
+    await resumePendingExecution({id:'payment-wait',automation_id:'payment',account_id:ACCOUNT,
+      user_id:'u1',contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,
+      next_step_position:3,context:{conversation_id:'chat',payment_activation_at:'2026-10-18T16:00:00Z'}})
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'cancelled'}))
+    expect(engineSendInteractive).not.toHaveBeenCalled()
+  })
+  it('restores only the saved course position after the final unanswered payment wait', async () => {
+    h.state.automations = [
+      {...automationWithUpdateStep(), id:'payment', name:'YAPE O PLIN'},
+      {...automationWithUpdateStep(), id:'course', name:'FARMACIA A 19.90'},
+    ]
+    h.state.pendingRows = [{id:'prior-course',automation_id:'course',status:'cancelled',
+      context:{conversation_id:'chat'}}]
+    h.state.conversationState = {automation_enabled:true,last_human_message_at:null}
+    await resumePendingExecution({id:'payment-final',automation_id:'payment',account_id:ACCOUNT,
+      user_id:'u1',contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,
+      next_step_position:7,context:{conversation_id:'chat',payment_activation_at:'2026-10-18T16:00:00Z',
+        payment_resume_pending_id:'prior-course',payment_resume_previous:true}})
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'pending',run_at:expect.any(String)}))
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'done'}))
+    expect(engineSendInteractive).not.toHaveBeenCalled()
+  })
   it('keeps the exact pending position when an adviser is still active', async () => {
     h.state.automations = [automationWithUpdateStep()];
     const humanAt = Date.now() - 2 * 60_000;
