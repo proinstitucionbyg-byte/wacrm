@@ -944,7 +944,10 @@ for (const triggerType of automationTriggers) {
   !humanRecentlyActive &&
   !flowConsumed &&
     !automationMatched &&
-  !interactiveReplyId &&
+  // Payment follow-up buttons are intentionally handled by the AI: they
+  // describe the student's current payment status and have no fixed
+  // automation branch. Other interactive replies remain flow-owned.
+  (!interactiveReplyId || interactiveReplyId.startsWith('payment_followup_')) &&
   (inboundText.trim() || imageAnalysis !== null)
 ) {
     // An AI answer to an unrelated question is not a route change. Existing
