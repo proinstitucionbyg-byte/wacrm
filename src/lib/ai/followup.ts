@@ -379,6 +379,9 @@ export async function runIdleFollowups(): Promise<number> {
       candidates = candidates.filter(candidate => !completedMessageOwners.has(candidate.id))
       const customerText = customer.content_text ?? ''
       const focusedCourse=conversationCourse(messages)
+      // A failed block is a saved interruption, not permission to choose a
+      // different stage of the same course. Preserve its position for review.
+      if(focusedCourse && recentRuns?.[0]?.status==='failed') candidates=[]
       if (!textFallback && !focusedCourse && (candidates.length === 0 || /\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText))) {
         const { data: general } = await db.from('automations')
           .select('id, name, trigger_config')

@@ -14,11 +14,11 @@
 - Prioridad al último curso elegido por el estudiante; reconocimiento de Inicial, Admin y RRHH.
 - Sin regreso automático al menú general cuando el curso está identificado. Ante un bloque fallido sin alternativa válida, se deriva a ventas con resumen del punto de continuidad.
 - Reconocimiento del saludo genérico combinado de pauta, sin consumir peticiones de un curso específico.
-- Videos originales conservados; nuevas copias H.264/AAC en el almacenamiento existente. Administración: 14 486 585 bytes; Inicial: 14 237 815 bytes; Farmacia: 14 679 645 bytes. Validación de decodificación completa antes de actualizar enlaces.
+- Los cinco videos quedan en una sola versión de nube por curso y un máximo de 13 000 000 bytes, con nombres cortos. Administración: 11 917 886 bytes; Inicial: 11 741 838 bytes; Farmacia: 12 150 632 bytes; Nutrición: 12 795 862 bytes; Recursos: 7 953 931 bytes. Duración conservada y validación de decodificación completa antes de actualizar enlaces. Originales respaldados localmente, copias antiguas retiradas de la nube después de migrar referencias.
 - Recuperación de los casos interrumpidos desde su bloque guardado, conservando las esperas y sin repetir el inicio. No se reactiva a quienes rechazaron información ni se interrumpen secuencias correctas.
 
 ## Comprobación
 
-- 278 pruebas de IA, motor de automatizaciones y medios de WhatsApp aprobadas.
+- 279 pruebas de IA, motor de automatizaciones y medios de WhatsApp aprobadas.
 - Compilación de producción aprobada.
 - Evidencia operativa y reporte de conversión en `output/video-repair/` (no versionado).

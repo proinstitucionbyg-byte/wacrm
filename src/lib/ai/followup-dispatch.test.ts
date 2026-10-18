@@ -76,6 +76,16 @@ describe('idle follow-up dispatch', () => {
     expect(h.route).toHaveBeenCalledWith(expect.anything(),'account','chat','ventas')
     expect(h.text).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('EDUCACION INICIAL')}))
   })
+  it('does not jump to an unused course block after a failed step',async()=>{
+    h.conv.followup_sent_at=null
+    h.customer.content_text='Quiero información de Nutrición'
+    h.context.mockResolvedValue([{role:'user',content:'Quiero información de Nutrición'}])
+    h.runs=[{automation_id:'nutrition',status:'failed',steps_executed:[]}]
+    h.candidates.mockResolvedValue([{id:'nutrition-curriculum',name:'MALLAS DE NUTRICION'}])
+    expect(await runIdleFollowups()).toBe(1)
+    expect(h.run).not.toHaveBeenCalled()
+    expect(h.route).toHaveBeenCalledWith(expect.anything(),'account','chat','ventas')
+  })
   it('does not reopen a completed course after an off-script AI answer', async () => {
     h.conv.followup_sent_at = null
     h.last = {sender_type:'bot',content_type:'text',content_text:'Sí, puedes estudiar desde tu celular.',created_at:'2026-10-17T19:40:00Z'}
