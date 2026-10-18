@@ -286,7 +286,7 @@ export async function runIdleFollowups(): Promise<number> {
 
       const completedMessageOwners = new Set<string>()
       const { data: recentRuns, error: runsError } = await db.from('automation_logs')
-        .select('automation_id, status, steps_executed')
+        .select('automation_id, status, steps_executed, created_at')
         .eq('account_id', c.account_id).eq('contact_id', c.contact_id)
         .order('created_at', { ascending: false }).limit(100)
       if (runsError) continue
@@ -331,6 +331,19 @@ export async function runIdleFollowups(): Promise<number> {
         .limit(1)
         .maybeSingle()
       if (pendingError || pending) continue
+      // A payment flow added after an older Yape/Plin run has no saved wait.
+      // Do not replace the student's payment decision with general courses.
+      if (!textFallback && /activ(?:a|ar).*promo/i.test(customer.content_text ?? '')) {
+        const paymentRunIds = [...new Set((recentRuns ?? [])
+          .filter(run => run.status !== 'failed' && Date.parse(run.created_at) >= Date.parse(customer.created_at))
+          .map(run => run.automation_id))]
+        if (paymentRunIds.length) {
+          const { data: paymentFlows, error: paymentError } = await db.from('automations')
+            .select('id,name').eq('account_id', c.account_id).in('id', paymentRunIds)
+          if (paymentError) continue
+          if (paymentFlows?.some(flow => flow.name === 'YAPE O PLIN')) continue
+        }
+      }
       const config = await loadAiConfig(db, c.account_id)
       if (!config || !config.autoReplyEnabled) continue
 

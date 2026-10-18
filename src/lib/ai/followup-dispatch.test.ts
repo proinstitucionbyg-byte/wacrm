@@ -5,7 +5,7 @@ const h = vi.hoisted(() => ({
   customer: {} as Record<string, unknown>, pending: [] as unknown[],
   text: vi.fn(), interactive: vi.fn(), context: vi.fn(), candidates: vi.fn(),
   run:vi.fn(), route:vi.fn(), general:null as null | {id:string;name:string;trigger_config:object},
-  runs:[] as Array<{automation_id:string;status?:string;steps_executed:Array<{detail:string}>}>,
+  runs:[] as Array<{automation_id:string;status?:string;created_at?:string;steps_executed:Array<{detail:string}>}>,
   runAutomations:[] as Array<{id:string;name:string}>,
 }))
 vi.mock('./admin-client', () => ({ supabaseAdmin: () => ({ from: (table: string) => {
@@ -205,5 +205,15 @@ describe('idle follow-up dispatch', () => {
     h.pending = [{id:'scheduled'}]
     expect(await runIdleFollowups()).toBe(0)
     expect(h.interactive).not.toHaveBeenCalled()
+  })
+  it('does not launch general courses after a payment activation when an older payment run has no pending wait', async () => {
+    h.conv.followup_sent_at = null
+    h.customer = {sender_type:'customer',content_text:'🔥 Activar promoción',created_at:'2026-10-17T19:29:00Z'}
+    h.last = {sender_type:'bot',content_type:'image',content_text:'Realiza tu pago y envía el comprobante',created_at:'2026-10-17T19:29:10Z'}
+    h.runs = [{automation_id:'payment',status:'success',created_at:'2026-10-17T19:29:02Z',steps_executed:[]}]
+    h.runAutomations = [{id:'payment',name:'YAPE O PLIN'}]
+    expect(await runIdleFollowups()).toBe(0)
+    expect(h.run).not.toHaveBeenCalled()
+    expect(h.text).not.toHaveBeenCalled()
   })
 })
