@@ -16,12 +16,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const decision = parsePaymentDecision(raw);
     if (!decision) return NextResponse.json({ error: 'Elige una decisión. Para rechazo u observación, escribe el motivo.' }, { status: 400 });
     const { data, error } = await ctx.supabase.from('payment_reviews')
-      .update({ status: decision.status, note: decision.note })
+      .update({ status: decision.status, note: decision.note, ...(decision.payment_purpose?{payment_purpose:decision.payment_purpose}:{}) })
       .eq('id', id).eq('account_id', ctx.accountId).eq('version', decision.version)
-      .neq('status', 'validated').select('id,status,version,reviewed_at,reviewed_by,conversation_id').maybeSingle();
+      .neq('status', 'validated').select('id,status,version,reviewed_at,reviewed_by,conversation_id,payment_purpose').maybeSingle();
     if (error) throw error;
     if (!data) return NextResponse.json({ error: 'El caso cambió o ya está validado. Actualiza antes de decidir.' }, { status: 409 });
-    if (data.status === 'validated' && data.conversation_id) {
+    if (data.status === 'validated' && data.payment_purpose==='enrollment' && data.conversation_id) {
       try { await collectConversationEnrollments(supabaseAdmin(), ctx.accountId, data.conversation_id); }
       catch (error) { console.error('[matriculas] payment intake collection failed:', error); }
     }

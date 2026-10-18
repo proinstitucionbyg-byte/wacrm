@@ -26,12 +26,14 @@ export async function POST(request: Request) {
       if (!cleanData || enrollmentIssues(cleanData).length) continue;
       const { data: review, error: reviewError } = await ctx.supabase
         .from('payment_reviews')
-        .select('status,message_id')
+        .select('status,message_id,payment_purpose')
         .eq('id', row.review_id)
         .eq('account_id', ctx.accountId)
         .maybeSingle();
       if (reviewError) throw reviewError;
-      if (review?.status !== 'validated') continue;
+      if (review?.status !== 'validated'||['tuition','other'].includes(review.payment_purpose)) continue;
+      let voucherId=review.message_id;
+      if(!voucherId){const {data:upload,error:uploadError}=await ctx.supabase.from('enrollment_uploads').select('id').eq('account_id',ctx.accountId).eq('review_id',row.review_id).eq('kind','voucher').maybeSingle();if(uploadError)throw uploadError;voucherId=upload?.id??null;}
       const lease = randomUUID();
       const { data: claimed, error: claimError } = await ctx.supabase
         .from('enrollment_drafts')
@@ -53,7 +55,7 @@ export async function POST(request: Request) {
       if (claimError) throw claimError;
       if (claimed)
         return ok({
-          job: { ...claimed, data: cleanData, voucher_message_id: review.message_id },
+          job: { ...claimed, data: cleanData, voucher_message_id: voucherId },
         });
     }
     return ok({ job: null });

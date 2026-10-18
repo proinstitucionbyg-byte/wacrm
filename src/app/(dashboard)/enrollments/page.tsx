@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import {ManualEnrollment} from '@/components/enrollments/manual-enrollment';
 import {
   ENROLLMENT_FIELDS,
   suggestIdentityData,
@@ -454,9 +455,9 @@ function EnrollmentsPageContent() {
   return (
     <section className="space-y-5">
       <h1 className="text-2xl font-bold">REGISTRO DE MATRICULAS</h1>
+      {canEdit&&<ManualEnrollment onCreated={()=>void load()}/>}
       <p className="text-muted-foreground text-sm">
-        Cada ficha corresponde a un pago validado por una persona autorizada.
-        Los faltantes no eliminan la aprobación.
+        Los ingresos manuales esperan la validacion del pago. La numeracion, la carpeta y los documentos se generan en la misma cola de registro. Los faltantes no eliminan una aprobacion.
       </p>
       <Button variant="outline" onClick={load} disabled={loading}>
         Actualizar

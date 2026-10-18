@@ -44,7 +44,7 @@ function C_REGISTRAR_(job) {
   if(index<0)throw new Error('REVISAR CURSO: NO COINCIDE CON EL CUADRO DE INICIOS');
   const curso=cursos[index], inicios=TABLA_('CUADRO DE INICIOS').filter(function(r){return CLAVE_(r[1])===curso&&DIA_(r[3])===d.start_date&&CLAVE_(r[4])==='SI';});
   if(inicios.length!==1)throw new Error('REVISAR FECHA OFICIAL: NO COINCIDE CON EL CUADRO DE INICIOS');
-  const montoAceptado=Number(d.amount)===d.prices[0]||(d.prices[0]===19.9&&Number(d.amount)>=19&&Number(d.amount)<=21);
+  const montoAceptado=Number(d.amount)===d.prices[0]||(d.prices[0]===19.9&&Number(d.amount)>=19&&Number(d.amount)<=21.9);
   const identidad=(d.identity_confirmed&&d.identity_message_ids.length)||(d.declaration_message_ids||[]).length;
   if(!identidad||!d.offer_confirmed||d.prices.length!==6||!montoAceptado)throw new Error('FALTAN CONFIRMACIONES DE IDENTIDAD U OFERTA');
   const markerColumn=29, header=CLAVE_(s.getRange(1,markerColumn).getValue());

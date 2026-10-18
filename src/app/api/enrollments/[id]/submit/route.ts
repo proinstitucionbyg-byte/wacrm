@@ -40,12 +40,12 @@ export async function POST(
       );
     const { data: review, error: reviewError } = await supabaseAdmin()
       .from('payment_reviews')
-      .select('status')
+      .select('status,payment_purpose')
       .eq('id', draft.review_id)
       .eq('account_id', ctx.accountId)
       .maybeSingle();
     if (reviewError) throw reviewError;
-    if (review?.status !== 'validated')
+    if (review?.status !== 'validated'||['tuition','other'].includes(review.payment_purpose))
       return NextResponse.json(
         { error: 'El pago necesita validación humana.' },
         { status: 409 }

@@ -1,5 +1,7 @@
 export const PAYMENT_STATUSES = ['pending', 'validated', 'rejected', 'observation'] as const;
 export type PaymentStatus = typeof PAYMENT_STATUSES[number];
+export const PAYMENT_PURPOSES = {enrollment:'NUEVA MATRICULA',tuition:'PENSION DE ESTUDIANTE',other:'OTRO PAGO'} as const;
+export type PaymentPurpose = keyof typeof PAYMENT_PURPOSES;
 /** Age is a warning, never an expiry or an automatic decision. */
 export function oldReceiptDate(raw: string | null | undefined, today = new Date()): boolean {
   if (!raw) return false;
@@ -19,7 +21,7 @@ export const PAYMENT_LABELS: Record<PaymentStatus, string> = {
 export function isPaymentStatus(value: unknown): value is PaymentStatus {
   return typeof value === 'string' && PAYMENT_STATUSES.includes(value as PaymentStatus);
 }
-export function parsePaymentDecision(body: unknown): { status: Exclude<PaymentStatus, 'pending'>; note: string; version: number } | null {
+export function parsePaymentDecision(body: unknown): { status: Exclude<PaymentStatus, 'pending'>; note: string; version: number; payment_purpose?: PaymentPurpose } | null {
   if (!body || typeof body !== 'object') return null;
   const raw = body as Record<string, unknown>;
   if (!isPaymentStatus(raw.status) || raw.status === 'pending' ||
@@ -27,9 +29,12 @@ export function parsePaymentDecision(body: unknown): { status: Exclude<PaymentSt
       typeof raw.note !== 'string' || raw.note.length > 2000) return null;
   const note = raw.note.trim();
   if (raw.status !== 'validated' && !note) return null;
-  return { status: raw.status, note, version: raw.version as number };
+  const purpose=typeof raw.payment_purpose==='string'&&Object.hasOwn(PAYMENT_PURPOSES,raw.payment_purpose)?raw.payment_purpose as PaymentPurpose:undefined;
+  if(raw.status==='validated'&&!purpose)return null;
+  return { status: raw.status, note, version: raw.version as number,...(purpose?{payment_purpose:purpose}:{}) };
 }
 export interface PaymentReview {
+  payment_purpose?: PaymentPurpose | 'unclassified';
   id: string; message_id: string | null; conversation_id: string | null;
   contact_id: string | null; status: PaymentStatus; source_area: string;
   source_adviser: string | null; origin: string; note: string | null;

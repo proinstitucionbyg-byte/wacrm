@@ -45,6 +45,10 @@ beforeEach(() => {
     mocks.order,
   ])
     fn.mockReturnValue(chain);
+  mocks.from.mockImplementation((table:string)=>{
+    if(table==='enrollment_uploads'){const uploads={select:()=>uploads,eq:()=>uploads,in:async()=>({data:[],error:null})};return uploads;}
+    return chain;
+  });
   mocks.role.mockResolvedValue({
     accountId: 'account-a',
     supabase: { from: mocks.from },

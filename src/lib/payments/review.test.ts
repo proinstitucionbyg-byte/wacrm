@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { isPaymentStatus, parsePaymentDecision } from './review';
 describe('decision humana de pago', () => {
   it('acepta validacion explicita y conserva la version revisada', () => {
-    expect(parsePaymentDecision({ status: 'validated', version: 1, note: '  Revisado  ' })).toEqual({ status: 'validated', version: 1, note: 'Revisado' });
+    expect(parsePaymentDecision({ status: 'validated', version: 1, note: '  Revisado  ',payment_purpose:'tuition' })).toEqual({ status: 'validated', version: 1, note: 'Revisado',payment_purpose:'tuition' });
+    expect(parsePaymentDecision({ status:'validated',version:1,note:'' })).toBeNull();
   });
   it('exige un motivo para rechazos y observaciones', () => {
     for (const status of ['rejected', 'observation']) {

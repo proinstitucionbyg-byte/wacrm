@@ -5,17 +5,19 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useMemberPermissions } from '@/hooks/use-member-permissions';
-import { PAYMENT_LABELS, oldReceiptDate, type PaymentReview, type PaymentStatus } from '@/lib/payments/review';
+import { PAYMENT_LABELS, PAYMENT_PURPOSES, oldReceiptDate, type PaymentPurpose, type PaymentReview, type PaymentStatus } from '@/lib/payments/review';
 
 export function PaymentDecision({ review, canReview, onChanged }: { review: PaymentReview; canReview: boolean; onChanged: () => void }) {
   const { can } = useMemberPermissions();
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const [purpose,setPurpose]=useState<PaymentPurpose | ''>(review.payment_purpose&&review.payment_purpose!=='unclassified'?review.payment_purpose:'');
   async function decide(status: Exclude<PaymentStatus, 'pending'>) {
+    if(status==='validated'&&!purpose){toast.error('Indica si es nueva matricula, pension u otro pago.');return;}
     if (status !== 'validated' && !note.trim()) { toast.error('Escribe el motivo de rechazo u observación.'); return; }
     setSaving(true);
     try {
-      const res = await fetch(`/api/payments/${review.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, note, version: review.version }) });
+      const res = await fetch(`/api/payments/${review.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, note, version: review.version,payment_purpose:purpose||undefined }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'No se pudo guardar la decisión');
       toast.success('Decisión guardada.'); onChanged();
@@ -28,12 +30,14 @@ export function PaymentDecision({ review, canReview, onChanged }: { review: Paym
     <p className="text-xs text-muted-foreground">Origen: {review.origin} · {review.source_area}{review.source_adviser ? ` · ${review.source_adviser}` : ''}</p>
     {review.note && <p className="whitespace-pre-wrap text-sm">Motivo: {review.note}</p>}
     {review.reviewed_at && <p className="text-xs text-muted-foreground">Decisión registrada: {new Date(review.reviewed_at).toLocaleString('es-PE', { timeZone: 'America/Lima' })}</p>}
-    {review.status === 'validated' && can('enrollments', 'view') && <Link href={`/enrollments?review_id=${review.id}`} className="block text-sm underline">Continuar al registro del estudiante</Link>}
+    {review.status === 'validated' && review.payment_purpose==='enrollment' && can('enrollments', 'view') && <Link href={`/enrollments?review_id=${review.id}`} className="block text-sm underline">Continuar al registro del estudiante</Link>}
+    {review.payment_purpose&&review.payment_purpose!=='unclassified'&&<p className="text-sm font-semibold">{PAYMENT_PURPOSES[review.payment_purpose]}</p>}
     {canReview && review.status !== 'validated' && <>
+      <label className="block text-xs">¿A que corresponde el pago?<select value={purpose} onChange={event=>setPurpose(event.target.value as PaymentPurpose | '')} disabled={saving} className="mt-1 w-full rounded-md border border-border bg-background p-2"><option value="">Seleccionar tipo de pago</option>{Object.entries(PAYMENT_PURPOSES).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
       <label className="block text-xs">Observación de tu revisión
         <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} disabled={saving} className="mt-1 min-h-20 w-full rounded-md border border-border bg-background p-2 text-sm" />
       </label>
-      <p className="text-xs text-muted-foreground">Valida despues de comprobar el abono en tus registros. Cuando los datos esten completos, se registrara la matricula y se enviaran los tres PDF.</p>
+      <p className="text-xs text-muted-foreground">Valida despues de comprobar el abono. Solo una nueva matricula genera registro y documentos. Las pensiones y otros pagos pasan a fidelizacion, sin contarse como venta.</p>
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" disabled={saving} onClick={() => decide('validated')}>✓ VALIDADO</Button>
         <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => decide('rejected')}>NO VALIDADO</Button>

@@ -31,6 +31,13 @@ export default function NotificationsPage() {
   const [markingAll, setMarkingAll] = useState(false);
   const [completing, setCompleting] = useState<string | null>(null);
   const [detail, setDetail] = useState<Notification | null>(null);
+  const [canDismiss,setCanDismiss]=useState(false);
+  useEffect(()=>{void createClient().rpc('can_manage_team_notices').then(({data})=>setCanDismiss(data===true));},[]);
+  async function dismiss(n:Notification,everyone:boolean){
+    const {error}=await createClient().rpc('dismiss_notification',{p_id:n.id,p_everyone:everyone});
+    if(error){toast.error('No se pudo retirar el aviso.');return;}
+    setNotifications(current=>current?.filter(item=>item.id!==n.id)??null);setDetail(null);toast.success(everyone?'Aviso retirado para todos sus destinatarios.':'Aviso retirado para ti.');
+  }
   const load = useCallback(async () => {
     if (!accountId) return;
     const supabase = createClient();
@@ -282,6 +289,7 @@ export default function NotificationsPage() {
                     </p>
                   </div>
                 </button>
+                {canDismiss&&<div className="flex flex-wrap gap-2 px-4 py-2"><Button size="sm" variant="outline" onClick={()=>void dismiss(n,false)}>Eliminar para mi</Button><Button size="sm" variant="outline" onClick={()=>void dismiss(n,true)}>Eliminar para todos</Button></div>}
                 {n.requires_action && n.dedup_key?.startsWith('calendar:') ? <CalendarActions notice={n} onChanged={load}/> : n.requires_action && <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3">
                   <Button size="sm" variant={n.completed_at ? 'secondary' : 'outline'} disabled={completing===n.id} onClick={()=>void completeTask(n)}>{completing===n.id ? 'GUARDANDO…' : n.completed_at ? '✓ REALIZADO · DESMARCAR' : 'MARCAR COMO REALIZADO'}</Button>
                   {n.completed_at && <span className="text-muted-foreground text-xs">Registrado el {new Date(n.completed_at).toLocaleString('es-PE',{timeZone:'America/Lima'})}. Responsable guardado para el reporte administrativo.</span>}

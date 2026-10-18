@@ -1,6 +1,9 @@
 export const MEMBER_PRESETS = {
   ventas: { label: 'AGENTE DE VENTAS', role: 'agent', area: 'VENTAS', cargo: 'AGENTE' },
   fidelizacion: { label: 'AGENTE DE FIDELIZACION', role: 'agent', area: 'FIDELIZACION', cargo: 'AGENTE' },
+  audiovisual: { label: 'AUDIOVISUAL', role: 'agent', area: 'AUDIOVISUAL', cargo: 'AUDIOVISUAL' },
+  docente: { label: 'DOCENTE', role: 'agent', area: 'DOCENTES', cargo: 'DOCENTE' },
+  coordinador_docentes: { label: 'COORDINADOR DE DOCENTES', role: 'agent', area: 'COORDINADOR DE DOCENTES', cargo: 'COORDINADOR' },
   coordinador: { label: 'COORDINADOR', role: 'agent', area: 'SIN AREA', cargo: 'COORDINADOR' },
   administrador: { label: 'ADMINISTRADOR', role: 'admin', area: 'ADMINISTRATIVA', cargo: 'ADMINISTRADOR' },
 } as const;

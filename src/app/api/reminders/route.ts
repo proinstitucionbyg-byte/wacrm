@@ -3,7 +3,7 @@ import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
 import { normalizePhone } from '@/lib/whatsapp/phone-utils';
 
 type ReminderInput = { body?: unknown; due_at?: unknown; repeat_days?: unknown; conversation_id?: unknown;
-  action_kind?: unknown; destination_phone?: unknown; message_text?: unknown };
+  action_kind?: unknown; destination_phone?: unknown; message_text?: unknown; recipient_ids?: unknown };
 
 export async function GET(request: Request) {
   try {
@@ -25,7 +25,9 @@ export async function GET(request: Request) {
       if (profileError) throw profileError;
       names = new Map((profiles ?? []).map(profile => [profile.user_id, profile.full_name || profile.email || 'Asesora']));
     }
-    return NextResponse.json({ reminders: (data ?? []).map(item => ({ ...item, owner_name: names.get(item.user_id) ?? null })),
+    const {data:recipients,error:recipientError}=await ctx.supabase.from('profiles').select('user_id,full_name,nickname,area').eq('account_id',ctx.accountId).order('full_name');
+    if(recipientError)throw recipientError;
+    return NextResponse.json({ recipients:recipients??[],reminders: (data ?? []).map(item => ({ ...item, owner_name: names.get(item.user_id) ?? null })),
       canViewTeam: ctx.role === 'owner', currentUserId: ctx.userId });
   } catch (error) { return toErrorResponse(error); }
 }
@@ -40,6 +42,12 @@ export async function POST(request: Request) {
     }
     const rows = [];
     for (const entry of entries) {
+      const recipients=entry.recipient_ids===undefined?[ctx.userId]:entry.recipient_ids;
+      if(!Array.isArray(recipients)||!recipients.length||recipients.length>50||recipients.some(id=>typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id)))return NextResponse.json({error:'Selecciona entre 1 y 50 destinatarios del equipo.'},{status:400});
+      const uniqueRecipients=[...new Set(recipients as string[])];
+      const {data:members,error:membersError}=await ctx.supabase.from('profiles').select('user_id').eq('account_id',ctx.accountId).in('user_id',uniqueRecipients);
+      if(membersError)throw membersError;
+      if(members?.length!==uniqueRecipients.length)return NextResponse.json({error:'Los destinatarios deben pertenecer a tu equipo.'},{status:403});
       const body = typeof entry.body === 'string' ? entry.body.trim() : '';
       const dueAt = typeof entry.due_at === 'string' ? new Date(entry.due_at) : new Date(NaN);
       const repeatDays = entry.repeat_days == null ? null : Number(entry.repeat_days);
@@ -54,6 +62,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Escribe cada recordatorio con una fecha futura válida.' }, { status: 400 });
       }
       if (kind === 'message') {
+        if(uniqueRecipients.length!==1||uniqueRecipients[0]!==ctx.userId)return NextResponse.json({error:'El envio programado de mensajes solo puede quedar a tu nombre. Para el equipo usa un recordatorio interno.'},{status:400});
         if (!/^9\d{8}$/.test(destinationPhone) || !messageText || messageText.length > 1000 || repeatDays !== null) {
           return NextResponse.json({ error: 'Para enviar un mensaje, indica un celular peruano y el texto exacto; el envío no puede repetirse.' }, { status: 400 });
         }
@@ -100,7 +109,7 @@ export async function POST(request: Request) {
         if (visibilityError) throw visibilityError;
         if (!visible) return NextResponse.json({ error: 'No tienes acceso a ese chat.' }, { status: 403 });
       }
-      rows.push({ account_id: ctx.accountId, user_id: ctx.userId, conversation_id: conversationId,
+      for(const recipient of uniqueRecipients)rows.push({ account_id: ctx.accountId, user_id: recipient, created_by:ctx.userId,conversation_id: recipient===ctx.userId?conversationId:null,
         body, due_at: dueAt.toISOString(), repeat_days: repeatDays, action_kind: kind,
         destination_phone: kind === 'message' ? destinationPhone : null,
         message_text: kind === 'message' ? messageText : null });

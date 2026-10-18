@@ -30,12 +30,12 @@ export async function collectConversationEnrollments(
   if (!draft || (selectedDraftId && !draft.data?.course)) return;
   const { data: review, error: reviewError } = await db
     .from('payment_reviews')
-    .select('status,created_at,evidence')
+    .select('status,created_at,evidence,payment_purpose')
     .eq('id', draft.review_id)
     .eq('account_id', accountId)
     .maybeSingle();
   if (reviewError) throw reviewError;
-  if (review?.status !== 'validated') return;
+  if (review?.status !== 'validated'||['tuition','other'].includes(review.payment_purpose)) return;
   // Include data sent before the voucher. Contradictory written/photo values stay pending.
   const { data: messages, error: messageError } = await db
     .from('messages')

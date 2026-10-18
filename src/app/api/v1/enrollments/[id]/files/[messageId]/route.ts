@@ -43,11 +43,14 @@ export async function GET(
       : [];
     const declarationIds: string[] = draft.data?.declaration_message_ids ?? [];
     const guardianIds: string[] = draft.data?.guardian_message_ids ?? [];
+    let upload:{storage_path:string;mime_type:string;kind:string}|null=null;
+    if(!review?.message_id){const result=await ctx.supabase.from('enrollment_uploads').select('storage_path,mime_type,kind').eq('id',messageId).eq('account_id',ctx.accountId).eq('review_id',draft.review_id).maybeSingle();if(result.error)throw result.error;upload=result.data;}
     if (
       review?.status !== 'validated' ||
-      (messageId !== review.message_id && !identityIds.includes(messageId) && !declarationIds.includes(messageId) && !guardianIds.includes(messageId))
+      (messageId !== review.message_id && !identityIds.includes(messageId) && !declarationIds.includes(messageId) && !guardianIds.includes(messageId) && upload?.kind!=='voucher')
     )
       throw new ApiError('not_found', 'Archivo no autorizado', 404);
+    if(upload){const {data:blob,error:downloadError}=await ctx.supabase.storage.from('enrollment-evidence').download(upload.storage_path);if(downloadError)throw downloadError;return new Response(blob,{headers:{'Content-Type':upload.mime_type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});}
     const { data: message, error: messageError } = await ctx.supabase
       .from('messages')
       .select('media_url,content_type,content_text,created_at,message_id')

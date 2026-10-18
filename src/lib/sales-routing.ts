@@ -1,4 +1,4 @@
-export const TEAM_AREAS = ['SIN AREA', 'VENTAS', 'FIDELIZACION', 'ADMINISTRATIVA', 'FINANZAS'] as const;
+export const TEAM_AREAS = ['SIN AREA', 'VENTAS', 'FIDELIZACION', 'ADMINISTRATIVA', 'FINANZAS', 'AUDIOVISUAL', 'DOCENTES', 'COORDINADOR DE DOCENTES'] as const;
 export interface SalesMember { user_id: string; area: string; cargo: string; percentage: number }
 export function parseSalesRouting(value: unknown): { enabled: boolean; version: number; members: SalesMember[] } | null {
   if (!value || typeof value !== 'object') return null;

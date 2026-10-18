@@ -27,6 +27,7 @@ export type EnrollmentData = Partial<
   prices?: number[];
 };
 export interface EnrollmentDraft {
+  payment_status?: string;
   id: string;
   review_id: string;
   conversation_id: string | null;
@@ -183,7 +184,7 @@ export function enrollmentIssues(data: EnrollmentData): string[] {
     issues.push('REVISAR MONTO');
   // CEO-approved exception for this first-month promotion only; retain actual paid amount.
   const paid = Number(data.amount);
-  const acceptedFirstMonth = data.prices?.[0] === 19.9 && paid >= 19 && paid <= 21;
+  const acceptedFirstMonth = data.prices?.[0] === 19.9 && paid >= 19 && paid <= 21.9;
   if (data.prices?.length === 6 && paid !== data.prices[0] && !acceptedFirstMonth)
     issues.push('PAGO PARCIAL O DISTINTO DE LA OFERTA: REVISAR');
   return [...new Set(issues)];

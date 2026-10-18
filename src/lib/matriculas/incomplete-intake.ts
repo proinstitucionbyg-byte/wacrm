@@ -105,14 +105,14 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
     if (draftError) throw draftError;
     const { data: review, error: reviewError } = await db
       .from('payment_reviews')
-      .select('status')
+      .select('status,payment_purpose')
       .eq('id', draft?.review_id)
       .eq('account_id', watch.account_id)
       .maybeSingle();
     if (reviewError) throw reviewError;
     if (
       !draft ||
-      review?.status !== 'validated' ||
+      review?.status !== 'validated' || ['tuition','other'].includes(review.payment_purpose)||
       draft.status !== 'collecting'
     ) {
       const closed = await db

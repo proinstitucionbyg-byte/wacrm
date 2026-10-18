@@ -7,7 +7,7 @@ const call=(preset:unknown='ventas')=>POST(new Request('https://crm.test',{metho
 beforeEach(()=>{vi.resetAllMocks();m.role.mockResolvedValue({supabase:{rpc:m.rpc}});m.rpc.mockResolvedValue({error:null});});
 describe('apply team permission preset',()=>{
   it('requires admin authentication',async()=>{m.role.mockRejectedValue({status:403});expect((await call()).status).toBe(403);expect(m.rpc).not.toHaveBeenCalled();});
-  it.each(['ventas','fidelizacion','coordinador','administrador'])('uses the guarded database function for %s',async(preset)=>{expect((await call(preset)).status).toBe(200);expect(m.rpc).toHaveBeenCalledWith('apply_member_preset',{p_user_id:'target',p_preset:preset});});
+  it.each(['ventas','fidelizacion','coordinador','administrador','audiovisual','docente','coordinador_docentes'])('uses the guarded database function for %s',async(preset)=>{expect((await call(preset)).status).toBe(200);expect(m.rpc).toHaveBeenCalledWith('apply_member_preset',{p_user_id:'target',p_preset:preset});});
   it.each(['owner','',null,{}])('rejects an unknown preset %j',async(preset)=>{expect((await call(preset)).status).toBe(400);expect(m.rpc).not.toHaveBeenCalled();});
   it('preserves database access denials and hides database details',async()=>{m.rpc.mockResolvedValue({error:{code:'42501',message:'private DB detail'}});const res=await call();expect(res.status).toBe(403);expect(await res.text()).not.toContain('private DB detail');});
   it('does not report success after another database failure',async()=>{m.rpc.mockResolvedValue({error:{code:'22023'}});expect((await call()).status).toBe(400);});

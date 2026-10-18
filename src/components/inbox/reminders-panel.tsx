@@ -25,6 +25,8 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
   const [teamView, setTeamView] = useState(false);
   const [canViewTeam, setCanViewTeam] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [recipients,setRecipients]=useState<{user_id:string;full_name:string|null;nickname:string|null;area:string|null}[]>([]);
+  const [selectedRecipients,setSelectedRecipients]=useState<string[]>([]);
   const [body, setBody] = useState('');
   const [drafts, setDrafts] = useState<ReminderDraft[]>([]);
   const [dueLocal, setDueLocal] = useState('');
@@ -99,10 +101,11 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
     try {
       const response = await fetch(teamView ? '/api/reminders?scope=team' : '/api/reminders');
       if (!response.ok) throw new Error();
-      const result = await response.json() as { reminders: Reminder[]; canViewTeam: boolean; currentUserId: string };
+      const result = await response.json() as { reminders: Reminder[]; canViewTeam: boolean; currentUserId: string;recipients:typeof recipients };
       setItems(result.reminders);
       setCanViewTeam(result.canViewTeam);
       setCurrentUserId(result.currentUserId);
+      setRecipients(result.recipients??[]);
     } catch { toast.error('No se pudieron cargar los recordatorios.'); }
   }, [teamView]);
   useEffect(() => { if (open) void refresh(); }, [open, refresh]);
@@ -146,7 +149,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
         body: JSON.stringify({ reminders: entries.map(entry => ({ body: entry.body,
           due_at: new Date(entry.dueLocal).toISOString(), repeat_days: entry.repeatDays,
           conversation_id: conversationId, action_kind: entry.sendIntent ? 'message' : 'notification',
-          destination_phone: entry.destinationPhone, message_text: entry.messageText })) }) });
+          destination_phone: entry.destinationPhone, message_text: entry.messageText,recipient_ids:selectedRecipients.length?selectedRecipients:undefined })) }) });
       if (!response.ok) throw new Error((await response.json()).error || 'No se pudo guardar.');
       setBody(''); setDrafts([]); setDueLocal(''); setRepeatDays(''); setNeedsInterval(false);
       await refresh();
@@ -220,6 +223,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
             <button type="button" onClick={() => setTeamView(true)} aria-pressed={teamView}
               className={`rounded-md border px-3 py-1 text-sm ${teamView ? 'border-sky-500 text-sky-400' : 'border-border'}`}>Todo el equipo</button>
           </div>}
+          <label className="block text-sm">¿Para quien es el recordatorio?<select multiple value={selectedRecipients} onChange={event=>setSelectedRecipients(Array.from(event.target.selectedOptions,option=>option.value))} className="mt-1 max-h-32 w-full rounded-md border border-border bg-background p-2">{recipients.map(person=><option key={person.user_id} value={person.user_id}>{person.nickname||person.full_name||'Integrante'}{person.user_id===currentUserId?' (yo)':''}{person.area?' — '+person.area:''}</option>)}</select><span className="text-xs text-muted-foreground">Sin seleccionar personas: solo para mi. Puedes elegir varios integrantes.</span></label>
           <label className="block text-sm">¿Qué quieres recordar?
             <textarea value={body} onChange={event => updateBody(event.target.value)} rows={3} maxLength={10000}
               placeholder="Recuérdame mañana a las 3 de la tarde llamar al estudiante"

@@ -34,14 +34,14 @@ describe('human payment decisions', () => {
     expect(mocks.from).not.toHaveBeenCalled();
   });
   it('scopes a human approval to account, version and unlocked status', async () => {
-    expect((await PATCH(request({ status: 'validated', note: 'abono comprobado', version: 1 }), context())).status).toBe(200);
+    expect((await PATCH(request({ status: 'validated', note: 'abono comprobado', version: 1,payment_purpose:'tuition' }), context())).status).toBe(200);
     expect(mocks.eq).toHaveBeenCalledWith('account_id', 'account-owner');
     expect(mocks.eq).toHaveBeenCalledWith('version', 1);
     expect(mocks.neq).toHaveBeenCalledWith('status', 'validated');
-    expect(mocks.update).toHaveBeenCalledWith({ status: 'validated', note: 'abono comprobado' });
+    expect(mocks.update).toHaveBeenCalledWith({ status: 'validated', note: 'abono comprobado',payment_purpose:'tuition' });
   });
   it('returns conflict when another review already changed the record', async () => {
     mocks.single.mockResolvedValue({ data: null, error: null });
-    expect((await PATCH(request({ status: 'validated', note: '', version: 1 }), context())).status).toBe(409);
+    expect((await PATCH(request({ status: 'validated', note: '', version: 1,payment_purpose:'enrollment' }), context())).status).toBe(409);
   });
 });
