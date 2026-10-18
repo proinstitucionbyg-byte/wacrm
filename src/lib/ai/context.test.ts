@@ -17,6 +17,13 @@ function fakeDb(rows: unknown[]): SupabaseClient {
 }
 
 describe('buildConversationContext', () => {
+  it('keeps course button titles and excludes failed outgoing captions from the context',async()=>{
+    const result=await buildConversationContext(fakeDb([
+      {sender_type:'bot',content_type:'video',content_text:'Clase Admin',status:'failed'},
+      {sender_type:'customer',content_type:'interactive',content_text:'🌱 Cero en Inicial',status:'delivered'},
+    ]),'conv-1')
+    expect(result).toEqual([{role:'user',content:'🌱 Cero en Inicial'}])
+  })
   it('includes image evidence and recipient comparison as unverified data', async () => {
     const result = await buildConversationContext(fakeDb([{ sender_type: 'customer', content_type: 'image', content_text: 'Mi pago', image_analysis: { status: 'pending_review', category: 'payment_receipt', fields: { amount: '19.90' }, recipient_check: { expected: 'LUIS BRAYAN PALACIOS CARHUAPOMA', status: 'exact_match' } } }]), 'conv-1')
     expect(result[0].role).toBe('user')

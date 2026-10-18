@@ -27,7 +27,7 @@ vi.mock('./admin-client', () => ({ supabaseAdmin: () => ({ from: (table: string)
 } }) }))
 vi.mock('./config', () => ({loadAiConfig:async()=>({autoReplyEnabled:true})}))
 vi.mock('./context', () => ({buildConversationContext:h.context}))
-vi.mock('./automation-match', () => ({findCandidateAutomations:h.candidates}))
+vi.mock('./automation-match', async importOriginal => ({...await importOriginal<typeof import('./automation-match')>(),findCandidateAutomations:h.candidates}))
 vi.mock('@/lib/automations/engine', () => ({runAutomationById:h.run}))
 vi.mock('./handoff-routing', async importOriginal => ({...await importOriginal<typeof import('./handoff-routing')>(),routeConversationToArea:h.route}))
 vi.mock('@/lib/automations/meta-send', () => ({engineSendInteractive:h.interactive}))
@@ -56,6 +56,26 @@ beforeEach(() => {
 })
 
 describe('idle follow-up dispatch', () => {
+  it('retains the student choice when the five latest messages are all outgoing',async()=>{
+    h.conv.followup_sent_at=null
+    h.customer.content_text='Información de nutrición'
+    h.context.mockResolvedValue([{role:'assistant',content:'Selecciona una opción'}])
+    h.candidates.mockResolvedValue([{id:'nutrition',name:'NUTRICION 19.90'}])
+    expect(await runIdleFollowups()).toBe(1)
+    expect(h.candidates).toHaveBeenCalledWith(expect.anything(),'account',expect.arrayContaining([{role:'user',content:'Información de nutrición'}]),3)
+    expect(h.run).toHaveBeenCalledWith(expect.objectContaining({automationId:'nutrition'}))
+  })
+  it('never sends a general menu when the last selected button identifies Inicial',async()=>{
+    h.conv.followup_sent_at=null
+    h.last={sender_type:'bot',content_type:'text',content_text:'Nuestra clase de Inicial',created_at:'2026-10-17T19:40:00Z'}
+    h.context.mockResolvedValue([{role:'user',content:'🌱 Cero en Inicial'},{role:'assistant',content:'Nuestra clase de Inicial'}])
+    h.runs=[{automation_id:'education',status:'failed',steps_executed:[]}]
+    h.candidates.mockResolvedValue([])
+    expect(await runIdleFollowups()).toBe(1)
+    expect(h.run).not.toHaveBeenCalled()
+    expect(h.route).toHaveBeenCalledWith(expect.anything(),'account','chat','ventas')
+    expect(h.text).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('EDUCACION INICIAL')}))
+  })
   it('does not reopen a completed course after an off-script AI answer', async () => {
     h.conv.followup_sent_at = null
     h.last = {sender_type:'bot',content_type:'text',content_text:'Sí, puedes estudiar desde tu celular.',created_at:'2026-10-17T19:40:00Z'}

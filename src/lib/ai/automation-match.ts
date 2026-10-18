@@ -24,6 +24,25 @@ function normalize(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
+/** Button titles often abbreviate the course, unlike the academic calendar. */
+export function salesCourseKey(text: string): string | null {
+  return courseKey(normalize(text).replace(/\binicial\b/g,'educacion inicial')
+    .replace(/\b(?:rrhh|rr\.hh|recursos humanos)\b/g,'recursos')
+    .replace(/\basistente a\b/g,'asistente administrativo')
+    .replace(/\badministracion\b/g,'administrativo'))
+}
+
+export function conversationCourse(messages: ChatMessage[]): string | null {
+  // The student's latest choice wins over earlier courses and our old offers.
+  for (const role of ['user','assistant']) {
+    for (const message of messages.filter(m=>m.role===role).slice().reverse()) {
+      const course=salesCourseKey(message.content)
+      if(course)return course
+    }
+  }
+  return null
+}
+
 function tokenize(s: string): string[] {
   const out = normalize(s)
     .split(/[^a-z0-9]+/)
@@ -48,19 +67,20 @@ interface Doc {
   extraTokens: string[]
   curriculum: boolean
   promotion: boolean
+  course: string | null
 }
 
 /** Explicit course-information requests run the saved block, without asking an LLM to reproduce it. */
 export function preferredCourseInformationAutomation(options: AutomationOption[], messages: ChatMessage[]): string | null {
   const latest = normalize(messages.filter(m => m.role === 'user').at(-1)?.content ?? '')
-  const course = courseKey(latest)
+  const course = salesCourseKey(latest)
   if (!course) return null
   const curriculum = /\b(mallas?|mayas?|temario|plan de estudios)\b/.test(latest)
-  if (!curriculum && !/\b(info|informacion|promocion|promo)\b/.test(latest)) return null
+  if (!curriculum && !/\b(info|informacion|promocion|promo|quiero|quisiera|deseo|interesa)\b/.test(latest)) return null
   if (!curriculum && /\b(pagar|pago|yape|plin|cuenta|matricularme|inscribirme|activar)\b|\bactiva (?:la|mi|tu|esta|promo)\b/.test(latest)) return null
   const matches = options.filter(option => {
     const name = normalize(option.name ?? '')
-    return courseKey(name) === course && (curriculum
+    return salesCourseKey(name) === course && (curriculum
       ? /\b(mallas?|mayas?|temario|plan de estudios)\b/.test(name)
       : !/\b(mallas?|mayas?|temario|plan de estudios)\b/.test(name) && /\b(promo|promocion|informacion)\b|19[.,]90/.test(name))
   })
@@ -95,6 +115,7 @@ export async function findCandidateAutomations(
       .slice(-RECENT_USER_MESSAGES)
 
     const latest = normalize(userMessages.at(-1)?.content ?? '')
+    const focus=conversationCourse(messages)
     const wantsCurriculum = /\b(mallas?|mayas?|temario|modulos|plan de estudios)\b|que (?:voy a |se )?aprend/.test(latest)
     // A welcome or a clarification is not evidence that the main offer was sent.
     const primaryInformationShared = messages.some((m) =>
@@ -142,6 +163,7 @@ export async function findCandidateAutomations(
         extraTokens: tokenize(`${r.description ?? ''} ${keywords.join(' ')}`),
         curriculum: /\b(mallas?|mayas?|temario|plan de estudios)\b/.test(normalize(name)),
         promotion: /\b(promo|promocion)\b|19[.,]90/.test(normalize(name)),
+        course: salesCourseKey(name) ?? salesCourseKey(keywords.join(' ')),
       }
     })
 
@@ -167,7 +189,7 @@ export async function findCandidateAutomations(
         }
         return { d, score }
       })
-      .filter((x) => x.score > 0 && (!x.d.curriculum || wantsCurriculum || primaryInformationShared))
+      .filter((x) => x.score > 0 && (!focus || x.d.course===focus || normalize(x.d.label).trim()==='yape o plin') && (!x.d.curriculum || wantsCurriculum || primaryInformationShared))
       .sort((a, b) => {
         // An explicit curriculum request is different from a first request for course info.
         if (wantsCurriculum && a.d.curriculum !== b.d.curriculum) return Number(b.d.curriculum) - Number(a.d.curriculum)

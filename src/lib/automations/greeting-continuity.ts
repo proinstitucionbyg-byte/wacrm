@@ -33,6 +33,9 @@ export function matchesGreeting(automation: Automation, messageText?: string): b
   const text = normalizeGreeting(messageText)
   if (!text || /\b(asesor|asesora|humano|persona|alguien|atencion|atiendan)\b/.test(text)) return false
   const cfg = automation.trigger_config as { keywords?: string[]; match_type?: string }
+  // Advertising's standard opener is a greeting, even when it combines
+  // "hola" and "quiero más información" instead of matching either alone.
+  if (/^(?:hola[\s!,;:.]*)?(?:quiero|deseo|necesito|quisiera)(?:\s+mas)?\s+informacion$/.test(text)) return true
   return cfg.match_type === 'exact' && Array.isArray(cfg.keywords)
     && cfg.keywords.some((keyword) => normalizeGreeting(keyword) === text)
 }

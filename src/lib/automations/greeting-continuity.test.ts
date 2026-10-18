@@ -29,4 +29,9 @@ describe('the two existing greeting automations', () => {
     expect(matchesGreeting(automation, 'Quiero hablar con alguien')).toBe(false)
     expect(matchesGreeting(automation, 'Necesito atención')).toBe(false)
   })
+  it('recognizes the generic opener supplied by ads without consuming course choices',()=>{
+    const automation={id:INITIAL_GREETING_ID,trigger_config:{match_type:'exact',keywords:['hola']}} as Automation
+    expect(matchesGreeting(automation,'¡Hola! Quiero más información')).toBe(true)
+    expect(matchesGreeting(automation,'Hola quiero informacion de nutricion')).toBe(false)
+  })
 })

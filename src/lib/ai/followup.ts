@@ -1,7 +1,7 @@
 import { supabaseAdmin } from './admin-client'
 import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
-import { findCandidateAutomations } from './automation-match'
+import { conversationCourse, findCandidateAutomations } from './automation-match'
 import { runAutomationById } from '@/lib/automations/engine'
 import { engineSendInteractive } from '@/lib/automations/meta-send'
 import { engineSendText } from '@/lib/flows/meta-send'
@@ -334,7 +334,11 @@ export async function runIdleFollowups(): Promise<number> {
       const config = await loadAiConfig(db, c.account_id)
       if (!config || !config.autoReplyEnabled) continue
 
-      const messages = await buildConversationContext(db, c.id, 5)
+      const contextMessages = await buildConversationContext(db, c.id, 5)
+      // A block can send five outgoing messages in a row. Retain the actual
+      // latest student choice even when it fell outside that short window.
+      const messages = customer.content_text && !contextMessages.some(m=>m.role==='user'&&m.content===customer.content_text)
+        ? [{role:'user' as const,content:customer.content_text},...contextMessages] : contextMessages
       let storedArea = c.ai_handoff_area
       if (!storedArea && c.assigned_agent_id) {
         const { data: adviser } = await db.from('profiles').select('area')
@@ -374,7 +378,8 @@ export async function runIdleFollowups(): Promise<number> {
         : []
       candidates = candidates.filter(candidate => !completedMessageOwners.has(candidate.id))
       const customerText = customer.content_text ?? ''
-      if (!textFallback && (candidates.length === 0 || /\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText))) {
+      const focusedCourse=conversationCourse(messages)
+      if (!textFallback && !focusedCourse && (candidates.length === 0 || /\b(curso|cursos|promo|promoci[oó]n)\b/i.test(customerText) && !courseKey(customerText))) {
         const { data: general } = await db.from('automations')
           .select('id, name, trigger_config')
           .eq('account_id', c.account_id)
@@ -406,7 +411,17 @@ export async function runIdleFollowups(): Promise<number> {
 
       // Sales must use a saved automation, not repeatedly ask which area.
       // No available block is safer than restarting one already delivered.
-      if (!textFallback && candidates.length === 0) continue
+      if (!textFallback && candidates.length === 0) {
+        if(focusedCourse && recentRuns?.[0]?.status==='failed') {
+          const {agentId}=await routeConversationToArea(db,c.account_id,c.id,'ventas')
+          await db.from('conversations').update({ai_handed_off_at:new Date().toISOString(),
+            ai_handoff_area:'VENTAS',ai_handoff_summary:`Continuar ${focusedCourse} desde el bloque interrumpido; no reiniciar ni enviar cursos generales.\n${buildHandoffSummary({messages,replyCount:0})}`}).eq('id',c.id).eq('account_id',c.account_id)
+          await engineSendText({accountId:c.account_id,userId:c.user_id,conversationId:c.id,contactId:c.contact_id,
+            text:`Seguimos con tu consulta de ${focusedCourse}. ${buildHandoffNotice({area:'ventas',agentConnected:Boolean(agentId)})}`,aiGenerated:true})
+          launched++
+        }
+        continue
+      }
 
       try {
         if (textFallback) {

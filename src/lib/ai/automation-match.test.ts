@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findCandidateAutomations, preferredCourseInformationAutomation, preferredEnrollmentAutomation } from './automation-match'
+import { conversationCourse, findCandidateAutomations, preferredCourseInformationAutomation, preferredEnrollmentAutomation } from './automation-match'
 import { buildSystemPrompt } from './defaults'
 import type { ChatMessage } from './types'
 
@@ -16,6 +16,13 @@ function db() {
 async function candidates(messages: ChatMessage[]) { return findCandidateAutomations(db(), 'account-test', messages) }
 
 describe('prioridad de informacion inicial del curso', () => {
+  it('keeps the latest selected course even after older questions about another one',async()=>{
+    const messages:ChatMessage[]=[{role:'user',content:'Info de farmacia'},{role:'user',content:'Quisiera nutrición dietética'}]
+    expect((await candidates(messages)).every(option=>option.id==='promo-nutricion')).toBe(true)
+    expect(preferredCourseInformationAutomation(await candidates(messages),messages)).toBe('promo-nutricion')
+    expect(conversationCourse([{role:'user',content:'🌱 Cero en Inicial'}])).toBe('AUXILIAR DE EDUCACION INICIAL')
+    expect(conversationCourse([{role:'user',content:'Malla administración'}])).toBe('ASISTENTE ADMINISTRATIVO')
+  })
   it('lanza el bloque guardado de pago al pedir inscripción', async () => {
     const messages: ChatMessage[] = [{ role: 'user', content: '¿Cómo hago para inscribirme en el curso?' }]
     expect(preferredEnrollmentAutomation(await candidates(messages), messages)).toBe('payment')

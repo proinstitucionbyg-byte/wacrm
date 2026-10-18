@@ -8,6 +8,7 @@ interface DbMessage {
   content_type: string
   content_text: string | null
   image_analysis: ImageAnalysis | null
+  status?: string
 }
 
 function imageEvidenceText(analysis: ImageAnalysis | null): string | null {
@@ -38,8 +39,7 @@ function imageEvidenceText(analysis: ImageAnalysis | null): string | null {
  * provider-neutral chat shape. Customer messages become `user`; agent
  * and bot messages become `assistant`. Text messages are included, and
  * so are audio messages that carry a transcript (content_text). Other
- * non-text messages (media without text, templates, interactive) carry
- * nothing to model and are excluded.
+ * interactive replies and video captions retain the selected course.
  *
  * Ordered oldest-first (chronological) so the transcript reads
  * naturally and the most recent customer message lands last.
@@ -51,9 +51,9 @@ export async function buildConversationContext(
 ): Promise<ChatMessage[]> {
   const { data, error } = await db
     .from('messages')
-    .select('sender_type, content_type, content_text, image_analysis')
+    .select('sender_type, content_type, content_text, image_analysis, status')
     .eq('conversation_id', conversationId)
-    .in('content_type', ['text', 'audio', 'image'])
+    .in('content_type', ['text', 'audio', 'image', 'interactive', 'video'])
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -61,6 +61,7 @@ export async function buildConversationContext(
 
   const rows = ((data ?? []) as DbMessage[]).reverse()
   return rows
+    .filter(m=>m.sender_type==='customer'||m.status!=='failed')
     .map((m) => {
       const content = [
         m.content_text?.trim(),
