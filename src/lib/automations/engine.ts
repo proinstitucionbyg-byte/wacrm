@@ -216,8 +216,8 @@ export async function runAutomationsForTrigger(
           && await hasActiveDeliveryWait(db, input.accountId, input.contactId, automation.id, input.context.conversation_id)) {
         continue;
       }
-      const paymentResumeId = automation.name === 'YAPE O PLIN' && input.contactId
-        ? await findPaymentResumeId(db, input.accountId, input.contactId, automation.id)
+      const paymentResumeId = isPaymentFlow(automation) && input.contactId
+        ? await findPaymentResumeId(db, input.accountId, input.contactId, automation.id, input.context?.conversation_id)
         : undefined;
       // A greeting is only a menu. Its unanswered buttons must not cancel an
       // 18-hour sales/fidelity wait already scheduled for this contact.
@@ -232,7 +232,7 @@ export async function runAutomationsForTrigger(
           .is('context->>enrollment_sequence_id', null);
       }
       try {
-        await executeAutomation(automation, automation.name === 'YAPE O PLIN'
+        await executeAutomation(automation, isPaymentFlow(automation)
           ? { ...input, context: { ...input.context,
               ...(paymentResumeId ? { payment_resume_pending_id: paymentResumeId } : {}),
               payment_activation_at: input.context?.inbound_at ?? new Date().toISOString() } }
@@ -255,14 +255,26 @@ export async function runAutomationsForTrigger(
   }
 }
 
+function isPaymentFlow(automation: Pick<Automation, 'name' | 'trigger_config'>): boolean {
+  return automation.name === 'YAPE O PLIN'
+    || (automation.trigger_config as Record<string, unknown>)?.payment_followup === true
+}
+
 async function findPaymentResumeId(
-  db: ReturnType<typeof supabaseAdmin>, accountId: string, contactId: string, paymentAutomationId: string,
+  db: ReturnType<typeof supabaseAdmin>, accountId: string, contactId: string, paymentAutomationId: string, conversationId?: string,
 ): Promise<string | undefined> {
   const { data: waiting, error } = await db.from('automation_pending_executions')
     .select('id,automation_id,context').eq('account_id', accountId).eq('contact_id', contactId)
     .eq('status', 'pending').order('created_at', { ascending: false }).limit(10)
   if (error || !waiting?.length) return undefined
-  const candidates = waiting.filter(row => row.automation_id !== paymentAutomationId
+  const scoped = waiting.filter(row => !conversationId
+    || (row.context as AutomationContext | null)?.conversation_id === conversationId)
+  // A payment button replaces a pending payment reminder, so retain the course
+  // that reminder already saved before cancelling it below.
+  const inherited = scoped.find(row => (row.context as AutomationContext | null)?.payment_activation_at
+    && (row.context as AutomationContext | null)?.payment_resume_pending_id)
+  if (inherited) return (inherited.context as AutomationContext).payment_resume_pending_id
+  const candidates = scoped.filter(row => row.automation_id !== paymentAutomationId
     && !(row.context as AutomationContext | null)?.enrollment_sequence_id)
   if (!candidates.length) return undefined
   const { data: flows, error: flowsError } = await db.from('automations').select('id,name')
@@ -314,8 +326,8 @@ export async function runAutomationById(input: {
       db, input.accountId, input.contactId, input.automationId, input.conversationId,
     )) return true
 
-    const paymentResumeId = automation.name === 'YAPE O PLIN'
-      ? await findPaymentResumeId(db, input.accountId, input.contactId, automation.id)
+    const paymentResumeId = isPaymentFlow(automation)
+      ? await findPaymentResumeId(db, input.accountId, input.contactId, automation.id, input.conversationId)
       : undefined
 
     // The two existing greetings only show a menu; they preserve prior waits.
@@ -336,7 +348,7 @@ export async function runAutomationById(input: {
       context: {
         message_text: input.messageText ?? '',
         conversation_id: input.conversationId,
-        ...(automation.name === 'YAPE O PLIN' ? {
+        ...(isPaymentFlow(automation) ? {
           ...(paymentResumeId ? { payment_resume_pending_id: paymentResumeId } : {}),
           payment_activation_at: new Date().toISOString(),
         } : {}),
@@ -387,8 +399,8 @@ export async function resumePendingExecution(pending: {
     await markPending(pending.id, 'failed')
     return
   }
-  if (automation.name === 'YAPE O PLIN' && pending.parent_step_id === null
-      && pending.next_step_position >= 3) {
+  if (isPaymentFlow(automation) && pending.parent_step_id === null
+      && (automation.name !== 'YAPE O PLIN' || pending.next_step_position >= 3)) {
     const activatedAt = pending.context?.payment_activation_at ?? pending.context?.inbound_at
     if (!activatedAt || !pending.context?.conversation_id) {
       await finalizeLog(pending.log_id, 'failed', 'Seguimiento de pago sin origen verificable')
@@ -427,14 +439,17 @@ export async function resumePendingExecution(pending: {
         await markPending(pending.id, 'failed')
         return
       }
-      const { data: otherWait, error: otherWaitError } = await db.from('automation_pending_executions').select('id')
+      const { data: otherWaits, error: otherWaitError } = await db.from('automation_pending_executions').select('id,context')
         .eq('account_id', pending.account_id).eq('contact_id', pending.contact_id)
-        .in('status', ['pending', 'running']).neq('id', pending.id).limit(1).maybeSingle()
+        .in('status', ['pending', 'running']).neq('id', pending.id).limit(20)
       if (otherWaitError) {
         await markPending(pending.id, 'failed')
         return
       }
-      if (otherWait) {
+      // The parent is waiting for this linked payment block to finish; it is
+      // not a competing course execution.
+      if (otherWaits?.some(row => !pending.log_id
+          || (row.context as AutomationContext | null)?.await_child_log_id !== pending.log_id)) {
         await markPending(pending.id, 'cancelled')
         return
       }

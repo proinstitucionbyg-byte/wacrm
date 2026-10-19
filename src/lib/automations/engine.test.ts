@@ -124,7 +124,8 @@ vi.mock("./admin-client", () => {
       const byId = ops.filters.find(([operator,key]) => operator === 'eq' && key === 'id')?.[2];
       if (byId) return { data: state.pendingRows.find(row => row.id === byId) ?? null, error: null };
       if (ops.filters.some(([operator,key]) => operator === 'neq' && key === 'id'))
-        return { data: state.pendingRows.find(row => row.status === 'pending' || row.status === 'running') ?? null,error:null };
+        return { data: state.pendingRows.filter(row => (row.status === 'pending' || row.status === 'running')
+          && row.id !== ops.filters.find(([operator,key]) => operator === 'neq' && key === 'id')?.[2]),error:null };
       return { data: state.pendingRows, error: null };
     }
     return { data: null, error: null };
@@ -210,6 +211,42 @@ beforeEach(() => {
 });
 
 describe('WhatsApp delivery order', () => {
+  it('carries the saved course through an exact payment-button response', async () => {
+    h.state.owned = {id:'c1'}
+    h.state.automations = [{...automationWithUpdateStep(),id:'process',name:'🕒 Estoy en proceso',
+      trigger_type:'keyword_match',trigger_config:{keywords:['🕒 Estoy en proceso'],match_type:'exact',payment_followup:true}}]
+    h.state.pendingRows = [{id:'payment-wait',automation_id:'payment',status:'pending',
+      context:{conversation_id:'chat',payment_activation_at:'2026-10-19T01:00:00Z',payment_resume_pending_id:'saved-course'}}]
+    h.state.stepsByAutomationId.process = [{id:'wait',automation_id:'process',step_type:'wait',position:1,
+      parent_step_id:null,step_config:{unit:'minutes',amount:90}}]
+    await runAutomationsForTrigger({accountId:ACCOUNT,triggerType:'keyword_match',contactId:'c1',
+      context:{conversation_id:'chat',message_text:'🕒 Estoy en proceso',inbound_at:'2026-10-19T02:00:00Z'}})
+    expect(h.state.pendingInserts).toContainEqual(expect.objectContaining({automation_id:'process',
+      context:expect.objectContaining({payment_resume_pending_id:'saved-course',payment_activation_at:'2026-10-19T02:00:00Z'})}))
+  })
+  it('cancels the process-button wait when a newer customer message exists', async () => {
+    h.state.automations = [{...automationWithUpdateStep(),id:'process',name:'🕒 Estoy en proceso',trigger_config:{payment_followup:true}}]
+    h.state.conversationState = {automation_enabled:true,last_human_message_at:null}
+    h.state.newerCustomer = true
+    await resumePendingExecution({id:'process-wait',automation_id:'process',account_id:ACCOUNT,user_id:'u1',
+      contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,next_step_position:2,
+      context:{conversation_id:'chat',payment_activation_at:'2026-10-19T02:00:00Z'}})
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'cancelled'}))
+    expect(h.state.logAutomationIds).toEqual([])
+  })
+  it('restores the course while the parent awaits the linked payment block', async () => {
+    h.state.automations = [{...automationWithUpdateStep(),id:'payment',name:'YAPE O PLIN'},
+      {...automationWithUpdateStep(),id:'course',name:'RECURSOS 19.90'}]
+    h.state.conversationState = {automation_enabled:true,last_human_message_at:null}
+    h.state.pendingRows = [{id:'saved-course',automation_id:'course',status:'cancelled',context:{conversation_id:'chat'}},
+      {id:'parent-wait',status:'pending',context:{await_child_log_id:'child-log'}}]
+    await resumePendingExecution({id:'child-final',automation_id:'payment',account_id:ACCOUNT,user_id:'u1',
+      contact_id:'c1',log_id:'child-log',parent_step_id:null,branch:null,next_step_position:9,
+      context:{conversation_id:'chat',payment_activation_at:'2026-10-19T02:00:00Z',
+        payment_resume_pending_id:'saved-course',payment_resume_previous:true}})
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'pending',run_at:expect.any(String)}))
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'done'}))
+  })
   it('keeps the exact interrupted course wait when starting the payment flow', async () => {
     h.state.owned = {id:'c1'}
     h.state.automations = [
