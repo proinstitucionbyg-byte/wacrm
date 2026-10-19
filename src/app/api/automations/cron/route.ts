@@ -39,6 +39,45 @@ export async function GET(request: Request) {
   // followups; otherwise a busy followup can starve document preparation.
   try { await runIncompleteIntakes(admin); }
   catch (error) { console.error('No se pudieron revisar las matrículas pendientes', error); }
+  // Resume promised automation steps before the slower routing and followup
+  // jobs. A slow job must never delay a student's already-due block.
+  const { data: due, error } = await admin
+    .from('automation_pending_executions')
+    .select('*')
+    .eq('status', 'pending')
+    .lte('run_at', new Date().toISOString())
+    .order('run_at', { ascending: true })
+    .limit(50);
+
+  if (error)
+    return NextResponse.json({ error: error.message }, { status: 500 });
+
+  let processed = 0;
+  for (const dueRow of due ?? []) {
+    const { data: claim } = await admin
+      .from('automation_pending_executions')
+      .update({ status: 'running' })
+      .eq('id', dueRow.id)
+      .eq('status', 'pending')
+      .select('*')
+      .maybeSingle();
+    if (!claim) continue;
+
+    const row = claim;
+    await resumePendingExecution({
+      id: row.id as string,
+      automation_id: row.automation_id as string,
+      account_id: row.account_id as string,
+      user_id: row.user_id as string,
+      contact_id: (row.contact_id as string | null) ?? null,
+      log_id: (row.log_id as string | null) ?? null,
+      parent_step_id: (row.parent_step_id as string | null) ?? null,
+      branch: (row.branch as 'yes' | 'no' | null) ?? null,
+      next_step_position: row.next_step_position as number,
+      context: (row.context as AutomationContext) ?? {},
+    });
+    processed++;
+  }
   const { error: reminderError } = await admin.rpc('publish_due_adviser_reminders');
   if (reminderError) console.error('No se pudieron entregar los recordatorios personales', reminderError);
   try { await dispatchDueReminderMessages(admin); }
@@ -59,49 +98,5 @@ export async function GET(request: Request) {
   if (casesError) return NextResponse.json({ error: 'No se pudieron actualizar los reportes de quejas y soluciones' }, { status: 500 });
   const { error: birthdaysError } = await admin.rpc('publish_birthday_notices');
   if (birthdaysError) return NextResponse.json({ error: 'No se pudieron actualizar los avisos de cumpleanos' }, { status: 500 });
-  const { data: due, error } = await admin
-    .from('automation_pending_executions')
-    .select('*')
-    .eq('status', 'pending')
-    .lte('run_at', new Date().toISOString())
-    .order('run_at', { ascending: true })
-    .limit(50);
-
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!due || due.length === 0) return NextResponse.json({ processed: 0 });
-
-  let processed = 0;
-  for (const dueRow of due) {
-    const { data: claim } = await admin
-      .from('automation_pending_executions')
-      .update({ status: 'running' })
-      .eq('id', dueRow.id)
-      .eq('status', 'pending')
-      .select('*')
-      .maybeSingle();
-    if (!claim) continue;
-
-    // A save may have moved the block after the due-list query. Use the row
-    // returned by the atomic claim, including its current position/context.
-    const row = claim;
-
-    await resumePendingExecution({
-      id: row.id as string,
-      automation_id: row.automation_id as string,
-      // account_id is NOT NULL on automation_pending_executions
-      // post-017; the engine uses it for tenant-scoped lookups.
-      account_id: row.account_id as string,
-      user_id: row.user_id as string,
-      contact_id: (row.contact_id as string | null) ?? null,
-      log_id: (row.log_id as string | null) ?? null,
-      parent_step_id: (row.parent_step_id as string | null) ?? null,
-      branch: (row.branch as 'yes' | 'no' | null) ?? null,
-      next_step_position: row.next_step_position as number,
-      context: (row.context as AutomationContext) ?? {},
-    });
-    processed++;
-  }
-
   return NextResponse.json({ processed });
 }

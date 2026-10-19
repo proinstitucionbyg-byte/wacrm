@@ -2,6 +2,15 @@
 
 Esta lista reúne los pedidos vigentes. «Hecho en datos» significa que se comprobó en Supabase; «local» requiere publicación del código. Ningún punto se marca terminado solo por haberlo pedido.
 
+## Corte verificado, 19 de octubre, 3:22 p. m. Lima
+
+- **Publicado y comprobado en EasyPanel:** commits `160586e` y `40f5205`. El segundo hace revisar las matrículas pendientes antes de los seguimientos lentos. EasyPanel muestra `40f5205` desplegado; ambas vigilancias de matrículas volvieron a actualizar `checked_at` a las 3:21 y 3:22 p. m.
+- **Hecho en código:** pausa de cinco minutos al responder un humano; no repetir Yape/Plin tras un comprobante; prospectos pendientes en Ventas; botón conjunto para desactivar IA y automatización sin vencimiento; mejoras de orden y contador del Inbox. La revisión real en chats sigue pendiente.
+- **Documentos: aún no enviados.** Nancy e Ing. Lugones siguen `collecting`, sin número de matrícula y con cero filas en `enrollment_document_deliveries`. Nancy tiene nombre, DNI, dos fotos, oferta y seis cuotas confirmadas; hace falta identificar por qué no pasa a `ready`. Lugones carece de nombre completo confirmado y cotejo de su foto de identidad. No crear documentos con datos inventados.
+- **Chats sin respuesta al corte:** Diany pidió información general; otra estudiante pulsó «Clase Farmacia». El segundo chat tiene tres ejecuciones pendientes (Egresado Farmacia y curso vencidas; Yape programada), por lo que hay que resolver la cola sin duplicar envíos. El cron tenía los bloques pendientes detrás de seguimientos lentos; hay un cambio local para procesarlos primero, compilación en curso.
+- **Pendiente urgente:** publicar y comprobar ese cambio del orden del cron; confirmar respuestas reales de ambos chats y entrega, no solo estado `sent`; resolver transición de Nancy a `ready` y completar Lugones; generar y entregar los tres documentos solo tras validación.
+- **Pendiente de verificar:** relación técnica del CRM de EasyPanel con la web pública y su suscripción. El CRM se sirve en `personal-wacrm.exjald.easypanel.host` desde GitHub; todavía no se verificaron DNS y dependencias de la web pública.
+
 ## Urgente: ventas y matrículas
 
 - [x] Audio de explicación de Office cargado e insertado entre imagen y botón en los cinco cursos activos de S/49.90; enlaces externos a Office siguen el bloque y las posiciones se ajustaron en Supabase. Pendiente comprobar una interacción real de extremo a extremo. Las versiones inactivas de S/79.90 ofrecen Office desde el tercer módulo, por lo que ese audio del segundo mes todavía no corresponde allí.
