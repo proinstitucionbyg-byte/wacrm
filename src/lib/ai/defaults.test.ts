@@ -1,6 +1,13 @@
 import {describe,expect,it} from 'vitest';
 import {buildSystemPrompt} from './defaults';
 describe('registration claims in AI responses',()=>{
+  it('keeps sales follow-ups focused on completing payment without inventing urgency',()=>{
+    const prompt=buildSystemPrompt({mode:'auto_reply',userPrompt:'BUSINESS_PROMPT',knowledge:['KNOWLEDGE']});
+    expect(prompt.lastIndexOf('SALES PAYMENT FOLLOW-UP')).toBeGreaterThan(prompt.lastIndexOf('KNOWLEDGE'));
+    expect(prompt).toContain('Never say "tómate el tiempo que necesites"');
+    expect(prompt).toContain('Do not invent deadlines');
+    expect(prompt).toContain('Respect a refusal');
+  });
   it.each(['auto_reply','draft'] as const)('protects institutional privacy in %s after account context and knowledge',mode=>{
     const prompt=buildSystemPrompt({mode,userPrompt:'BUSINESS_PROMPT',knowledge:['KNOWLEDGE']});
     expect(prompt.lastIndexOf('INSTITUTIONAL PRIVACY')).toBeGreaterThan(prompt.lastIndexOf('KNOWLEDGE'));

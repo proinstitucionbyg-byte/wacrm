@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runIncompleteIntakes } from '@/lib/matriculas/incomplete-intake';
+import { runSalesWindowFollowups } from '@/lib/ai/sales-window-followup';
 import { dispatchDueReminderMessages } from '@/lib/reminders/dispatch';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
 import { resumePendingExecution } from '@/lib/automations/engine';
@@ -42,6 +43,8 @@ export async function GET(request: Request) {
   await routeWaitingSalesConversations();
   await reactivateExpiredManualControls();
   await runIdleFollowups();
+  try { await runSalesWindowFollowups(admin); }
+  catch (error) { console.error('No se pudo procesar el cierre de ventas de 23 horas', error); }
   await runIncompleteIntakes(admin);
   const { error: areaRoutingError } = await admin.rpc('route_waiting_area_conversations');
   if (areaRoutingError) return NextResponse.json({ error: 'No se pudo actualizar la cola de areas' }, { status: 500 });
