@@ -189,6 +189,34 @@ import type { Automation } from "@/types";
 
 const ACCOUNT = "acct-1";
 
+describe('Minedu saved-course integration',()=>{
+ it('marks its ten-minute wait for returning to the saved course',async()=>{
+  h.state.owned={id:'c1'}
+  h.state.automations=[{...automationWithUpdateStep(),name:'MINEDU',trigger_type:'keyword_match',trigger_config:{keywords:['minedu'],match_type:'contains',course_detour:true}}]
+  h.state.steps=[{id:'wait',automation_id:'a1',position:4,parent_step_id:null,step_type:'wait',step_config:{amount:10,unit:'minutes',resume_previous_course:true}}]
+  await runAutomationsForTrigger({accountId:ACCOUNT,contactId:'c1',triggerType:'keyword_match',context:{conversation_id:'chat',message_text:'¿Tienen Minedu?'}})
+  expect(h.state.pendingInserts).toHaveLength(1)
+  expect(h.state.pendingInserts[0]).toMatchObject({next_step_position:5,context:{course_detour_resume:true}})
+ })
+ it('defers a Minedu response if a course send is still running',async()=>{
+  h.state.owned={id:'c1'}
+  h.state.automations=[{...automationWithUpdateStep(),name:'MINEDU',trigger_type:'keyword_match',trigger_config:{keywords:['minedu'],match_type:'contains',course_detour:true}},
+   {...automationWithUpdateStep(),id:'course',name:'NUTRICION 19.90',trigger_type:'keyword_match',trigger_config:{keywords:['nutri'],match_type:'exact'}}]
+  h.state.pendingRows=[{id:'busy',automation_id:'course',status:'running',context:{conversation_id:'chat'}}]
+  await runAutomationsForTrigger({accountId:ACCOUNT,contactId:'c1',triggerType:'keyword_match',context:{conversation_id:'chat',message_text:'minedu'}})
+  expect(h.state.pendingInserts).toHaveLength(1)
+  expect(h.state.pendingInserts[0]).toMatchObject({next_step_position:0,context:{course_detour_capture:true}})
+  expect(engineSendMedia).not.toHaveBeenCalled();expect(h.state.pendingCancels).toBe(0)
+ })
+ it('a continue button without a saved position asks for clarification instead of guessing',async()=>{
+  h.state.owned={id:'c1'}
+  h.state.automations=[{...automationWithUpdateStep(),name:'Continuar',trigger_type:'keyword_match',trigger_config:{keywords:['▶️ Continuar curso'],match_type:'exact',course_continue:true}}]
+  await runAutomationsForTrigger({accountId:ACCOUNT,contactId:'c1',triggerType:'keyword_match',context:{conversation_id:'chat',message_text:'▶️ Continuar curso'}})
+  expect(engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('qué información deseas revisar')}))
+  expect(h.state.pendingInserts).toHaveLength(0)
+ })
+})
+
 beforeEach(() => {
   vi.clearAllMocks();
   h.state.owned = null;

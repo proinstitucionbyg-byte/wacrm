@@ -31,7 +31,7 @@ import { automationAudioEvidence } from './audio-evidence'
 import { greetingAutomationId, INITIAL_GREETING_ID, isGreetingAutomation, matchesGreeting, RETURN_GREETING_ID, shouldShowGreeting } from './greeting-continuity'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
-import { courseKey } from '@/lib/matriculas/calendar'
+import { captureCourseCheckpoint, currentCourseCheckpoint, isCourseContinue, isCourseDetour, isSavedCourseName, restoreCourseCheckpoint, type CourseCheckpoint } from './course-detour'
 
 // ------------------------------------------------------------
 // Public API
@@ -74,6 +74,9 @@ export interface AutomationContext {
   payment_resume_pending_id?: string
   payment_activation_at?: string
   payment_resume_previous?: boolean
+  course_checkpoint?: CourseCheckpoint
+  course_detour_capture?: boolean
+  course_detour_resume?: boolean
 }
 
 export interface DispatchInput {
@@ -216,20 +219,29 @@ export async function runAutomationsForTrigger(
           && await hasActiveDeliveryWait(db, input.accountId, input.contactId, automation.id, input.context.conversation_id)) {
         continue;
       }
+      if (isCourseContinue(automation) && input.contactId && input.context?.conversation_id) {
+        await continueSavedCourse(automation, input.contactId, input.context.conversation_id)
+        continue
+      }
+      const detour = isCourseDetour(automation) && input.contactId && input.context?.conversation_id
+        ? await captureCourseCheckpoint(db, input.accountId, input.contactId, input.context.conversation_id) : null
+      if (detour) input.context = { ...input.context, course_checkpoint: detour.checkpoint, course_detour_capture: detour.busy }
       const paymentResumeId = isPaymentFlow(automation) && input.contactId
         ? await findPaymentResumeId(db, input.accountId, input.contactId, automation.id, input.context?.conversation_id)
         : undefined;
       // A greeting is only a menu. Its unanswered buttons must not cancel an
       // 18-hour sales/fidelity wait already scheduled for this contact.
-      if (input.contactId && !cancelledOld && !isGreetingAutomation(automation.id)) {
+      if (input.contactId && !cancelledOld && !isGreetingAutomation(automation.id) && !detour?.busy) {
         cancelledOld = true;
-        await db
+        const cancelQuery = db
           .from("automation_pending_executions")
           .update({ status: "cancelled" })
           .eq("contact_id", input.contactId)
           .eq("account_id", input.accountId)
           .eq("status", "pending")
           .is('context->>enrollment_sequence_id', null);
+        if (detour) cancelQuery.is('context->>manual_agent_id', null)
+        await cancelQuery
       }
       try {
         await executeAutomation(automation, isPaymentFlow(automation)
@@ -260,6 +272,22 @@ function isPaymentFlow(automation: Pick<Automation, 'name' | 'trigger_config'>):
     || (automation.trigger_config as Record<string, unknown>)?.payment_followup === true
 }
 
+async function continueSavedCourse(automation: Automation, contact: string, chat: string): Promise<void> {
+  const db = supabaseAdmin()
+  const checkpoint = await currentCourseCheckpoint(db, automation.account_id, contact, chat)
+  if (checkpoint) {
+    const { error } = await db.from('automation_pending_executions').update({ status: 'cancelled' })
+      .eq('account_id', automation.account_id).eq('contact_id', contact).eq('status', 'pending')
+      .contains('context', { conversation_id: chat, course_checkpoint: checkpoint })
+    if (error) throw error
+  }
+  const result = await restoreCourseCheckpoint(db, { account: automation.account_id, contact, chat, checkpoint, automatic: false })
+  await engineSendText({ accountId: automation.account_id, userId: automation.user_id, contactId: contact, conversationId: chat,
+    text: result === 'restored' ? '▶️ Continuamos con la información de tu curso desde donde te quedaste, conservando los tiempos de seguimiento. 😊'
+      : result === 'human' ? 'Tu consulta continúa con nuestro equipo. Quedamos atentos para ayudarte. 💙'
+      : '💬 Cuéntanos qué información deseas revisar para continuar y te ayudamos.' })
+}
+
 async function findPaymentResumeId(
   db: ReturnType<typeof supabaseAdmin>, accountId: string, contactId: string, paymentAutomationId: string, conversationId?: string,
 ): Promise<string | undefined> {
@@ -274,13 +302,21 @@ async function findPaymentResumeId(
   const inherited = scoped.find(row => (row.context as AutomationContext | null)?.payment_activation_at
     && (row.context as AutomationContext | null)?.payment_resume_pending_id)
   if (inherited) return (inherited.context as AutomationContext).payment_resume_pending_id
+  const courseCheckpoint = scoped.find(row => (row.context as AutomationContext | null)?.course_checkpoint)?.context?.course_checkpoint as CourseCheckpoint | undefined
+  if (courseCheckpoint?.pending_ids.length) {
+    const { data: saved, error: savedError } = await db.from('automation_pending_executions').select('id,context')
+      .eq('account_id', accountId).eq('contact_id', contactId).in('id', courseCheckpoint.pending_ids).eq('status', 'cancelled')
+    if (savedError) throw savedError
+    const leaf = saved?.find(row => row.context?.conversation_id === conversationId && !row.context?.await_child_log_id)
+    if (leaf) return (leaf.context as AutomationContext).payment_resume_pending_id ?? leaf.id
+  }
   const candidates = scoped.filter(row => row.automation_id !== paymentAutomationId
     && !(row.context as AutomationContext | null)?.enrollment_sequence_id)
   if (!candidates.length) return undefined
   const { data: flows, error: flowsError } = await db.from('automations').select('id,name')
     .eq('account_id', accountId).in('id', [...new Set(candidates.map(row => row.automation_id))])
   if (flowsError) return undefined
-  const courseFlowIds = new Set((flows ?? []).filter(flow => courseKey(flow.name)).map(flow => flow.id))
+  const courseFlowIds = new Set((flows ?? []).filter(flow => isSavedCourseName(flow.name)).map(flow => flow.id))
   return candidates.find(row => courseFlowIds.has(row.automation_id))?.id
 }
 /**
@@ -326,19 +362,27 @@ export async function runAutomationById(input: {
       db, input.accountId, input.contactId, input.automationId, input.conversationId,
     )) return true
 
+    if (isCourseContinue(automation)) {
+      await continueSavedCourse(automation as Automation, input.contactId, input.conversationId)
+      return true
+    }
+    const detour = isCourseDetour(automation)
+      ? await captureCourseCheckpoint(db, input.accountId, input.contactId, input.conversationId) : null
     const paymentResumeId = isPaymentFlow(automation)
       ? await findPaymentResumeId(db, input.accountId, input.contactId, automation.id, input.conversationId)
       : undefined
 
     // The two existing greetings only show a menu; they preserve prior waits.
-    if (!isGreetingAutomation(automation.id)) {
-      await db
+    if (!isGreetingAutomation(automation.id) && !detour?.busy) {
+      const cancelQuery = db
         .from('automation_pending_executions')
         .update({ status: 'cancelled' })
         .eq('contact_id', input.contactId)
         .eq('account_id', input.accountId)
         .eq('status', 'pending')
         .is('context->>enrollment_sequence_id', null)
+      if (detour) cancelQuery.is('context->>manual_agent_id', null)
+      await cancelQuery
     }
 
     const logId = await executeAutomation(automation as Automation, {
@@ -348,6 +392,7 @@ export async function runAutomationById(input: {
       context: {
         message_text: input.messageText ?? '',
         conversation_id: input.conversationId,
+        ...(detour ? { course_checkpoint: detour.checkpoint, course_detour_capture: detour.busy } : {}),
         ...(isPaymentFlow(automation) ? {
           ...(paymentResumeId ? { payment_resume_pending_id: paymentResumeId } : {}),
           payment_activation_at: new Date().toISOString(),
@@ -398,6 +443,24 @@ export async function resumePendingExecution(pending: {
     console.error('[automations] resume: missing automation', pending.automation_id, error)
     await markPending(pending.id, 'failed')
     return
+  }
+  if (isCourseDetour(automation) && pending.context?.course_detour_capture && pending.contact_id && pending.context.conversation_id) {
+    try {
+      const state = await captureCourseCheckpoint(db, pending.account_id, pending.contact_id, pending.context.conversation_id)
+      if (state.busy) {
+        await db.from('automation_pending_executions').update({ status: 'pending', run_at: new Date(Date.now() + 30_000).toISOString() })
+          .eq('id', pending.id).eq('status', 'running')
+        return
+      }
+      pending.context = { ...pending.context, course_detour_capture: false, course_checkpoint: state.checkpoint }
+      const { error: cancelError } = await db.from('automation_pending_executions').update({ status: 'cancelled' })
+        .eq('account_id', pending.account_id).eq('contact_id', pending.contact_id).eq('status', 'pending')
+        .neq('id', pending.id).is('context->>enrollment_sequence_id', null).is('context->>manual_agent_id', null)
+      if (cancelError) throw cancelError
+    } catch {
+      await markPending(pending.id, 'failed')
+      return
+    }
   }
   if (isPaymentFlow(automation) && pending.parent_step_id === null
       && (automation.name !== 'YAPE O PLIN' || pending.next_step_position >= 3)) {
@@ -460,7 +523,7 @@ export async function resumePendingExecution(pending: {
       const { data: previousFlow } = previous ? await db.from('automations').select('id,name')
         .eq('id', previous.automation_id).eq('account_id', pending.account_id).maybeSingle()
         : { data: null }
-      if (!previous || !previousFlow || !courseKey(previousFlow.name)
+      if (!previous || !previousFlow || !isSavedCourseName(previousFlow.name)
           || (previous.context as AutomationContext | null)?.conversation_id !== pending.context.conversation_id) {
         await finalizeLog(pending.log_id, 'failed', 'El bloque anterior no coincide con este chat')
         await markPending(pending.id, 'failed')
@@ -540,6 +603,19 @@ export async function resumePendingExecution(pending: {
       // Some delivered WhatsApp messages never receive a delivery webhook.
       // Continue after a short spacing window rather than losing the sale.
     }
+  }
+  if (isCourseDetour(automation) && pending.context?.course_detour_resume && pending.contact_id && pending.context.conversation_id) {
+    try {
+      await restoreCourseCheckpoint(db, { account: pending.account_id, contact: pending.contact_id,
+        chat: pending.context.conversation_id, checkpoint: pending.context.course_checkpoint,
+        automatic: true, ignorePendingId: pending.id })
+      await finalizeLog(pending.log_id, 'success', null)
+      await markPending(pending.id, 'done')
+    } catch {
+      await finalizeLog(pending.log_id, 'failed', 'No se pudo retomar el curso guardado')
+      await markPending(pending.id, 'failed')
+    }
+    return
   }
   if (pending.context?.await_child_log_id) {
     const childLogId = pending.context.await_child_log_id
@@ -732,6 +808,15 @@ interface ExecuteArgs {
 
 async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   const db = supabaseAdmin()
+  if (isCourseDetour(args.automation) && args.context.course_detour_capture) {
+    const { error } = await db.from('automation_pending_executions').insert({
+      automation_id: args.automation.id, account_id: args.automation.account_id, user_id: args.automation.user_id,
+      contact_id: args.contactId, log_id: args.logId, parent_step_id: args.parentStepId, branch: args.branch,
+      next_step_position: args.startPosition, context: args.context, run_at: new Date(Date.now() + 30_000).toISOString(), status: 'pending',
+    })
+    await finalizeLog(args.logId, error ? 'failed' : 'partial', error ? 'No se pudo guardar la consulta pendiente' : null)
+    return
+  }
 
   const baseQuery = db
     .from('automation_steps')
@@ -785,7 +870,8 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         next_step_position: step.position + 1,
         context: { ...args.context, await_delivery_only: undefined,
           ...(args.automation.name === 'YAPE O PLIN' && cfg.resume_previous_course === true
-            ? { payment_resume_previous: true } : {}) },
+            ? { payment_resume_previous: true } : {}),
+          ...(isCourseDetour(args.automation) && cfg.resume_previous_course === true ? { course_detour_resume: true } : {}) },
         run_at: dueAt,
         status: 'pending',
       })
