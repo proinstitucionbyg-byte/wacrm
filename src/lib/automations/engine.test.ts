@@ -23,6 +23,7 @@ const h = vi.hoisted(() => ({
     conversationState: null as Record<string, unknown> | null,
     messageStatus: 'sent' as 'sent' | 'delivered' | 'read' | 'failed',
     newerCustomer: false,
+    claimedPending: null as Record<string,unknown>|null,
   },
 }));
 
@@ -117,8 +118,9 @@ vi.mock("./admin-client", () => {
     if (table === "automation_pending_executions" && type === "update") {
       state.pendingUpdates.push(ops.payload as Record<string, unknown>);
       state.pendingCancels++;
+      const id=ops.filters.find(([, key]) => key === 'id')?.[2];
       return { data: ['running','pending'].includes((ops.payload as { status?: string })?.status ?? '')
-        ? { id: ops.filters.find(([, key]) => key === 'id')?.[2] } : null, error: null };
+        ? {...(state.claimedPending??state.pendingRows.find(row=>row.id===id)??{}),id,...(ops.payload as object)} : null, error: null };
     }
     if (table === "automation_pending_executions") {
       const byId = ops.filters.find(([operator,key]) => operator === 'eq' && key === 'id')?.[2];
@@ -181,7 +183,7 @@ vi.mock("./meta-send", () => ({
 }));
 
 import { resumeDeliveredMessage, resumePendingExecution, runAutomationById, runAutomationsForTrigger, triggerMatches } from "./engine";
-import { engineSendInteractive, engineSendMedia } from './meta-send';
+import { engineSendInteractive, engineSendMedia, engineSendText } from './meta-send';
 import { INITIAL_GREETING_ID, RETURN_GREETING_ID } from './greeting-continuity';
 import type { Automation } from "@/types";
 
@@ -208,9 +210,23 @@ beforeEach(() => {
   h.state.conversationState = null;
   h.state.messageStatus = 'sent';
   h.state.newerCustomer = false;
+  h.state.claimedPending = null;
 });
 
 describe('WhatsApp delivery order', () => {
+  it('uses the updated claimed position if an editor inserted a block after the delivery lookup',async()=>{
+    h.state.automations=[automationWithUpdateStep()]
+    h.state.messageStatus='delivered'
+    const stale={id:'pending',automation_id:'a1',account_id:ACCOUNT,user_id:'u1',contact_id:'c1',log_id:'log1',
+      parent_step_id:null,branch:null,status:'pending',next_step_position:1,
+      context:{conversation_id:'chat',await_delivery_only:true,await_delivery_message_id:'wamid.old'}}
+    h.state.pendingRows=[stale]
+    h.state.claimedPending={...stale,next_step_position:2}
+    h.state.steps=[{id:'new',automation_id:'a1',parent_step_id:null,position:1,step_type:'send_message',step_config:{text:'inserted'}},
+      {id:'original',automation_id:'a1',parent_step_id:null,position:2,step_type:'send_message',step_config:{text:'same next block'}}]
+    await resumeDeliveredMessage('wamid.old','chat',ACCOUNT)
+    expect(engineSendText).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({text:'same next block'}))
+  })
   it('carries the saved course through an exact payment-button response', async () => {
     h.state.owned = {id:'c1'}
     h.state.automations = [{...automationWithUpdateStep(),id:'process',name:'🕒 Estoy en proceso',

@@ -36,6 +36,7 @@ export default function EditAutomationPage({
       if (cancelled) return
       setInitial({
         id: body.automation.id,
+        steps_revision:body.steps_revision,
         folder_id: body.automation.folder_id ?? null,
         name: body.automation.name ?? "",
         description: body.automation.description ?? "",

@@ -66,15 +66,19 @@ export async function GET(request: Request) {
   if (!due || due.length === 0) return NextResponse.json({ processed: 0 });
 
   let processed = 0;
-  for (const row of due) {
+  for (const dueRow of due) {
     const { data: claim } = await admin
       .from('automation_pending_executions')
       .update({ status: 'running' })
-      .eq('id', row.id)
+      .eq('id', dueRow.id)
       .eq('status', 'pending')
-      .select('id')
+      .select('*')
       .maybeSingle();
     if (!claim) continue;
+
+    // A save may have moved the block after the due-list query. Use the row
+    // returned by the atomic claim, including its current position/context.
+    const row = claim;
 
     await resumePendingExecution({
       id: row.id as string,

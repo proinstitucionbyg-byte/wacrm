@@ -614,13 +614,13 @@ export async function resumeDeliveredMessage(messageId: string, conversationId: 
       if (row.context?.await_delivery_only !== true) continue
       const { data: claim, error: claimError } = await db.from('automation_pending_executions')
         .update({ status: 'running' }).eq('id', row.id).eq('status', 'pending')
-        .select('id').maybeSingle()
+        .select('*').maybeSingle()
       if (claimError) {
         console.error('[automations] delivery resume claim failed:', claimError)
         continue
       }
       if (claim) {
-        await resumePendingExecution(row as Parameters<typeof resumePendingExecution>[0])
+        await resumePendingExecution(claim as Parameters<typeof resumePendingExecution>[0])
       }
     }
   } catch (error) {

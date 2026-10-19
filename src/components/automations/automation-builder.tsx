@@ -41,6 +41,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import {Dialog,DialogContent,DialogTitle,DialogDescription,DialogFooter} from '@/components/ui/dialog'
+import type {ReferenceImpact} from '@/lib/automations/reference-impact'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,6 +73,7 @@ import { cn } from "@/lib/utils"
 // ------------------------------------------------------------
 
 export interface BuilderStep {
+  id?: string
   /** Client id; the API assigns real UUIDs server-side. */
   cid: string
   step_type: AutomationStepType
@@ -79,6 +82,7 @@ export interface BuilderStep {
 }
 
 export interface BuilderInitial {
+  steps_revision?: string
   id?: string
   folder_id?: string | null
   name: string
@@ -158,12 +162,7 @@ const TRIGGER_OPTIONS: { value: AutomationTriggerType }[] = [
 ]
 
 function cid(): string {
-  return (
-    "c_" +
-    (typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Date.now().toString(36))
-  )
+  return crypto.randomUUID()
 }
 
 // The send_buttons / send_list step_config IS an InteractiveMessagePayload,
@@ -697,6 +696,9 @@ const folderId = searchParams.get("folder")
   const isEditing = !!initial.id
   const [state, setState] = useState<BuilderInitial>(initial)
   const [saving, setSaving] = useState(false)
+  const [revision,setRevision]=useState(initial.steps_revision)
+  const [review,setReview]=useState<null|{payload:Record<string,unknown>;token:string;impacts:ReferenceImpact[];problems:string[];
+    summary:{before:number;after:number;unchangedLinks:number;pendingChanges:number}}>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   function patchTop<K extends keyof BuilderInitial>(key: K, value: BuilderInitial[K]) {
@@ -728,10 +730,11 @@ const folderId = searchParams.get("folder")
     setState((s) => ({ ...s, steps: moveAt(s.steps, path, direction) }))
   }
 
-  async function save() {
+  async function save(confirmed?:{payload:Record<string,unknown>;token:string}) {
     setSaving(true)
     try {
-      const payload = {
+      const payload:Record<string,unknown> = confirmed?.payload ?? {
+        steps_revision:revision,
         name: state.name || "Untitled automation",
         description: state.description || null,
         trigger_type: state.trigger_type,
@@ -741,11 +744,23 @@ const folderId = searchParams.get("folder")
 steps: toApiSteps(state.steps),
       }
 
+      let impactToken=confirmed?.token
+      if(isEditing&&!confirmed){
+        const check=await fetch(`/api/automations/${initial.id}`,{method:'PATCH',headers:{'content-type':'application/json'},
+          body:JSON.stringify({...payload,preview:true})})
+        const preview=await check.json()
+        if(!check.ok){toast.error(preview.error??'No se pudo revisar el cambio.');return}
+        if(preview.impacts.length||preview.problems.length||preview.summary.pendingChanges){
+          setReview({payload,...preview});return
+        }
+        impactToken=preview.token
+      }
+
       const res = isEditing
         ? await fetch(`/api/automations/${initial.id}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({...payload,impact_token:impactToken}),
           })
         : await fetch(`/api/automations`, {
             method: "POST",
@@ -770,6 +785,8 @@ steps: toApiSteps(state.steps),
         return
       }
       toast.success(isEditing ? t("toasts.saved") : t("toasts.created"))
+      setReview(null)
+      if(isEditing&&body.steps){setState(s=>({...s,steps:fromServerSteps(body.steps)}));setRevision(body.steps_revision)}
       if (!isEditing && body?.automation?.id) {
         router.replace(`/automations/${body.automation.id}/edit`)
       }
@@ -780,6 +797,31 @@ steps: toApiSteps(state.steps),
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
+      <Dialog open={!!review} onOpenChange={open=>{if(!open&&!saving)setReview(null)}}>
+        <DialogContent className="w-[calc(100vw-1.5rem)] max-w-2xl max-h-[85dvh] overflow-y-auto">
+          <DialogTitle>Revisar enlaces antes de guardar</DialogTitle>
+          <DialogDescription>Moviste, agregaste o quitaste bloques. Estos cambios mantienen cada enlace apuntando a la información correcta.</DialogDescription>
+          {review&&<div className="space-y-3 text-sm">
+            <p>Esta automatización pasa de <strong>{review.summary.before}</strong> a <strong>{review.summary.after}</strong> bloques.</p>
+            {review.impacts.map((item,i)=><div key={i} className="rounded-lg border p-3 space-y-1 break-words">
+              <p className="font-medium">{item.automationName}</p><p className="text-muted-foreground">{item.folder} · Bloque {item.block}</p>
+              <p>Antes: <strong>{item.before}</strong> → Después: <strong>{item.after}</strong></p>
+              <p className="text-xs text-muted-foreground">Código: {item.automationId}</p>
+              {item.problem&&<p className="text-destructive">{item.problem}</p>}
+            </div>)}
+            <p>{review.summary.unchangedLinks} enlaces conservan su selección actual.</p>
+            {!!review.summary.pendingChanges&&<p>Se ajustarán {review.summary.pendingChanges} posiciones guardadas para continuar desde el mismo contenido, incluidas las secuencias pausadas. Sus horas de espera se conservan.</p>}
+            {review.problems.map((problem,i)=><p key={i} className="text-destructive">{problem}</p>)}
+            <p>Al aceptar, se guardan tus cambios y se actualizan juntos los enlaces indicados.</p>
+          </div>}
+          <DialogFooter>
+            <Button variant="outline" disabled={saving} onClick={()=>setReview(null)}>Volver al editor</Button>
+            <Button disabled={saving||!!review?.problems.length} onClick={()=>{if(review)void save({payload:review.payload,token:review.token})}}>
+              {saving?'Guardando…':'Aceptar y actualizar enlaces'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Top bar. At sub-sm widths the "Active" label is hidden and the
           switch moves to the right of the save button, so the name input
           gets maximum width. */}
@@ -817,7 +859,7 @@ steps: toApiSteps(state.steps),
           />
         </div>
         <Button
-          onClick={save}
+          onClick={()=>void save()}
           disabled={saving}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
@@ -1940,6 +1982,7 @@ function moveInBranches(
 // ------------------------------------------------------------
 
 interface ApiStep {
+  id?: string
   step_type: string
   step_config: Record<string, unknown>
   branches?: { yes?: ApiStep[]; no?: ApiStep[] }
@@ -1947,6 +1990,7 @@ interface ApiStep {
 
 export function toApiSteps(steps: BuilderStep[]): ApiStep[] {
   return steps.map((s) => ({
+    id:s.id??s.cid,
     step_type: s.step_type,
     step_config: s.step_config,
     branches: s.branches
@@ -1968,7 +2012,8 @@ export interface ServerStepNode {
 
 export function fromServerSteps(nodes: ServerStepNode[]): BuilderStep[] {
   return nodes.map((n) => ({
-    cid: cid(),
+    cid: n.id,
+    id: n.id,
     step_type: n.step_type as AutomationStepType,
     step_config: n.step_config ?? {},
     branches:
