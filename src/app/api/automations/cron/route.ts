@@ -35,6 +35,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const admin = supabaseAdmin();
+  // Payment-validated registrations must be refreshed before slower sales
+  // followups; otherwise a busy followup can starve document preparation.
+  try { await runIncompleteIntakes(admin); }
+  catch (error) { console.error('No se pudieron revisar las matrículas pendientes', error); }
   const { error: reminderError } = await admin.rpc('publish_due_adviser_reminders');
   if (reminderError) console.error('No se pudieron entregar los recordatorios personales', reminderError);
   try { await dispatchDueReminderMessages(admin); }
@@ -45,7 +49,6 @@ export async function GET(request: Request) {
   await runIdleFollowups();
   try { await runSalesWindowFollowups(admin); }
   catch (error) { console.error('No se pudo procesar el cierre de ventas de 23 horas', error); }
-  await runIncompleteIntakes(admin);
   const { error: areaRoutingError } = await admin.rpc('route_waiting_area_conversations');
   if (areaRoutingError) return NextResponse.json({ error: 'No se pudo actualizar la cola de areas' }, { status: 500 });
   const { error: noticesError } = await admin.rpc('publish_operational_notices');
