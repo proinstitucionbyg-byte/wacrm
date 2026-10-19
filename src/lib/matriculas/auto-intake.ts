@@ -5,6 +5,10 @@ import { declarationEvidence, isGuardianMessage } from './identity-evidence';
 import { quotedOfferPrices } from './offer-prices';
 export interface IntakeEvidence extends IntakeMessage { sender_type?: string; ai_generated?: boolean; created_at?: string }
 const key = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
+const sameName = (left: string, right: string) => {
+  const words = (value: string) => key(value).split(' ').sort().join(' ');
+  return words(left) === words(right);
+};
 /** Matching written identifiers to the photo is not payment validation. The caller requires the CEO's payment decision first. */
 export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvidence[], calendar: AcademicModule[], receivedAt: string): EnrollmentData {
   const next = { ...data };
@@ -16,15 +20,17 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
       const name = normalizedLine.match(/^(?:NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?)\s*:\s*(.+)$/);
       const doc = normalizedLine.match(/^(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE)\s*:\s*(.+)$/);
       if (name) writtenNames.add(key(name[1]));
+      else if (/^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(line.trim()) && sameName(line,next.full_name)) writtenNames.add(key(line));
       if (doc) writtenDocs.add(key(doc[1]).replace(/[\s()-]/g, ''));
+      else if (normalizedLine.replace(/[\s()-]/g, '') === next.document_number) writtenDocs.add(next.document_number);
     }
     const photos = customer.filter((message) => message.image_analysis?.category === 'identity_document');
     const consistent = photos.every((photo) => {
       const f = photo.image_analysis?.fields;
-      return !f?.full_name || (key(String(f.full_name)) === key(next.full_name!) && (!f.document_number || key(String(f.document_number)).replace(/\s/g, '') === next.document_number));
+      return !f?.full_name || (sameName(String(f.full_name), next.full_name!) && (!f.document_number || key(String(f.document_number)).replace(/\s/g, '') === next.document_number));
     });
-    const front = photos.some((photo) => key(String(photo.image_analysis?.fields?.full_name ?? '')) === key(next.full_name!) && String(photo.image_analysis?.fields?.document_number ?? '').replace(/\s/g, '') === next.document_number);
-    if (consistent && front && writtenNames.size === 1 && writtenNames.has(key(next.full_name)) && writtenDocs.size === 1 && writtenDocs.has(next.document_number)) next.identity_confirmed = true;
+    const front = photos.some((photo) => sameName(String(photo.image_analysis?.fields?.full_name ?? ''), next.full_name!) && String(photo.image_analysis?.fields?.document_number ?? '').replace(/\s/g, '') === next.document_number);
+    if (consistent && front && writtenNames.size === 1 && sameName([...writtenNames][0], next.full_name) && writtenDocs.size <= 1 && (writtenDocs.size === 0 || writtenDocs.has(next.document_number))) next.identity_confirmed = true;
   }
   const photos = customer.filter(message => message.image_analysis?.category === 'identity_document');
   // A contradictory photo must be resolved, not bypassed with the written-data exception.

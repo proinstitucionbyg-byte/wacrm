@@ -837,8 +837,9 @@ const lastHuman = conversation.last_human_message_at
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
 const inboundText = inboundRoutingText(contentText ?? message.text?.body ?? null, audioTranscript)
 const automatedInbound = isLikelyAutomatedInbound(inboundText)
+const allAutomaticRepliesDisabled = conversation.ai_enabled === false && conversation.automation_enabled === false
 
-const followupReplyHandled = interactiveReplyId
+const followupReplyHandled = !allAutomaticRepliesDisabled && interactiveReplyId
   ? await handleIdleFollowupReply({
       accountId,
       userId: configOwnerUserId,
@@ -851,11 +852,11 @@ const followupReplyHandled = interactiveReplyId
 // Academic cancellation notices must not launch the sales funnel.
 let teacherHandled = false
 try {
-  teacherHandled = await handleTeacherInbound(supabaseAdmin(), { accountId, conversationId: conversation.id, contactId: contactRecord.id, userId: configOwnerUserId, messageId: message.id, text: inboundText, humanRecentlyActive })
+  if (!allAutomaticRepliesDisabled) teacherHandled = await handleTeacherInbound(supabaseAdmin(), { accountId, conversationId: conversation.id, contactId: contactRecord.id, userId: configOwnerUserId, messageId: message.id, text: inboundText, humanRecentlyActive })
 } catch (error) { console.error('[teacher] cancellation requires review', error) }
 // Assignment makes the lead available to an adviser. It does not consume the
 // inbound or pause the existing flow/AI; human replies use their own pause.
-if (!automatedInbound && !teacherHandled && !humanRecentlyActive && !followupReplyHandled) {
+if (!allAutomaticRepliesDisabled && !automatedInbound && !teacherHandled && !humanRecentlyActive && !followupReplyHandled) {
   await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
 }
 const automationPaused =

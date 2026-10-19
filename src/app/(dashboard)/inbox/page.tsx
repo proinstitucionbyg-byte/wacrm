@@ -278,11 +278,13 @@ if (activeConversation?.id === fetched.id) {
                 ? {
                     ...c,
                     last_message_text: newMsg.content_text ?? "",
-                    last_message_at: newMsg.created_at,
+                    last_message_at: newMsg.sender_type === "bot" ? c.last_message_at : newMsg.created_at,
                     unread_count:
                       activeConversation?.id === newMsg.conversation_id
                         ? 0
-                        : c.unread_count + 1,
+                        : newMsg.sender_type === "customer"
+                          ? c.unread_count + 1
+                          : c.unread_count,
                   }
                 : c,
             ),

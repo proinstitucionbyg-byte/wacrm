@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { runAutomationById } from '@/lib/automations/engine';
 import { routeConversationToArea } from '@/lib/ai/handoff-routing';
 import { ENROLLMENT_FIELDS, isMinor, type EnrollmentData } from './enrollment';
+import { collectConversationEnrollments } from './collect';
 
 const HOUR = 3600000;
 export type IncompletePhase =
@@ -33,9 +34,6 @@ export function missingWrittenFields(data: EnrollmentData): string[] {
       'birth_date',
       'phone1',
       'email',
-      'address',
-      'department',
-      'district',
       'course',
     ] as const
   )
@@ -64,17 +62,17 @@ export function incompleteIntakeText(
   const fields = missingWrittenFields(data);
   const introduction =
     phase === 'provisional'
-      ? '¡Bienvenido(a) a INSTICRECE! Tu pago fue validado. Todavía no podemos emitir tu boleta, cronograma de pagos y ficha de matrícula porque necesitamos completar tu registro. Fidelización te acompañará con este trámite.'
+      ? 'Recibimos la validación de tu pago. Todavía necesitamos completar tu registro para emitir tu boleta, cronograma de pagos y ficha de matrícula. El equipo de ventas te acompañará con este trámite.'
       : phase === 'intake_followup'
         ? 'Queremos ayudarte a completar tu matrícula. Tus documentos siguen pendientes de completar el registro.'
-        : 'Antes de que termine nuestra ventana de atención, déjanos los datos pendientes y confirma tu celular, correo y un contacto alternativo si lo tienes, para que fidelización pueda continuar ayudándote.';
+        : 'Antes de que termine nuestra ventana de atención, déjanos los datos pendientes y confirma tu celular y correo para que ventas pueda continuar ayudándote.';
   return (
     introduction +
     '\n\n' +
     (fields.length
       ? 'Por favor envíanos:\n' + fields.map((field) => '• ' + field).join('\n')
       : 'Estamos revisando la información recibida para completar tus documentos. Si detectamos alguna diferencia, te pediremos aclararla.') +
-    '\n\nSi perdiste tu documento, puedes escribir tus datos y su número; conservaremos el pantallazo como respaldo. Si tampoco recuerdas el número, indícanoslo para que fidelización te ayude. No completaremos datos por ti.'
+    '\n\nSi perdiste tu documento, puedes escribir tus datos y su número; conservaremos el pantallazo como respaldo. Si tampoco recuerdas el número, indícanoslo para que ventas te ayude. No completaremos datos por ti.'
   );
 }
 
@@ -122,6 +120,20 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
       if (closed.error) throw closed.error;
       continue;
     }
+    if (draft.status === 'collecting') {
+      // Data can arrive after the human validates a voucher. Recheck the
+      // saved chat before asking for fields that the student already sent.
+      await collectConversationEnrollments(db, watch.account_id, watch.conversation_id, watch.enrollment_id);
+      const { data: refreshed, error: refreshError } = await db.from('enrollment_drafts')
+        .select('status,data').eq('id', watch.enrollment_id).eq('account_id', watch.account_id).maybeSingle();
+      if (refreshError) throw refreshError;
+      if (refreshed && refreshed.status !== 'collecting') {
+        const closed = await db.from('incomplete_intake_watches').update({ closed_at: stamp }).eq('enrollment_id', watch.enrollment_id);
+        if (closed.error) throw closed.error;
+        continue;
+      }
+      if (refreshed) draft.data = refreshed.data;
+    }
     const { data: conversation, error: convError } = await db
       .from('conversations')
       .select('contact_id')
@@ -155,14 +167,14 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
     const recipients = (profiles ?? []).filter(
       (p) =>
         ['owner', 'admin'].includes(p.account_role) ||
-        p.area?.trim().toUpperCase() === 'FIDELIZACION'
+        p.area?.trim().toUpperCase() === 'VENTAS'
     );
     const owner = profiles?.find((p) => p.account_role === 'owner');
     if (!owner) continue;
     const body =
       'PAGO VALIDADO · DATOS PENDIENTES · DOCUMENTOS NO EMITIDOS\n' +
       fidelityReviewTasks(draft.data).join('\n') +
-      '\nFIDELIZACION DEBE COMPLETAR EL REGISTRO Y GESTIONAR EL ACCESO A CLASE CON UN ENLACE VERIFICADO. NO INVENTAR EL ENLACE.\nPLAZO DE BIENVENIDA: ' +
+      '\nVENTAS DEBE COMPLETAR EL REGISTRO; DESPUES DEL ALTA, FIDELIZACION GESTIONARA EL ACCESO A CLASE CON UN ENLACE VERIFICADO. NO INVENTAR EL ENLACE.\nPLAZO DE BIENVENIDA: ' +
       new Date(watch.welcome_due_at).toLocaleString('es-PE', {
         timeZone: 'America/Lima',
       });
@@ -188,7 +200,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
           type: 'system_notice',
           conversation_id: watch.conversation_id,
           title: 'VENTANA CERRADA · DATOS PENDIENTES',
-          body: 'NO SE ENVIARON MENSAJES LIBRES FUERA DE LA VENTANA. FIDELIZACION DEBE CONTINUAR POR UN MEDIO AUTORIZADO O UNA PLANTILLA CONFIGURADA. EL EXPEDIENTE SIGUE PENDIENTE.',
+          body: 'NO SE ENVIARON MENSAJES LIBRES FUERA DE LA VENTANA. VENTAS DEBE CONTINUAR POR UN MEDIO AUTORIZADO O UNA PLANTILLA CONFIGURADA. EL EXPEDIENTE SIGUE PENDIENTE.',
           target_url: '/inbox?c=' + watch.conversation_id,
           dedup_key: 'incomplete-window:' + watch.enrollment_id,
         })),
@@ -201,7 +213,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
         db,
         watch.account_id,
         watch.conversation_id,
-        'fidelizacion'
+        'ventas'
       );
       const { data: blocks, error: blockError } = await db
         .from('automations')

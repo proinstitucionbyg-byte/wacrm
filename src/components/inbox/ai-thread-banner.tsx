@@ -163,6 +163,31 @@ export function AiThreadBanner({
     }
   }, [automationOn, busy, conversationId, onChange]);
 
+  const toggleBothIndefinitely = useCallback(async () => {
+    if (busy) return;
+    const enable = aiDisabled && !automationOn;
+    setBusy(true);
+    try {
+      const { error } = await createClient().from('conversations').update({
+        ai_enabled: enable,
+        automation_enabled: enable,
+        // A null timestamp means the scheduler must not reactivate them.
+        ai_disabled_at: null,
+        automation_disabled_at: null,
+      }).eq('id', conversationId);
+      if (error) throw error;
+      setAiDisabled(!enable);
+      setAutomationOn(enable);
+      onChange?.({ ai_enabled: enable, automation_enabled: enable });
+      toast.success(enable ? 'IA y automatización reactivadas' : 'IA y automatización desactivadas hasta que las reactives');
+    } catch (error) {
+      console.error('Failed to toggle both controls:', error);
+      toast.error('No se pudo cambiar el estado de IA y automatización');
+    } finally {
+      setBusy(false);
+    }
+  }, [aiDisabled, automationOn, busy, conversationId, onChange]);
+
   return (
     <Banner tone={aiDisabled && !automationOn ? "muted" : "primary"}>
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -181,7 +206,10 @@ export function AiThreadBanner({
         </span>
       </div>
 
-      <div className="flex flex-shrink-0 items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <BannerButton onClick={toggleBothIndefinitely} busy={busy} icon={Hand}>
+          {aiDisabled && !automationOn ? 'Reactivar ambas' : 'Desactivar ambas indefinidamente'}
+        </BannerButton>
         <BannerButton
           onClick={toggleAI}
           busy={busy}
@@ -213,7 +241,7 @@ function Banner({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 border-b px-3 py-2 text-xs sm:px-4",
+        "flex flex-wrap items-center gap-3 border-b px-3 py-2 text-xs sm:px-4",
         tone === "primary"
           ? "border-primary/20 bg-primary/5"
           : "border-border bg-muted/40",

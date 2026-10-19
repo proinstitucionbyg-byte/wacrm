@@ -852,6 +852,31 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   let errorMessage: string | null = null
 
   for (const [index, step] of (steps as AutomationStep[]).entries()) {
+    // An adviser can reply while a block is waiting for delivery or while
+    // this loop is advancing. Keep the exact next step instead of sending
+    // over the adviser or losing the remaining sequence.
+    if (args.context.conversation_id && !args.context.manual_agent_id && !args.context.enrollment_sequence_id) {
+      const { data: conversation, error: pauseError } = await db.from('conversations')
+        .select('last_human_message_at,automation_enabled')
+        .eq('id', args.context.conversation_id)
+        .eq('account_id', args.automation.account_id)
+        .maybeSingle()
+      if (pauseError) throw pauseError
+      const humanAt = Date.parse(conversation?.last_human_message_at ?? '')
+      if (conversation?.automation_enabled === false || (Number.isFinite(humanAt) && Date.now() < humanAt + HUMAN_PAUSE_MS)) {
+        const runAt = Math.max(Date.now() + 30_000, Number.isFinite(humanAt) ? humanAt + HUMAN_PAUSE_MS : 0)
+        const { error: deferError } = await db.from('automation_pending_executions').insert({
+          automation_id: args.automation.id, account_id: args.automation.account_id,
+          user_id: args.automation.user_id, contact_id: args.contactId, log_id: args.logId,
+          parent_step_id: args.parentStepId, branch: args.branch,
+          next_step_position: step.position, context: args.context,
+          run_at: new Date(runAt).toISOString(), status: 'pending',
+        })
+        if (deferError) throw deferError
+        await appendResults(args.logId, results, 'partial', null)
+        return
+      }
+    }
     // `wait` is the suspension point: enqueue and stop processing this
     // scope. The cron endpoint will pick it up later.
     if (step.step_type === 'wait') {

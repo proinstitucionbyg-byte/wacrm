@@ -13,8 +13,14 @@ export function declarationEvidence(data: EnrollmentData, messages: IntakeMessag
   for (const message of messages) {
     if (isGuardianMessage(message)) continue;
     for (const line of (message.content_text ?? '').replace(/\\n/g, '\n').split(/\r?\n/)) {
-      const match = normalize(line).match(/^(NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?|DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE|CORREO(?: ELECTRONICO)?|EMAIL)\s*:\s*(.+)$/);
-      if (!match) continue;
+      const normalized = normalize(line);
+      const match = normalized.match(/^(NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?|DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE|CORREO(?: ELECTRONICO)?|EMAIL)\s*:\s*(.+)$/);
+      if (!match) {
+        if (/^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(line.trim()) && normalized === normalize(data.full_name)) { names.add(normalized); ids.add(message.id); }
+        else if (normalized.replace(/[\s()-]/g, '') === normalize(data.document_number)) { documents.add(normalized.replace(/[\s()-]/g, '')); ids.add(message.id); }
+        else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(line.trim()) && normalized === normalize(data.email)) { emails.add(normalized); ids.add(message.id); }
+        continue;
+      }
       const [,label,value] = match;
       const target = /^NOMBRE/.test(label) ? names : /CORREO|EMAIL/.test(label) ? emails : documents;
       target.add(target === documents ? value.replace(/[\s()-]/g, '') : value);

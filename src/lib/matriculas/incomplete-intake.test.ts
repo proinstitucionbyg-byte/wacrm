@@ -5,6 +5,7 @@ vi.mock('@/lib/automations/engine', () => ({
 vi.mock('@/lib/ai/handoff-routing', () => ({
   routeConversationToArea: vi.fn(),
 }));
+vi.mock('./collect', () => ({ collectConversationEnrollments: vi.fn() }));
 import {
   incompletePhase,
   incompleteIntakeText,
@@ -12,6 +13,7 @@ import {
   runIncompleteIntakes,
 } from './incomplete-intake';
 import { runAutomationById } from '@/lib/automations/engine';
+import { collectConversationEnrollments } from './collect';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const H = 3600000,
   clock = Date.parse('2026-10-11T12:00:00-05:00');
@@ -77,10 +79,10 @@ describe('protocolo excepcional de bienvenida', () => {
   });
   it('pide datos escritos y no afirma documentos emitidos ni inventa fechas de pago', () => {
     const text = incompleteIntakeText('provisional', {});
-    expect(text).toContain('Todavía no podemos emitir');
-    expect(text).toContain('DIRECCION');
-    expect(text).toContain('DEPARTAMENTO');
-    expect(text).toContain('DISTRITO');
+    expect(text).toContain('Todavía necesitamos completar tu registro para emitir');
+    expect(text).not.toContain('• DIRECCION');
+    expect(text).not.toContain('• DEPARTAMENTO');
+    expect(text).not.toContain('• DISTRITO');
     expect(text).toContain('pantallazo');
     expect(text).not.toMatch(/día 15|día 30|inscripción está confirmada/i);
   });
@@ -200,11 +202,13 @@ function fixture(override: Record<string, Result[]> = {}) {
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(clock);
   vi.mocked(runAutomationById).mockClear().mockResolvedValue(true);
+  vi.mocked(collectConversationEnrollments).mockClear();
 });
 describe('cola real de registro incompleto', () => {
   it('envía únicamente el bloque interno reservado del pago validado', async () => {
     const state = fixture();
     await runIncompleteIntakes(state.db);
+    expect(collectConversationEnrollments).toHaveBeenCalledWith(state.db, 'account', 'chat', 'draft');
     expect(runAutomationById).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: 'account',

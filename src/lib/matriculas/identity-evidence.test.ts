@@ -12,6 +12,15 @@ describe('identidad con respaldo escrito y tutor',()=>{
     expect(declarationEvidence(data,[{...message,content_text:'NOMBRE: LUIS TEST\nDNI: 12345678'}])).toEqual([]);
     expect(declarationEvidence(data,[message,{...message,id:'other',content_text:'DNI: 87654321'}])).toEqual([]);
   });
+  it('acepta nombre, documento y correo escritos en mensajes separados',()=>{
+    const values={full_name:'MARIELA HAYDEE LUGONES LOAYZA',document_number:'70249409',email:'persona@example.com'};
+    const written=[
+      {id:'11111111-1111-4111-8111-111111111111',sender_type:'customer',content_text:values.full_name},
+      {id:'22222222-2222-4222-8222-222222222222',sender_type:'customer',content_text:values.document_number},
+      {id:'33333333-3333-4333-8333-333333333333',sender_type:'customer',content_text:values.email},
+    ];
+    expect(declarationEvidence(values,written)).toHaveLength(3);
+  });
   it('la excepcion no marca una foto verificada',()=>{
     const prepared=prepareAutomaticIntake(data,[message],[],'2026-10-09T12:00:00Z');
     expect(prepared.declaration_message_ids).toEqual([id]);expect(prepared.identity_confirmed).not.toBe(true);

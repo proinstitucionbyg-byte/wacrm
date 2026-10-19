@@ -5,12 +5,12 @@ import {
   suggestIdentityData,
 } from './enrollment';
 describe('matricula posterior a pago humano', () => {
-  it('no emite documentos sin fecha de nacimiento y domicilio completo', () => {
+  it('requiere fecha de nacimiento pero no bloquea los documentos por domicilio opcional', () => {
     const issues=enrollmentIssues({full_name:'ALUMNO',document_type:'DNI',document_number:'12345678'});
     expect(issues).toContain('FALTA FECHA DE NACIMIENTO');
-    expect(issues).toContain('FALTA DIRECCION');
-    expect(issues).toContain('FALTA DEPARTAMENTO');
-    expect(issues).toContain('FALTA DISTRITO');
+    expect(issues).not.toContain('FALTA DIRECCION');
+    expect(issues).not.toContain('FALTA DEPARTAMENTO');
+    expect(issues).not.toContain('FALTA DISTRITO');
   });
   it('fills only empty fields from identity OCR and still requires comparison', () => {
     expect(

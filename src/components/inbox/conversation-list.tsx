@@ -236,7 +236,11 @@ export function ConversationList({
       });
     }
 
-    return result;
+    return result.sort((a, b) =>
+      (b.last_message_at ? Date.parse(b.last_message_at) : 0) -
+      (a.last_message_at ? Date.parse(a.last_message_at) : 0) ||
+      b.created_at.localeCompare(a.created_at)
+    );
   }, [conversations, filter, search, selectedTagIds, selectedCompany]);
 
   const toggleTag = useCallback((id: string) => {
@@ -314,8 +318,8 @@ export function ConversationList({
               </Button>
             )}
             {checkedChats.length > 0 && tags.filter((tag) => checkedTagCounts.has(tag.id)).map((tag) => (
-              <button key={tag.id} type="button" disabled={tagBusy} onClick={() => void applyLabel(true, tag.id)} aria-label={`Retirar ${tag.name} de los chats seleccionados`} className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs" style={{ color: tag.color }}>
-                {tag.name} ({checkedTagCounts.get(tag.id)}/{checkedChats.length}) <X className="h-3 w-3" />
+              <button key={tag.id} type="button" disabled={tagBusy} onClick={() => void applyLabel(true, tag.id)} aria-label={`Retirar ${tag.name} de los chats seleccionados`} className="inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs" style={{ color: tag.color }}>
+                {tag.name} ({checkedTagCounts.get(tag.id)}/{checkedChats.length}) <X className="h-5 w-5" />
               </button>
             ))}
           </div>

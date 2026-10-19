@@ -125,6 +125,7 @@ export async function dispatchSocialInbound(db: SupabaseClient, input: SocialDis
     .eq('id', input.conversationId).eq('account_id', input.accountId).eq('contact_id', input.contactId).maybeSingle()
   if (error || !conversation) throw error ?? new Error('Conversación no disponible.')
   if (isLikelyAutomatedInbound(input.text)) return
+  if (conversation.ai_enabled === false && conversation.automation_enabled === false) return
   const lastHuman = conversation.last_human_message_at ? new Date(conversation.last_human_message_at).getTime() : 0
   const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
   if (await handleTeacherInbound(db, { ...input, humanRecentlyActive })) return

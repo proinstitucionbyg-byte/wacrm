@@ -44,7 +44,9 @@ export async function sendSocialMessage(db: SupabaseClient, input: SocialSendInp
     internalId = saved.id
     const now = new Date().toISOString()
     const { error: updateError } = await db.from('conversations').update({
-      last_message_text: part.contentText || `[${part.contentType}]`, last_message_at: now, updated_at: now,
+      last_message_text: part.contentText || `[${part.contentType}]`,
+      ...(input.senderId ? { last_message_at: now } : {}),
+      updated_at: now,
     }).eq('id', input.conversationId).eq('account_id', input.accountId)
     if (updateError) throw new Error('Mensaje enviado; no se actualizó la vista del chat. Revisa antes de repetirlo.')
     if (input.senderId) {

@@ -197,8 +197,8 @@ describe('idle follow-up dispatch', () => {
     expect(h.run).not.toHaveBeenCalled()
     expect(h.interactive).not.toHaveBeenCalled()
   })
-  it('does not resume before ten minutes or interrupt a scheduled pause', async () => {
-    h.conv.last_human_message_at = '2026-10-17T19:51:00Z'
+  it('does not resume during the five-minute human pause or interrupt a scheduled wait', async () => {
+    h.conv.last_human_message_at = '2026-10-17T19:57:00Z'
     h.conv.followup_sent_at = null
     expect(await runIdleFollowups()).toBe(0)
     h.conv.last_human_message_at = null

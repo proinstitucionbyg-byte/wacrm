@@ -15,6 +15,7 @@ import {
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
 import { sendSocialMessage } from '@/lib/social/send'
+import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 
 // ------------------------------------------------------------
 // Automation-side Meta sender.
@@ -39,6 +40,7 @@ interface SendTextArgs {
   conversationId: string
   contactId: string
   text: string
+  aiGenerated?: boolean
 }
 
 interface SendTemplateArgs {
@@ -132,6 +134,18 @@ type SendInput =
 
 async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+
+  // The adviser may have replied while the AI was composing. Check again at
+  // the last common send boundary, including WhatsApp and social channels.
+  if (input.kind === 'text' && input.aiGenerated) {
+    const { data: conversation, error } = await db.from('conversations')
+      .select('ai_enabled,last_human_message_at')
+      .eq('id', input.conversationId).eq('account_id', input.accountId).maybeSingle()
+    if (error || !conversation || conversation.ai_enabled === false) throw new Error('AI reply stopped before send')
+    const humanAt = Date.parse(conversation.last_human_message_at ?? '')
+    if (Number.isFinite(humanAt) && Date.now() < humanAt + HUMAN_PAUSE_MS)
+      throw new Error('Adviser is attending this conversation')
+  }
 
   // Scope the contact + config lookups by account_id, not user_id.
   // The engine uses the service-role client (bypassing RLS); without
@@ -262,6 +276,7 @@ const template_name =
     message_id: waMessageId,
     media_url: input.kind === 'media' ? (/^\d+$/.test(input.mediaUrl) ? `/api/whatsapp/media/${input.mediaUrl}` : input.mediaUrl) : null,
     status: 'sent',
+    ai_generated: input.kind === 'text' && input.aiGenerated === true,
   })
   if (msgErr) {
     // Meta already has the message; record the DB error but don't pretend
@@ -278,7 +293,6 @@ const template_name =
     : input.kind === 'media'
       ? `[${input.mediaType}] ${input.caption ?? ''}`
       : input.text,
-      last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq('id', input.conversationId)

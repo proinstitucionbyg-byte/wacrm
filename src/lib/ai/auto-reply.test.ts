@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string; name?: string }[],
     pendingSequence: [] as Array<{automation_id:string;context:Record<string,unknown>}>,
+    paymentReview: null as {status:string} | null,
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
@@ -29,6 +30,11 @@ vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
+      if (table === 'payment_reviews') {
+        const chain = {select:()=>chain,eq:()=>chain,in:()=>chain,gte:()=>chain,order:()=>chain,limit:()=>chain,
+          maybeSingle:async()=>({data:h.state.paymentReview,error:null})}
+        return chain
+      }
       if (table === 'automation_pending_executions') {
         const chain = { select:()=>chain,eq:()=>chain,in:()=>chain,
           limit:async()=>({data:h.state.pendingSequence,error:null}) }
@@ -109,6 +115,7 @@ beforeEach(() => {
   }
   h.state.autoResponders = []
   h.state.pendingSequence = []
+  h.state.paymentReview = null
   h.state.claim = true
   h.state.updatePayload = null
   h.state.rpcCalls = []
@@ -143,6 +150,15 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     h.buildConversationContext.mockResolvedValue([{role:'user',content:'Número para yapear'}])
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('937467119')}))
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
+  it('continues an enrollment with a received payment without restarting Yape',async()=>{
+    h.state.paymentReview = {status:'validated'}
+    h.state.autoResponders=[{id:'payment',name:'YAPE O PLIN'}]
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'sigamos con la inscripción'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('no necesitas volver a pagar')}))
+    expect(h.runAutomation).not.toHaveBeenCalled()
     expect(h.generateReply).not.toHaveBeenCalled()
   })
   it('blocks a fabricated Yape number in a model reply',async()=>{

@@ -61,13 +61,15 @@ describe('shared social send', () => {
     pauseAdmin.mockReturnValue(pause.db)
     expect(await sendSocialMessage(db, { ...input, senderId: 'agent' })).toEqual({ whatsapp_message_id: 'meta-confirmation', message_id: 'internal' })
     expect(writes[0]).toEqual(['messages', expect.objectContaining({ sender_type: 'agent', sender_id: 'agent', message_id: 'meta-confirmation', content_text: input.text })])
+    expect(writes[1]).toEqual(['conversations', expect.objectContaining({ last_message_at: expect.any(String) })])
     expect(pauseAdmin).toHaveBeenCalledOnce()
     expect(pause.filters).toContainEqual(['flow_runs', 'account_id', 'account'])
     expect(pause.filters).toContainEqual(['flow_runs', 'contact_id', 'contact'])
   })
   it('does not pause a Flow for an automated social send', async () => {
-    const { db } = database([{ data: { id: 'conv' } }, { data: { id: 'internal' } }, { error: null }])
+    const { db, writes } = database([{ data: { id: 'conv' } }, { data: { id: 'internal' } }, { error: null }])
     await sendSocialMessage(db, input)
+    expect(writes[1]).toEqual(['conversations', expect.not.objectContaining({ last_message_at: expect.anything() })])
     expect(pauseAdmin).not.toHaveBeenCalled()
   })
   it('does not save a fake success if Meta rejects the request', async () => {

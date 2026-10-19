@@ -1,2 +1,2 @@
-/** Resume only after ten minutes without adviser activity, on every channel. */
-export const HUMAN_PAUSE_MS = 10 * 60 * 1000
+/** Give the adviser five uninterrupted minutes after each message. */
+export const HUMAN_PAUSE_MS = 5 * 60 * 1000

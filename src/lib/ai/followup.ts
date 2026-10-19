@@ -163,7 +163,7 @@ export async function handleIdleFollowupReply(args: {
   }
 }
 
-/** Re-enable only controls that were manually turned off at least ten minutes ago. */
+/** Re-enable only timed controls; a null disabled_at is an indefinite manual pause. */
 export async function reactivateExpiredManualControls(): Promise<number> {
   const db = supabaseAdmin()
   const cutoff = new Date(Date.now() - HUMAN_PAUSE_MS).toISOString()

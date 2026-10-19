@@ -121,6 +121,15 @@ describe('social intake', () => {
   })
 })
 describe('social funnel dispatch', () => {
+  it('does not answer a conversation with both automatic controls disabled', async () => {
+    const { db } = database([ok({ id: 'conv', ai_enabled: false, automation_enabled: false })])
+    await dispatchSocialInbound(db, { ...dispatch, replyId: 'payment_followup_done' })
+    expect(mocks.followup).not.toHaveBeenCalled()
+    expect(mocks.sales).not.toHaveBeenCalled()
+    expect(mocks.flows).not.toHaveBeenCalled()
+    expect(mocks.automations).not.toHaveBeenCalled()
+    expect(mocks.ai).not.toHaveBeenCalled()
+  })
   it('keeps automation and AI active after the sales assignment', async () => {
     mocks.sales.mockResolvedValue(true)
     const { db } = database([ok({ id: 'conv', ai_enabled: true, automation_enabled: true }), ok()])

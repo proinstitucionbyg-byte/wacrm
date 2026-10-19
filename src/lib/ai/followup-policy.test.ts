@@ -11,7 +11,8 @@ describe('sales and fidelity follow-up separation',()=>{
   })
   it('keeps fidelity support out of sales automations',()=>{
     expect(idleFollowupArea([{role:'user',content:'Sigo esperando'}],'FIDELIZACION')).toBe('fidelizacion')
-    expect(idleFollowupArea([{role:'user',content:'No puedo ingresar a mi clase'}],'VENTAS')).toBe('fidelizacion')
+    expect(idleFollowupArea([{role:'user',content:'No puedo ingresar a mi clase'}],'VENTAS')).toBe('ventas')
+    expect(idleFollowupArea([{role:'user',content:'Ya estoy matriculado'},{role:'user',content:'No puedo ingresar a mi clase'}],'VENTAS')).toBe('fidelizacion')
   })
   it('recognizes an explicit new sale without letting old fidelity context override it',()=>{
     expect(idleFollowupArea([{role:'user',content:'Quiero matricularme'}],'FIDELIZACION')).toBe('ventas')

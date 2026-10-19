@@ -8,6 +8,8 @@ export function studentSupportArea(latest: string, messages: ChatMessage[]): 'fi
   const academic = /(?:mi|mis|la|las) (?:clase|clases|nota|notas|certificado|certificados|grabacion|grabaciones)|(?:link|enlace|acceso).{0,30}(?:clase|aula|plataforma)|(?:no puedo|no me deja).{0,30}(?:ingresar|entrar)|(?:problema|ayuda).{0,30}(?:docente|clase|plataforma)/.test(question);
   const customerHistory = normalize(messages.filter(m => m.role === 'user').map(m => m.content).join('\n'));
   const identifiedStudent = /\bsoy (?:alumn[oa]|estudiante)|\bya (?:estoy matriculad[oa]|me matricule|estudio|estoy estudiando)|\bestoy (?:llevando|estudiando)\b/.test(customerHistory);
-  if (academic && (identifiedStudent || /\bmi(?:s)?\b|(?:link|enlace|acceso).{0,30}(?:clase|aula|plataforma)/.test(question))) return 'fidelizacion';
+  // A new prospect can ask about "mi clase" before enrollment. Do not move
+  // them to student support without their own claim of already studying.
+  if (academic && identifiedStudent) return 'fidelizacion';
   return null;
 }

@@ -340,10 +340,20 @@ describe('WhatsApp delivery order', () => {
     h.state.conversationState = {automation_enabled:true,last_human_message_at:new Date(humanAt).toISOString()};
     await resumePendingExecution({id:'pending',automation_id:'a1',account_id:ACCOUNT,user_id:'u1',contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,next_step_position:48,context:{conversation_id:'chat'}});
     expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'pending',run_at:expect.any(String)}));
-    expect(Date.parse(String(h.state.pendingUpdates.at(-1)?.run_at))).toBeGreaterThanOrEqual(humanAt + 10 * 60_000);
+    expect(Date.parse(String(h.state.pendingUpdates.at(-1)?.run_at))).toBeGreaterThanOrEqual(humanAt + 5 * 60_000);
     expect(h.state.pendingUpdates.some(update => update.status === 'cancelled')).toBe(false);
     expect(h.state.logAutomationIds).toEqual([]);
     expect(engineSendInteractive).not.toHaveBeenCalled();
+  });
+  it('defers a newly started block at its first unsent step during adviser attention', async () => {
+    h.state.owned = {id:'c1'};
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [{id:'first',automation_id:'a1',step_type:'send_message',position:1,
+      parent_step_id:null,step_config:{text:'Información del curso'}}];
+    h.state.conversationState = {automation_enabled:true,last_human_message_at:new Date().toISOString()};
+    await runAutomationById({accountId:ACCOUNT,automationId:'a1',contactId:'c1',conversationId:'chat'});
+    expect(engineSendText).not.toHaveBeenCalled();
+    expect(h.state.pendingInserts).toContainEqual(expect.objectContaining({next_step_position:1,status:'pending'}));
   });
   it('resumes the next block immediately when Meta confirms delivery', async () => {
     h.state.automations = [automationWithUpdateStep()];

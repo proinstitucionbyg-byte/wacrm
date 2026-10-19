@@ -23,6 +23,20 @@ describe('automatic intake from compared evidence and official dates',()=>{
     expect(prepareAutomaticIntake(data,evidence,calendar,'2026-10-09T12:00:00Z')).toMatchObject({identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9],start_date:'2026-10-06'});
   });
   it('does not confirm identity from a photo alone',()=> expect(prepareAutomaticIntake(data,evidence.slice(1),calendar,'2026-10-09T12:00:00Z').identity_confirmed).not.toBe(true));
+  it('compares a bare written name with a photo even when the surname order differs', () => {
+    const written: IntakeEvidence = { id: 'name', sender_type: 'customer', content_text: 'NANCY MARGOT REYNA RODRIGUEZ' };
+    const photo: IntakeEvidence = { id: 'photo', sender_type: 'customer', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'REYNA RODRIGUEZ NANCY MARGOT', document_number: '41326266' } } };
+    expect(prepareAutomaticIntake({ full_name: 'NANCY MARGOT REYNA RODRIGUEZ', document_number: '41326266' }, [written, photo], calendar, '2026-10-19T12:00:00Z').identity_confirmed).toBe(true);
+  });
+  it('compares a bare written name and number against the same photographed document', () => {
+    const student = { full_name: 'MARIELA HAYDEE LUGONES LOAYZA', document_number: '70249409' };
+    const written: IntakeEvidence[] = [
+      { id: 'name', sender_type: 'customer', content_text: student.full_name },
+      { id: 'number', sender_type: 'customer', content_text: student.document_number },
+    ];
+    const photo: IntakeEvidence = { id: 'photo', sender_type: 'customer', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: student.full_name, document_number: student.document_number } } };
+    expect(prepareAutomaticIntake(student, [...written, photo], calendar, '2026-10-19T12:00:00Z').identity_confirmed).toBe(true);
+  });
   it('compares accented document labels without discarding document letters',()=>{
     const written = {...evidence[0],content_text:'Nombres y apellidos: LUIS PALACIOS\nCarné de extranjería: AB 123456'};
     const photo = {...evidence[1],image_analysis:{category:'identity_document',fields:{full_name:'LUIS PALACIOS',document_number:'AB123456'}}};
