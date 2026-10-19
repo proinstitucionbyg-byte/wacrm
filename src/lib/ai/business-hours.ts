@@ -119,28 +119,28 @@ export function buildHandoffNotice(args: {
 
   if (args.delicate) {
     const when = args.agentConnected
-      ? 'Una asesora te escribirá en unos minutos.'
+      ? 'Una asesora especializada continuará la atención por llamada o mensaje. Por favor, mantente atento a nuestra comunicación.'
       : isOpenNow(now)
-        ? 'Una asesora te escribirá apenas se libere.'
-        : `Una asesora te atenderá ${ensurePeriod(nextOpeningText(now))}`
+        ? 'Se te asignará una asesora especializada para atenderte por llamada o mensaje apenas esté disponible. Por favor, mantente atento a nuestra comunicación.'
+        : `Una asesora especializada te atenderá por llamada o mensaje ${ensurePeriod(nextOpeningText(now))} Por favor, mantente atento a nuestra comunicación.`
     return `Tu caso ya quedó derivado con prioridad a nuestro equipo de ${label} 🤍 ${when} Cuando te sientas con ánimo, puedes contarnos por aquí los detalles, sin ninguna prisa.`
   }
 
   if (args.agentConnected) {
-    return `Gracias por escribirnos 😊 Ya derivé tu consulta con nuestro equipo de ${label}. En unos minutos te atenderán por este mismo chat.${KEEP_HELPING}`
+    return `Hola, ¿qué tal? 😊 Ya derivé tu consulta a ${label}. Una asesora especializada continuará tu atención por llamada o mensaje. Por favor, mantente atento a nuestra llamada o mensaje. 📞${KEEP_HELPING}`
   }
 
   if (isOpenNow(now)) {
-    return `Gracias por escribirnos 😊 Ya derivé tu consulta con nuestro equipo de ${label}. En este momento nuestros asesores están atendiendo otras consultas; te escribirán apenas se libere uno. Nuestro horario es ${SCHEDULE_TEXT}.${KEEP_HELPING}`
+    return `Hola, ¿qué tal? 😊 Ya derivé tu consulta a ${label}. Estamos verificando la disponibilidad del equipo para asignarte una asesora especializada. Por favor, espera un momento y mantente atento a nuestra llamada o mensaje. 📞 Nuestro horario es ${SCHEDULE_TEXT}.${KEEP_HELPING}`
   }
 
-  return `Gracias por escribirnos 😊 Tu caso ya quedó registrado y derivado a nuestro equipo de ${label}. Ahora estamos fuera de horario: te atenderán ${ensurePeriod(nextOpeningText(now))} Nuestro horario es ${SCHEDULE_TEXT}.${KEEP_HELPING}`
+  return `Hola, ¿qué tal? 😊 Tu consulta quedó derivada a ${label}. Ahora estamos fuera de horario; se te asignará una asesora especializada para atenderte por llamada o mensaje ${ensurePeriod(nextOpeningText(now))} Por favor, mantente atento a nuestra comunicación. 📞 Nuestro horario es ${SCHEDULE_TEXT}.${KEEP_HELPING}`
 }
 
 /** Short reassurance when a customer asks again after being handed off. */
 export function buildWaitingReminder(now: number = Date.now()): string {
   if (isOpenNow(now)) {
-    return `Tu caso ya está derivado con nuestro equipo y te escribirán apenas se libere un asesor. Nuestro horario es ${SCHEDULE_TEXT}.`
+    return `Tu consulta sigue en espera de atención por una asesora especializada. Por favor, mantente atento a nuestra llamada o mensaje. 📞 Nuestro horario es ${SCHEDULE_TEXT}.`
   }
-  return `Tu caso ya está derivado con nuestro equipo. Ahora estamos fuera de horario: te atenderán ${ensurePeriod(nextOpeningText(now))} Nuestro horario es ${SCHEDULE_TEXT}.`
+  return `Tu consulta sigue derivada con nuestro equipo. Ahora estamos fuera de horario: una asesora especializada te atenderá por llamada o mensaje ${ensurePeriod(nextOpeningText(now))} Por favor, mantente atento a nuestra comunicación. 📞 Nuestro horario es ${SCHEDULE_TEXT}.`
 }

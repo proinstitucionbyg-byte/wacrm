@@ -296,7 +296,7 @@ describe('dispatchInboundToAiReply — handoff', () => {
     await dispatchInboundToAiReply(ARGS)
     expect(h.routeArea).not.toHaveBeenCalled()
     expect(h.generateReply).not.toHaveBeenCalled()
-    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('ya está derivado')}))
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('llamada o mensaje')}))
   })
 
   it('does not reassign an unresolved repeated question already handed off', async () => {
@@ -328,7 +328,7 @@ describe('dispatchInboundToAiReply — handoff', () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).toHaveBeenCalledTimes(1)
-    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('equipo de ventas') }))
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('consulta a ventas') }))
     expect(h.state.rpcCalls).toHaveLength(0)
     expect(h.state.updatePayload?.ai_handed_off_at).toEqual(expect.any(String))
     expect(h.state.updatePayload).not.toHaveProperty('ai_autoreply_disabled')

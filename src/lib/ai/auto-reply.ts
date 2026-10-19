@@ -7,10 +7,8 @@ import { buildSystemPrompt } from './defaults'
 import { findCandidateAutomations, preferredCourseInformationAutomation, preferredEnrollmentAutomation } from './automation-match'
 import { routeConversationToArea, explicitlyRequestedArea } from './handoff-routing'
 import {
-  SCHEDULE_TEXT,
+  buildWaitingReminder as waitingReminder,
   buildHandoffNotice,
-  isOpenNow,
-  nextOpeningText,
   scheduleContext,
 } from './business-hours'
 import { buildHandoffSummary } from './handoff'
@@ -38,14 +36,6 @@ interface DispatchArgs {
 
 /** For this long after a handoff the AI knows the customer was already told. */
 const HANDOFF_MEMORY_MS = 24 * 60 * 60 * 1000
-
-/** Short reassurance when a customer asks again after being handed off. */
-function waitingReminder(now: number = Date.now()): string {
-  if (isOpenNow(now)) {
-    return `Tu caso ya está derivado con nuestro equipo y te escribirán apenas se libere un asesor. Nuestro horario es ${SCHEDULE_TEXT}.`
-  }
-  return `Tu caso ya está derivado con nuestro equipo. Ahora estamos fuera de horario: te atenderán ${nextOpeningText(now)}. Nuestro horario es ${SCHEDULE_TEXT}.`
-}
 
 /**
  * AI auto-reply for a freshly-arrived inbound message.
