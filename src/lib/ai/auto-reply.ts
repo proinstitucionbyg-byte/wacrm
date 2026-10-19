@@ -20,6 +20,7 @@ import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { academicContext } from '@/lib/matriculas/calendar'
 import { studentSupportArea } from './student-support'
 import { sentOfferPriceReply } from './sent-offer'
+import { verifiedPaymentReply, safePaymentReply } from './payment-details'
 import { isLikelyAutomatedInbound } from './automated-inbound'
 import { hasRepeatedUnresolvedMessage, isWaitingForRepetitionHandoff, repetitionHandoffArea, REPETITION_HANDOFF_MARKER } from './repetition'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
@@ -114,7 +115,7 @@ export async function dispatchInboundToAiReply(
       return
     }
 
-    const offerReply = requestedArea ? null : sentOfferPriceReply(messages)
+    const offerReply = requestedArea ? null : verifiedPaymentReply(messages) ?? sentOfferPriceReply(messages)
     if (offerReply) {
       const { data: claimed, error } = await db.rpc('claim_ai_reply_slot', { conversation_id: conversationId, max_replies: config.autoReplyMaxPerConversation })
       if (!error && claimed === true) await engineSendText({ accountId, userId: configOwnerUserId, conversationId, contactId, text: offerReply, aiGenerated: true })
@@ -233,7 +234,7 @@ export async function dispatchInboundToAiReply(
           userId: configOwnerUserId,
           conversationId,
           contactId,
-          text: text || waitingReminder(),
+          text: text ? safePaymentReply(text) : waitingReminder(),
           aiGenerated: true,
         })
         return
@@ -263,7 +264,7 @@ export async function dispatchInboundToAiReply(
           userId: configOwnerUserId,
           conversationId,
           contactId,
-          text,
+          text: safePaymentReply(text),
           aiGenerated: true,
         })
       }
@@ -300,7 +301,7 @@ export async function dispatchInboundToAiReply(
         userId: configOwnerUserId,
         conversationId,
         contactId,
-        text,
+        text: safePaymentReply(text),
         aiGenerated: true,
       })
     }

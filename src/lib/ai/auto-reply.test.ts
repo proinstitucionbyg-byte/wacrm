@@ -139,6 +139,18 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.generateReply).not.toHaveBeenCalled()
     expect(h.runAutomation).not.toHaveBeenCalled()
   })
+  it('answers a Yape number request without asking for enrollment data or generating a number',async()=>{
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'Número para yapear'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('937467119')}))
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
+  it('blocks a fabricated Yape number in a model reply',async()=>{
+    h.generateReply.mockResolvedValue({text:'Yape/Plin: 974 000 000',handoff:false})
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('937467119')}))
+    expect(h.engineSendText).not.toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('974 000 000')}))
+  })
   it('runs the saved course automation without generating or sending replacement text',async()=>{
     h.state.autoResponders=[{id:'nutricion',name:'NUTRICION 19.90'}]
     h.buildConversationContext.mockResolvedValue([{role:'user',content:'Quiero informacion de nutricion'}])
