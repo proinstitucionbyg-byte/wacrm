@@ -283,7 +283,7 @@ async function continueSavedCourse(automation: Automation, contact: string, chat
   }
   const result = await restoreCourseCheckpoint(db, { account: automation.account_id, contact, chat, checkpoint, automatic: false })
   await engineSendText({ accountId: automation.account_id, userId: automation.user_id, contactId: contact, conversationId: chat,
-    text: result === 'restored' ? '▶️ Continuamos con la información de tu curso desde donde te quedaste, conservando los tiempos de seguimiento. 😊'
+    text: result === 'restored' ? '▶️ Continuemos con la información de tu curso desde donde te quedaste. 😊'
       : result === 'human' ? 'Tu consulta continúa con nuestro equipo. Quedamos atentos para ayudarte. 💙'
       : '💬 Cuéntanos qué información deseas revisar para continuar y te ayudamos.' })
 }
