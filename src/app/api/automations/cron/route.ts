@@ -35,10 +35,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const admin = supabaseAdmin();
-  // Payment-validated registrations must be refreshed before slower sales
-  // followups; otherwise a busy followup can starve document preparation.
-  try { await runIncompleteIntakes(admin); }
-  catch (error) { console.error('No se pudieron revisar las matrículas pendientes', error); }
   const staleClaimCutoff = new Date(Date.now() - 15 * 60_000).toISOString();
   const { error: staleNullClaimError } = await admin
     .from('automation_pending_executions')
@@ -95,6 +91,11 @@ export async function GET(request: Request) {
     });
     processed++;
   }
+  // Scheduled automation blocks are the time-sensitive work in this route.
+  // Enrollment intake runs immediately after them so a slow document/OCR pass
+  // cannot make already-due WhatsApp blocks miss the current cron invocation.
+  try { await runIncompleteIntakes(admin); }
+  catch (error) { console.error('No se pudieron revisar las matrículas pendientes', error); }
   const { error: reminderError } = await admin.rpc('publish_due_adviser_reminders');
   if (reminderError) console.error('No se pudieron entregar los recordatorios personales', reminderError);
   try { await dispatchDueReminderMessages(admin); }
