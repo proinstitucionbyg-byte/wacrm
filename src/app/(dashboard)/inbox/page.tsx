@@ -421,14 +421,17 @@ if (activeConversation?.id === fetched.id) {
       if (!document.hidden) setResyncToken((n) => n + 1);
     };
     document.addEventListener('visibilitychange', refreshIfVisible);
-    // A periodic catch-up covers a socket that appears connected but
-    // silently misses an INSERT. It refetches data, never reloads the page.
-    const timer = window.setInterval(refreshIfVisible, 60_000);
+    // Realtime already keeps an active inbox current. A full list refetch
+    // every minute caused a visible flash and could disrupt an agent who was
+    // composing a reply. Poll only while the realtime channel is disconnected.
+    const timer = window.setInterval(() => {
+      if (!isConnected) refreshIfVisible();
+    }, 60_000);
     return () => {
       document.removeEventListener('visibilitychange', refreshIfVisible);
       window.clearInterval(timer);
     };
-  }, []);
+  }, [isConnected]);
   /**
    * Manual refresh trigger for the thread-header refresh button.
    * Bumps the same resyncToken the reconnect / visibility paths use,

@@ -39,6 +39,23 @@ export async function GET(request: Request) {
   // followups; otherwise a busy followup can starve document preparation.
   try { await runIncompleteIntakes(admin); }
   catch (error) { console.error('No se pudieron revisar las matrículas pendientes', error); }
+  const staleClaimCutoff = new Date(Date.now() - 15 * 60_000).toISOString();
+  const { error: staleNullClaimError } = await admin
+    .from('automation_pending_executions')
+    .update({ status: 'pending', claimed_at: null })
+    .eq('status', 'running')
+    .lt('run_at', staleClaimCutoff)
+    .is('claimed_at', null);
+  const { error: staleTimedClaimError } = await admin
+    .from('automation_pending_executions')
+    .update({ status: 'pending', claimed_at: null })
+    .eq('status', 'running')
+    .lt('claimed_at', staleClaimCutoff);
+  if (staleNullClaimError || staleTimedClaimError)
+    console.error(
+      'No se pudieron recuperar ejecuciones bloqueadas',
+      staleNullClaimError ?? staleTimedClaimError,
+    );
   // Resume promised automation steps before the slower routing and followup
   // jobs. A slow job must never delay a student's already-due block.
   const { data: due, error } = await admin
@@ -56,7 +73,7 @@ export async function GET(request: Request) {
   for (const dueRow of due ?? []) {
     const { data: claim } = await admin
       .from('automation_pending_executions')
-      .update({ status: 'running' })
+      .update({ status: 'running', claimed_at: new Date().toISOString() })
       .eq('id', dueRow.id)
       .eq('status', 'pending')
       .select('*')
