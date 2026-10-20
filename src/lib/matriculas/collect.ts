@@ -27,7 +27,11 @@ export async function collectConversationEnrollments(
   const draft = selectedDraftId
     ? drafts?.find((item) => item.id === selectedDraftId)
     : drafts?.[0];
-  if (!draft || (selectedDraftId && !draft.data?.course)) return;
+  // An explicit draft id is already an unambiguous association. Newly
+  // validated payments start with payment fields only, so requiring a course
+  // here prevented us from reading the student's earlier chat and left the
+  // enrollment permanently in `collecting`.
+  if (!draft) return;
   const { data: review, error: reviewError } = await db
     .from('payment_reviews')
     .select('status,created_at,evidence,payment_purpose')

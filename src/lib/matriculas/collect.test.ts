@@ -96,7 +96,7 @@ describe('scoped enrollment collection', () => {
     expect(eq).not.toHaveBeenCalledWith('id', 'first');
     expect(update).toHaveBeenCalledTimes(1);
   });
-  it('does not select a foreign draft or an intake with no chosen course', async () => {
+  it('does not select a foreign draft and collects an explicitly chosen new intake', async () => {
     await collectConversationEnrollments(
       db,
       'account',
@@ -110,7 +110,9 @@ describe('scoped enrollment collection', () => {
       'conversation',
       'draft'
     );
-    expect(update).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      data: { phone1: '51987000000', email: 'uno@gmail.com' },
+    });
   });
   it('does not reset a draft when nothing new was extracted', async () => {
     limit.mockResolvedValue({ data: [], error: null });
