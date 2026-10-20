@@ -135,7 +135,7 @@ function EnrollmentEditor({
       <h2 className="font-semibold">
         {data.full_name || 'MATRICULA CON DATOS PENDIENTES'}
       </h2>
-      <p className="text-muted-foreground text-xs">{data.course || 'CURSO PENDIENTE'} · COMPROBANTE {draft.review_id}</p>
+      <p className="text-muted-foreground text-xs">{data.course || 'CURSO PENDIENTE'} · OPERACIÓN {draft.operation_reference || 'POR CONFIRMAR'}</p>
       {!locked && <div className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={saving || dirty || !data.course} onClick={collectSelected}>Recoger datos para esta matrícula</Button><p className="text-muted-foreground text-xs">Si tiene varias matrículas, guarda primero el curso en la ficha correspondiente a este comprobante.</p></div>}
       {!canEdit && (
         <p className="text-muted-foreground text-sm">

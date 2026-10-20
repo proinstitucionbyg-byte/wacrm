@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     const offset = Number(params.get('offset') ?? 0);
     if ((!isPaymentStatus(status) && status !== 'all') || !Number.isSafeInteger(offset) || offset < 0 || offset > 100000) return NextResponse.json({ error: 'Filtro inválido' }, { status: 400 });
     if (messageId && !/^[0-9a-f-]{36}$/i.test(messageId)) return NextResponse.json({ error: 'Mensaje inválido' }, { status: 400 });
-    let query = ctx.supabase.from('payment_reviews').select('*, contact:contacts(name,phone)', { count: 'exact' }).eq('account_id', ctx.accountId).order('created_at', { ascending: false });
+    let query = ctx.supabase.from('payment_reviews').select('*, contact:contacts(name,phone)', { count: 'exact' }).eq('account_id', ctx.accountId).is('duplicate_of', null).order('created_at', { ascending: false });
     if (messageId) query = query.eq('message_id', messageId);
     else if (status !== 'all') query = query.eq('status', status);
     const { data, error, count } = await query.range(offset, offset + 49);

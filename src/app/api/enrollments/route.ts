@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     if (reviewId) query = query.eq('review_id', reviewId);
     const { data, error } = await query;
     if (error) throw error;
-    const {data:reviews,error:reviewsError}=data?.length?await supabaseAdmin().from('payment_reviews').select('id,status,payment_purpose').eq('account_id',ctx.accountId).in('id',data.map(draft=>draft.review_id)):{data:[],error:null};
+    const {data:reviews,error:reviewsError}=data?.length?await supabaseAdmin().from('payment_reviews').select('id,status,payment_purpose,operation_reference').eq('account_id',ctx.accountId).in('id',data.map(draft=>draft.review_id)):{data:[],error:null};
     if(reviewsError)throw reviewsError;
     const reviewStates=new Map((reviews??[]).map(review=>[review.id,review]));
     return NextResponse.json({
@@ -30,6 +30,7 @@ export async function GET(request: Request) {
       drafts: (data ?? []).filter(draft=>!['tuition','other'].includes(reviewStates.get(draft.review_id)?.payment_purpose??'')).map((draft) => ({
         ...draft,
         payment_status:reviewStates.get(draft.review_id)?.status,
+        operation_reference:reviewStates.get(draft.review_id)?.operation_reference,
         issues: enrollmentIssues(draft.data),
       })),
     });

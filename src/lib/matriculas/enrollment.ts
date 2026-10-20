@@ -28,6 +28,7 @@ export type EnrollmentData = Partial<
 };
 export interface EnrollmentDraft {
   payment_status?: string;
+  operation_reference?: string | null;
   id: string;
   review_id: string;
   conversation_id: string | null;
