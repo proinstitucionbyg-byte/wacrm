@@ -61,7 +61,10 @@ import {
   hasContactedSinceAssignment,
 } from '@/lib/inbox/adviser-introduction';
 import { useCan } from '@/hooks/use-can';
-import { loadConversationMessages } from '@/lib/inbox/load-messages';
+import {
+  loadConversationMessages,
+  loadRecentConversationMessages,
+} from '@/lib/inbox/load-messages';
 import { InboxCleanup } from './inbox-cleanup';
 import {
   Dialog,
@@ -206,6 +209,8 @@ export function MessageThread({
   const { user, accountId } = useAuth();
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadedConversationRef = useRef<string | null>(null);
   const scrollConversationRef = useRef<string | null>(null);
@@ -399,8 +404,15 @@ export function MessageThread({
       if (loadedConversationRef.current !== conversationId) setLoading(true);
 
       try {
-        const data = await loadConversationMessages(supabase, conversationId, () => cancelled);
-        if (!cancelled) onMessagesLoadedRef.current(data);
+        const page = await loadRecentConversationMessages(
+          supabase,
+          conversationId,
+          () => cancelled,
+        );
+        if (!cancelled) {
+          onMessagesLoadedRef.current(page.messages);
+          setHasOlderMessages(page.hasMore);
+        }
       } catch (error) {
         console.error('Failed to fetch messages:', error);
       }
@@ -419,6 +431,25 @@ export function MessageThread({
     // realtime is best-effort and any message events sent while the WS
     // was disconnected or throttled are otherwise lost.
   }, [conversationId, resyncToken]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!conversationId || loadingOlderMessages) return;
+    setLoadingOlderMessages(true);
+    try {
+      const allMessages = await loadConversationMessages(
+        createClient(),
+        conversationId,
+        () => false,
+      );
+      onMessagesLoadedRef.current(allMessages);
+      setHasOlderMessages(false);
+    } catch (error) {
+      console.error('Failed to fetch complete message history:', error);
+      toast.error('No se pudo cargar el historial anterior.');
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [conversationId, loadingOlderMessages]);
 
   // Reactions fetch — pulls the current state from the DB. Kept separate
   // from the channel subscription below so a `resyncToken` bump just
@@ -1441,6 +1472,21 @@ export function MessageThread({
           </div>
         ) : (
           <div className="space-y-4">
+            {hasOlderMessages && (
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingOlderMessages}
+                  onClick={() => void loadOlderMessages()}
+                >
+                  {loadingOlderMessages
+                    ? 'Cargando historial…'
+                    : 'Ver mensajes anteriores'}
+                </Button>
+              </div>
+            )}
             {messageGroups.map((group) => (
               <div key={group.date}>
                 {/* Date separator */}

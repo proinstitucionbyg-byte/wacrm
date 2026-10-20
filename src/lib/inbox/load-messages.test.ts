@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { loadConversationMessages } from './load-messages';
+import {
+  loadConversationMessages,
+  loadRecentConversationMessages,
+  RECENT_MESSAGE_LIMIT,
+} from './load-messages';
 function setup(total:number,error:unknown=null,hiddenIds:string[]=[],hiddenError:unknown=null) {
   const rows=Array.from({length:total},(_,i)=>({id:String(total-i)}));
   const chain={select:vi.fn(),eq:vi.fn(),order:vi.fn(),range:vi.fn(async (start:number,end:number)=>({data:rows.slice(start,end+1),error}))};
@@ -8,6 +12,15 @@ function setup(total:number,error:unknown=null,hiddenIds:string[]=[],hiddenError
   return {db:{from:vi.fn((table:string)=>table==='inbox_hidden_messages'?hidden:chain)},chain};
 }
 describe('complete conversation history',()=>{
+  it('loads only the recent window for a responsive initial thread',async()=>{
+    const {db,chain}=setup(758);
+    const page=await loadRecentConversationMessages(db as never,'chat',()=>false);
+    expect(page.messages).toHaveLength(RECENT_MESSAGE_LIMIT);
+    expect(page.messages[0].id).toBe(String(758 - RECENT_MESSAGE_LIMIT + 1));
+    expect(page.messages.at(-1)?.id).toBe('758');
+    expect(page.hasMore).toBe(true);
+    expect(chain.range).toHaveBeenCalledOnce();
+  });
   it('omits only this viewer’s hidden messages, preserving complete pagination',async()=>{
     const {db}=setup(203,null,['2','100','201']);const rows=await loadConversationMessages(db as never,'chat',()=>false);
     expect(rows).toHaveLength(200);expect(rows.map(r=>r.id)).not.toContain('100');
