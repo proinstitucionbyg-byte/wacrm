@@ -28,6 +28,15 @@ describe('automatic intake from compared evidence and official dates',()=>{
     ];
     expect(prepareAutomaticIntake(student,messages,calendar,'2026-10-20T12:00:00Z').identity_confirmed).toBe(true);
   });
+  it('compares identity only against the latest requested photo batch',()=>{
+    const student={full_name:'MILENA MILETH PEZO ESPINOZA',document_type:'DNI',document_number:'52159224'};
+    const messages: IntakeEvidence[]=[
+      {id:'old',sender_type:'customer',created_at:'2026-10-20T06:47:00Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MILENA MILETH PEZO ESPINOZA',document_number:'62179224'}}},
+      {id:'name',sender_type:'customer',created_at:'2026-10-20T07:09:00Z',content_text:'Nombre Milena Mileth Pezo Espinoza'},
+      {id:'front',sender_type:'customer',created_at:'2026-10-20T07:10:00Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'PEZO ESPINOZA MILENA MILETH',document_number:'52159224'}}},
+    ];
+    expect(prepareAutomaticIntake(student,messages,calendar,'2026-10-20T12:00:00Z').identity_confirmed).toBe(true);
+  });
   it('uses the latest internally consistent promotion block instead of an older campaign',()=>{
     const oldQuote={...evidence[2],created_at:'2026-10-18T10:00:00Z'};
     const latestText={...evidence[2],id:'latest-text',created_at:'2026-10-20T10:00:00Z',content_text:evidence[2].content_text!.replace('79.90','49.90')};

@@ -40,6 +40,16 @@ describe('deterministic chat intake', () => {
     ]);
     expect(value).toMatchObject({ full_name: 'MILENA MILETH PEZO ESPINOZA', email: 'milena@example.com', course: 'AUXILIAR DE EDUCACION INICIAL', document_type: 'DNI', document_number: '52159224' });
   });
+  it('uses the latest requested identity batch instead of mixing earlier OCR attempts', () => {
+    const value = collectEnrollmentData({}, [
+      { id: 'old-email', created_at: '2026-10-20T06:46:00Z', content_text: 'Correo anterior@example.com' },
+      { id: 'old-front', created_at: '2026-10-20T06:47:00Z', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'MILENA MILETH PEZO ESPINOZA', document_type: 'DNI', document_number: '62179224' } } },
+      { id: 'name', created_at: '2026-10-20T07:09:00Z', content_text: 'Nombre Milena Mileth Pezo Espinoza' },
+      { id: 'email', created_at: '2026-10-20T07:10:00Z', content_text: 'Correo correcto@example.com' },
+      { id: 'front', created_at: '2026-10-20T07:10:00Z', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'PEZO ESPINOZA MILENA MILETH', document_type: 'DNI', document_number: '52159224' } } },
+    ]);
+    expect(value).toMatchObject({ full_name: 'MILENA MILETH PEZO ESPINOZA', email: 'correcto@example.com', document_number: '52159224' });
+  });
   it('does not replace the holder document with an electoral code from the reverse',()=>{
     const reverse={...back,image_analysis:{category:'identity_document',fields:{...back.image_analysis?.fields,document_type:'Constancia de sufragio',document_number:'000379'}}};
     const value=collectEnrollmentData({},[{...front,content_text:null},reverse]);

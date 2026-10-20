@@ -13,9 +13,13 @@ const sameName = (left: string, right: string) => {
 export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvidence[], calendar: AcademicModule[], receivedAt: string): EnrollmentData {
   const next = { ...data };
   const customer = messages.filter((message) => message.sender_type === 'customer' && !isGuardianMessage(message));
+  const latestIdentityAt = Math.max(...customer.filter(message => message.image_analysis?.category === 'identity_document').map(message => Date.parse(message.created_at ?? '')).filter(Number.isFinite));
+  const identityCustomer = Number.isFinite(latestIdentityAt)
+    ? customer.filter(message => !message.created_at || Date.parse(message.created_at) >= latestIdentityAt - 15 * 60_000)
+    : customer;
   if (!next.identity_confirmed && next.full_name && next.document_number) {
     const writtenNames = new Set<string>(), writtenDocs = new Set<string>();
-    for (const message of customer) for (const line of (message.content_text ?? '').replace(/\\n/g, '\n').split(/\r?\n/)) {
+    for (const message of identityCustomer) for (const line of (message.content_text ?? '').replace(/\\n/g, '\n').split(/\r?\n/)) {
       const normalizedLine = key(line);
       const name = normalizedLine.match(/^(?:NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?)\s*(?:(?::|-)\s*|\s+)(.+)$/);
       const doc = normalizedLine.match(/^(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE)\s*(?:(?::|-)\s*|\s+)(.+)$/);
@@ -24,7 +28,7 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
       if (doc) writtenDocs.add(key(doc[1]).replace(/[\s()-]/g, ''));
       else if (normalizedLine.replace(/[\s()-]/g, '') === next.document_number) writtenDocs.add(next.document_number);
     }
-    const photos = customer.filter((message) => message.image_analysis?.category === 'identity_document');
+    const photos = identityCustomer.filter((message) => message.image_analysis?.category === 'identity_document');
     const consistent = photos.every((photo) => {
       const f = photo.image_analysis?.fields;
       const photographedDocument = key(String(f?.document_number ?? '')).replace(/[\s()-]/g, '');
@@ -37,10 +41,10 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     const front = photos.some((photo) => sameName(String(photo.image_analysis?.fields?.full_name ?? ''), next.full_name!) && String(photo.image_analysis?.fields?.document_number ?? '').replace(/\s/g, '') === next.document_number);
     if (consistent && front && writtenNames.size === 1 && sameName([...writtenNames][0], next.full_name) && writtenDocs.size <= 1 && (writtenDocs.size === 0 || writtenDocs.has(next.document_number))) next.identity_confirmed = true;
   }
-  const photos = customer.filter(message => message.image_analysis?.category === 'identity_document');
+  const photos = identityCustomer.filter(message => message.image_analysis?.category === 'identity_document');
   // A contradictory photo must be resolved, not bypassed with the written-data exception.
   if (!next.identity_confirmed && photos.length === 0) {
-    next.declaration_message_ids = declarationEvidence(next, customer);
+    next.declaration_message_ids = declarationEvidence(next, identityCustomer);
   } else next.declaration_message_ids = [];
   if (!next.offer_confirmed && next.course) {
     const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => ({

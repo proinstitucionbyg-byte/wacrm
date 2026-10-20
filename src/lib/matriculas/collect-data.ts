@@ -4,6 +4,7 @@ import { isGuardianMessage } from './identity-evidence';
 export interface IntakeMessage {
   id: string;
   content_text: string | null;
+  created_at?: string;
   image_analysis?: {
     category?: string;
     fields?: Record<string, unknown>;
@@ -15,6 +16,8 @@ const key = (value: string) =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toUpperCase();
+const samePersonName = (left: string, right: string) =>
+  key(left).split(' ').sort().join(' ') === key(right).split(' ').sort().join(' ');
 const courses = [
   [/\bNUTRICION(?: Y DIETETICA)?\b/, 'NUTRICION Y DIETETICA'],
   [/\b(?:AUXILIAR DE )?FARMACIA\b/, 'AUXILIAR DE FARMACIA'],
@@ -43,6 +46,17 @@ export function collectEnrollmentData(
   };
   const photoIds: string[] = [];
   const guardianIds: string[] = [];
+  const latestIdentityAt = Math.max(
+    ...messages
+      .filter((message) => message.image_analysis?.category === 'identity_document')
+      .map((message) => Date.parse(message.created_at ?? ''))
+      .filter(Number.isFinite)
+  );
+  const belongsToLatestIdentityBatch = (message: IntakeMessage) => {
+    if (!Number.isFinite(latestIdentityAt) || !message.created_at) return true;
+    const createdAt = Date.parse(message.created_at);
+    return Number.isFinite(createdAt) && createdAt >= latestIdentityAt - 15 * 60_000;
+  };
   for (const message of messages) {
     if (isGuardianMessage(message)) {
       if (message.image_analysis?.category === 'identity_document') guardianIds.push(message.id);
@@ -54,12 +68,13 @@ export function collectEnrollmentData(
     // Students often answer the prompted fields as separate bare messages.
     // Accept only unambiguous shapes; a question or conversational sentence
     // must never become a name, course or document by inference.
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) add('email', trimmed);
+    const currentIdentityBatch = belongsToLatestIdentityBatch(message);
+    if (currentIdentityBatch && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) add('email', trimmed);
     const bareCourse = courses.filter(([pattern]) =>
       new RegExp(`^${pattern.source}$`, pattern.flags).test(key(trimmed)));
     if (bareCourse.length === 1) add('course', bareCourse[0][1]);
     if (/^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(trimmed) &&
-        !/\b(SOY|QUIERO|COMO|CUANDO|CURSO|INSCRIBIRME|MATRICULARME|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES)\b/.test(key(trimmed)) &&
+        !/\b(SOY|QUIERO|COMO|CUANDO|CURSO|INSCRIBIRME|MATRICULARME|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL)\b/.test(key(trimmed)) &&
         bareCourse.length === 0) add('full_name', trimmed, true);
     for (const line of text.split(/\r?\n/)) {
       const labelled = line.match(
@@ -68,8 +83,8 @@ export function collectEnrollmentData(
       if (!labelled) continue;
       const label = key(labelled[1]);
       const value = labelled[2];
-      if (/^NOMBRE/.test(label)) add('full_name', value, true);
-      else if (/^(CORREO|EMAIL)/.test(label)) add('email', value);
+      if (/^NOMBRE/.test(label) && currentIdentityBatch) add('full_name', value, true);
+      else if (/^(CORREO|EMAIL)/.test(label) && currentIdentityBatch) add('email', value);
       else if (/^(CELULAR|TELEFONO)/.test(label)) {
         const phone = value.replace(/[\s()-]/g, '');
         // Unnumbered supplied phone is additional to the WhatsApp contact number.
@@ -89,7 +104,7 @@ export function collectEnrollmentData(
         add(({DIRECCION:'address', DEPARTAMENTO:'department', DISTRITO:'district'} as const)[label as 'DIRECCION'|'DEPARTAMENTO'|'DISTRITO'],value);
       } else if (label === 'PROMOCION') add('promotion_id', value);
     }
-    for (const line of text.split(/\r?\n/)) {
+    for (const line of currentIdentityBatch ? text.split(/\r?\n/) : []) {
       const value = line.trim();
       if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) add('email', value);
     }
@@ -108,7 +123,7 @@ export function collectEnrollmentData(
       /\bSUPER PROMO(?:CION)? DE ([A-Z ]+?)(?:[.,!?\n]|$)/
     );
     if (promo) add('promotion_id', `SUPER PROMO DE ${promo[1]}`);
-    if (message.image_analysis?.category !== 'identity_document') continue;
+    if (message.image_analysis?.category !== 'identity_document' || !currentIdentityBatch) continue;
     photoIds.push(message.id);
     const photoName = parseEnrollmentData({
       full_name: message.image_analysis.fields?.full_name,
@@ -140,7 +155,7 @@ export function collectEnrollmentData(
     // when OCR yields a different spelling. If ordinary chat phrases also
     // resemble a name, prefer the single written value that matches the DNI.
     const writtenPhotoMatches = field === 'full_name'
-      ? [...writtenNames].filter((name) => photoNames.has(name))
+      ? [...writtenNames].filter((name) => [...photoNames].some((photoName) => samePersonName(name, photoName)))
       : [];
     const chosen = field === 'full_name' && writtenPhotoMatches.length === 1
       ? writtenPhotoMatches[0]
