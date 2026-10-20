@@ -41,7 +41,7 @@ describe('deterministic chat intake', () => {
     expect(value).toMatchObject({ full_name: 'MILENA MILETH PEZO ESPINOZA', email: 'milena@example.com', course: 'AUXILIAR DE EDUCACION INICIAL', document_type: 'DNI', document_number: '52159224' });
   });
   it('uses the latest requested identity batch instead of mixing earlier OCR attempts', () => {
-    const value = collectEnrollmentData({}, [
+    const value = collectEnrollmentData({full_name:'NOMBRE ANTERIOR INCORRECTO',document_type:'DNI',document_number:'62179224',identity_message_ids:['old-front']}, [
       { id: 'old-email', created_at: '2026-10-20T06:46:00Z', content_text: 'Correo anterior@example.com' },
       { id: 'old-front', created_at: '2026-10-20T06:47:00Z', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'MILENA MILETH PEZO ESPINOZA', document_type: 'DNI', document_number: '62179224' } } },
       { id: 'name', created_at: '2026-10-20T07:09:00Z', content_text: 'Nombre Milena Mileth Pezo Espinoza' },
@@ -49,6 +49,28 @@ describe('deterministic chat intake', () => {
       { id: 'front', created_at: '2026-10-20T07:10:00Z', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'PEZO ESPINOZA MILENA MILETH', document_type: 'DNI', document_number: '52159224' } } },
     ]);
     expect(value).toMatchObject({ full_name: 'MILENA MILETH PEZO ESPINOZA', email: 'correcto@example.com', document_number: '52159224' });
+    expect(value.identity_message_ids).toEqual(['front']);
+  });
+  it('uses the readable address from the reverse of the latest DNI',()=>{
+    const value=collectEnrollmentData({address:'DIRECCION ANTERIOR',department:'OTRO',district:'OTRO'},[
+      {id:'written',created_at:'2026-10-20T17:02:00Z',content_text:'Distrito: SAN JUAN DE MIRAFLORES'},
+      {id:'back',created_at:'2026-10-20T17:02:43Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MORALES BAZAN ESKEYLA ALINA',document_type:'DNI',document_number:'73354819',address:'PUEBLO J 28 DE JULIO MZ. M LT. 9',department:'LIMA',district:'HUARAL/CHANCAY'}}},
+    ]);
+    expect(value).toMatchObject({address:'PUEBLO J 28 DE JULIO MZ. M LT. 9',department:'LIMA',district:'HUARAL/CHANCAY'});
+  });
+  it('uses the complete front name and the reverse address from the same DNI batch',()=>{
+    const value=collectEnrollmentData({},[
+      {id:'front',created_at:'2026-10-20T17:02:16Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MORALES BAZAN, ESKEYLA ALINA',document_type:'DNI',document_number:'73354819'}}},
+      {id:'back',created_at:'2026-10-20T17:02:43Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MORALES ESKEYLA ALINA',document_type:'DNI',document_number:'73354819',address:'PUEBLO J 28 DE JULIO MZ. M LT. 9'}}},
+    ]);
+    expect(value).toMatchObject({full_name:'ESKEYLA ALINA MORALES BAZAN',document_number:'73354819',address:'PUEBLO J 28 DE JULIO MZ. M LT. 9'});
+  });
+  it('reads a bare name line and Documento with a dot from a resent data block',()=>{
+    const value=collectEnrollmentData({},[
+      {id:'text',created_at:'2026-10-20T17:34:16Z',content_text:'Milena mileth Pezo Espinoza\nDocumento.62179224\nCorreo\nmilenamilethpezoespinoza0@gmail.com'},
+      {id:'front',created_at:'2026-10-20T17:34:42Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'PEZO ESPINOZA MILENA MILETH',document_type:'DNI',document_number:'62179224'}}},
+    ]);
+    expect(value).toMatchObject({full_name:'MILENA MILETH PEZO ESPINOZA',document_type:'DNI',document_number:'62179224',email:'milenamilethpezoespinoza0@gmail.com'});
   });
   it('does not replace the holder document with an electoral code from the reverse',()=>{
     const reverse={...back,image_analysis:{category:'identity_document',fields:{...back.image_analysis?.fields,document_type:'Constancia de sufragio',document_number:'000379'}}};

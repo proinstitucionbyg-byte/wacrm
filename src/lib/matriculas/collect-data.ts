@@ -18,6 +18,14 @@ const key = (value: string) =>
     .toUpperCase();
 const samePersonName = (left: string, right: string) =>
   key(left).split(' ').sort().join(' ') === key(right).split(' ').sort().join(' ');
+const normalizeIdentityName = (value: unknown) => {
+  if (typeof value !== 'string') return value;
+  const parts = value.split(',').map(clean).filter(Boolean);
+  return parts.length === 2 ? `${parts[1]} ${parts[0]}` : value;
+};
+const isBarePersonName = (value: string) =>
+  /^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(value) &&
+  !/\b(SOY|QUIERO|COMO|CUANDO|CURSO|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL|DISTRITO|DEPARTAMENTO|DIRECCION|DOCUMENTO|CELULAR|TELEFONO)\b|\b(?:INSCRIB|MATRICUL)\w*/.test(key(value));
 const courses = [
   [/\bNUTRICION(?: Y DIETETICA)?\b/, 'NUTRICION Y DIETETICA'],
   [/\b(?:AUXILIAR DE )?FARMACIA\b/, 'AUXILIAR DE FARMACIA'],
@@ -32,9 +40,10 @@ export function collectEnrollmentData(
   messages: IntakeMessage[]
 ): EnrollmentData {
   const candidates = new Map<keyof EnrollmentData, Set<string>>();
+  const photoCandidates = new Map<keyof EnrollmentData, Set<string>>();
   const writtenNames = new Set<string>();
   const photoNames = new Set<string>();
-  const add = (field: keyof EnrollmentData, raw: unknown, written = false) => {
+  const add = (field: keyof EnrollmentData, raw: unknown, written = false, photographed = false) => {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 500) return;
     const parsed = parseEnrollmentData({ [field]: raw });
     const value = parsed?.[field];
@@ -42,6 +51,11 @@ export function collectEnrollmentData(
     const values = candidates.get(field) ?? new Set<string>();
     values.add(value);
     candidates.set(field, values);
+    if (photographed) {
+      const photographedValues = photoCandidates.get(field) ?? new Set<string>();
+      photographedValues.add(value);
+      photoCandidates.set(field, photographedValues);
+    }
     if (written && field === 'full_name') writtenNames.add(value);
   };
   const photoIds: string[] = [];
@@ -73,12 +87,14 @@ export function collectEnrollmentData(
     const bareCourse = courses.filter(([pattern]) =>
       new RegExp(`^${pattern.source}$`, pattern.flags).test(key(trimmed)));
     if (bareCourse.length === 1) add('course', bareCourse[0][1]);
-    if (/^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(trimmed) &&
-        !/\b(SOY|QUIERO|COMO|CUANDO|CURSO|INSCRIBIRME|MATRICULARME|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL)\b/.test(key(trimmed)) &&
-        bareCourse.length === 0) add('full_name', trimmed, true);
+    if (isBarePersonName(trimmed) && bareCourse.length === 0) add('full_name', trimmed, true);
     for (const line of text.split(/\r?\n/)) {
+      const lineValue = line.trim();
+      const isExactCourse = courses.some(([pattern]) =>
+        new RegExp(`^${pattern.source}$`, pattern.flags).test(key(lineValue)));
+      if (currentIdentityBatch && !isExactCourse && isBarePersonName(lineValue)) add('full_name', lineValue, true);
       const labelled = line.match(
-        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*(?:(?::|-)\s*|\s+)(.+)$/i
+        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|documento(?: de identidad)?|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*(?:(?::|-|\.)\s*|\s+)(.+)$/i
       );
       if (!labelled) continue;
       const label = key(labelled[1]);
@@ -94,8 +110,8 @@ export function collectEnrollmentData(
           phone.replace(/^\+/, '') !== data.phone1?.replace(/^\+/, '')
         )
           add(field, phone);
-      } else if (['DNI','CARNE DE EXTRANJERIA','PASAPORTE'].includes(label) && /^[A-Z0-9\s-]+$/i.test(value.trim())) {
-        add('document_type', label);
+      } else if (['DNI','DOCUMENTO','DOCUMENTO DE IDENTIDAD','CARNE DE EXTRANJERIA','PASAPORTE'].includes(label) && /^[A-Z0-9\s-]+$/i.test(value.trim())) {
+        add('document_type', label.startsWith('DOCUMENTO') && /^\d{8}$/.test(value.trim()) ? 'DNI' : label);
         add('document_number', value);
       } else if (label === 'FECHA DE NACIMIENTO') {
         const date = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
@@ -125,8 +141,9 @@ export function collectEnrollmentData(
     if (promo) add('promotion_id', `SUPER PROMO DE ${promo[1]}`);
     if (message.image_analysis?.category !== 'identity_document' || !currentIdentityBatch) continue;
     photoIds.push(message.id);
-    const photoName = parseEnrollmentData({
-      full_name: message.image_analysis.fields?.full_name,
+    const isReverse = Boolean(message.image_analysis.fields?.address);
+    const photoName = isReverse ? undefined : parseEnrollmentData({
+      full_name: normalizeIdentityName(message.image_analysis.fields?.full_name),
     })?.full_name;
     if (photoName) photoNames.add(photoName);
     for (const field of [
@@ -138,6 +155,7 @@ export function collectEnrollmentData(
       'department',
       'district',
     ] as const) {
+      if (field === 'full_name' && isReverse) continue;
       // The reverse may contain electoral/printing codes, not the holder's ID.
       if ((field === 'document_number' || field === 'document_type') && !message.image_analysis.fields?.full_name) continue;
       if (
@@ -145,11 +163,26 @@ export function collectEnrollmentData(
         key(String(message.image_analysis.fields?.document_type ?? '')) === 'DNI' &&
         !/^\d{8}$/.test(String(message.image_analysis.fields?.document_number ?? '').replace(/[\s()-]/g, ''))
       ) continue;
-      add(field, message.image_analysis.fields?.[field]);
+      add(
+        field,
+        field === 'full_name'
+          ? normalizeIdentityName(message.image_analysis.fields?.[field])
+          : message.image_analysis.fields?.[field],
+        false,
+        true
+      );
     }
   }
   const next = { ...data };
-  // Conflicting OCR/text values remain empty for review; existing edits always win.
+  // While identity is still pending, recalculate identity fields from the
+  // newest front/back batch. This repairs an earlier bad OCR attempt instead
+  // of permanently keeping the first value written into the draft.
+  if (!data.identity_confirmed && photoIds.length) {
+    for (const field of ['full_name','document_type','document_number','birth_date','address','department','district'] as const)
+      delete next[field];
+  }
+  // Conflicting OCR/text values remain empty for review. The address printed
+  // on the reverse of the document wins over an older address typed in chat.
   for (const [field, values] of candidates) {
     // A student's explicit written name is kept as provisional data even
     // when OCR yields a different spelling. If ordinary chat phrases also
@@ -157,14 +190,19 @@ export function collectEnrollmentData(
     const writtenPhotoMatches = field === 'full_name'
       ? [...writtenNames].filter((name) => [...photoNames].some((photoName) => samePersonName(name, photoName)))
       : [];
+    const photographed = photoCandidates.get(field);
     const chosen = field === 'full_name' && writtenPhotoMatches.length === 1
       ? writtenPhotoMatches[0]
       : field === 'full_name' && writtenNames.size === 1
         ? [...writtenNames][0]
+        : ['address','department','district'].includes(field) && photographed?.size === 1
+          ? [...photographed][0]
         : values.size === 1 ? [...values][0] : null;
     if (!next[field] && chosen) Object.assign(next, { [field]: chosen });
   }
-  const ids = [...new Set([...(data.identity_message_ids ?? []), ...photoIds])];
+  const ids = data.identity_confirmed
+    ? [...new Set([...(data.identity_message_ids ?? []), ...photoIds])]
+    : [...new Set(photoIds)];
   if (!data.identity_confirmed && photoIds.length && ids.length <= 4)
     next.identity_message_ids = ids;
   if (guardianIds.length) next.guardian_message_ids = [...new Set([...(data.guardian_message_ids ?? []), ...guardianIds])].slice(0,4);
