@@ -57,6 +57,7 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
 };
 
 type InboxFilter = ConversationStatus | 'all' | 'unread';
+const CONVERSATION_RENDER_BATCH = 150;
 
 export function ConversationList({
   activeConversationId,
@@ -80,6 +81,7 @@ export function ConversationList({
 
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InboxFilter>('all');
+  const [visibleLimit, setVisibleLimit] = useState(CONVERSATION_RENDER_BATCH);
   const [loading, setLoading] = useState(true);
   // Contact-based filters (issue #272). Tags use OR logic (a conversation
   // matches if its contact carries any selected tag), consistent with
@@ -242,6 +244,24 @@ export function ConversationList({
       b.created_at.localeCompare(a.created_at)
     );
   }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+
+  useEffect(() => {
+    setVisibleLimit(CONVERSATION_RENDER_BATCH);
+  }, [filter, search, selectedTagIds, selectedCompany]);
+
+  const visibleConversations = useMemo(() => {
+    const visible = filtered.slice(0, visibleLimit);
+    if (
+      activeConversationId &&
+      !visible.some((conversation) => conversation.id === activeConversationId)
+    ) {
+      const active = filtered.find(
+        (conversation) => conversation.id === activeConversationId,
+      );
+      if (active) return [...visible, active];
+    }
+    return visible;
+  }, [activeConversationId, filtered, visibleLimit]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -513,7 +533,7 @@ export function ConversationList({
           </div>
         ) : (
           <div className="flex flex-col gap-3 px-3 py-3">
-            {filtered.map((conv) => (
+            {visibleConversations.map((conv) => (
               <div
                 key={conv.id}
                 className="flex items-center"
@@ -551,6 +571,21 @@ export function ConversationList({
                 />
               </div>
             ))}
+            {visibleLimit < filtered.length && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mx-3 mb-3"
+                onClick={() =>
+                  setVisibleLimit((current) =>
+                    Math.min(current + CONVERSATION_RENDER_BATCH, filtered.length)
+                  )
+                }
+              >
+                Mostrar conversaciones anteriores ({filtered.length - visibleLimit})
+              </Button>
+            )}
           </div>
         )}
       </ScrollArea>
