@@ -155,6 +155,33 @@ export function MessageComposer({
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const restoringTextRef = useRef(false);
+  const textStorageKey = `wacrm:inbox:draft:${conversationId}`;
+
+  // A browser/container refresh must not erase an unfinished reply. Keep one
+  // local draft per conversation and restore it after the client mounts.
+  useEffect(() => {
+    restoringTextRef.current = true;
+    try {
+      setText(sessionStorage.getItem(textStorageKey) ?? '');
+    } catch {
+      setText('');
+    }
+  }, [textStorageKey]);
+
+  useEffect(() => {
+    if (restoringTextRef.current) {
+      restoringTextRef.current = false;
+      return;
+    }
+    try {
+      if (text) sessionStorage.setItem(textStorageKey, text);
+      else sessionStorage.removeItem(textStorageKey);
+    } catch {
+      // Storage can be unavailable in a restricted browser. The live state
+      // still works normally for the current mount.
+    }
+  }, [text, textStorageKey]);
 
   // Interactive-message builder dialog + quick-reply picker.
   const [interactiveOpen, setInteractiveOpen] = useState(false);
@@ -201,6 +228,19 @@ export function MessageComposer({
   const readOnly = !canSend;
   // Media (like free-form text) is only allowed inside the 24h window.
   const inputsDisabled = readOnly || sessionExpired;
+
+  // A real page reload cannot preserve a live microphone stream. Prevent the
+  // browser from silently discarding a recording or any unsent content.
+  const hasUnsavedComposerWork = recording || Boolean(text.trim()) || Boolean(draft) || interactiveOpen;
+  useEffect(() => {
+    if (!hasUnsavedComposerWork) return;
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', protectDraft);
+    return () => window.removeEventListener('beforeunload', protectDraft);
+  }, [hasUnsavedComposerWork]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {

@@ -10,6 +10,7 @@ import { isBsuid } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { resumeDeliveredMessage, runAutomationsForTrigger } from '@/lib/automations/engine'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
+import { canAutoReplyToInboundImage } from '@/lib/ai/inbound-image-routing'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
@@ -949,6 +950,7 @@ for (const triggerType of automationTriggers) {
   // describe the student's current payment status and have no fixed
   // automation branch. Other interactive replies remain flow-owned.
   (!interactiveReplyId || interactiveReplyId.startsWith('payment_followup_')) &&
+  canAutoReplyToInboundImage(imageAnalysis) &&
   (inboundText.trim() || imageAnalysis !== null)
 ) {
     // An AI answer to an unrelated question is not a route change. Existing
