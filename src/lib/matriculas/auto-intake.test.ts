@@ -47,6 +47,21 @@ describe('automatic intake from compared evidence and official dates',()=>{
     expect(prepareAutomaticIntake(data,evidence,calendar,'2026-10-09T12:00:00Z')).toMatchObject({identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9],start_date:'2026-10-06'});
   });
   it('does not confirm identity from a photo alone',()=> expect(prepareAutomaticIntake(data,evidence.slice(1),calendar,'2026-10-09T12:00:00Z').identity_confirmed).not.toBe(true));
+  it('confirms a consistent physical DNI when both front and reverse are present',()=>{
+    const student={...data,full_name:'ESKEYLA ALINA MORALES BAZAN',document_type:'DNI',document_number:'73354819'};
+    const front: IntakeEvidence={id:'front',sender_type:'customer',created_at:'2026-10-20T17:02:16Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MORALES BAZAN, ESKEYLA ALINA',document_number:'73354819'}}};
+    const back: IntakeEvidence={id:'back',sender_type:'customer',created_at:'2026-10-20T17:02:43Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MORALES ESKEYLA ALINA',document_number:'73354819',address:'PUEBLO J 28 DE JULIO'}}};
+    expect(prepareAutomaticIntake(student,[front,back],calendar,'2026-10-20T17:03:00Z').identity_confirmed).toBe(true);
+  });
+  it('uses the latest price-bearing promotion and ignores later informational audios',()=>{
+    const promo={...evidence[2],created_at:'2026-10-20T10:00:00Z',content_text:evidence[2].content_text!.replace('79.90','49.90')};
+    const info={...evidence[2],id:'info',created_at:'2026-10-20T11:00:00Z',content_text:'[AUDIO ENVIADO: NUTRICION] Información sobre certificación y clases.'};
+    expect(prepareAutomaticIntake(data,[promo,info],calendar,'2026-10-20T12:00:00Z')).toMatchObject({offer_confirmed:true,prices:[19.9,49.9,49.9,49.9,49.9,49.9]});
+  });
+  it('uses the discounted monthly price stated after the regular price in an audio',()=>{
+    const audio={...evidence[2],created_at:'2026-10-20T10:00:00Z',content_text:'AUDIO ENVIADO: NUTRICION. La mensualidad regular estaría en 99.90, pero lo estamos dando en 49.90. Tu primer mes tan solo 19.90. La duración viene a ser de seis meses.'};
+    expect(prepareAutomaticIntake(data,[audio],calendar,'2026-10-20T12:00:00Z')).toMatchObject({offer_confirmed:true,prices:[19.9,49.9,49.9,49.9,49.9,49.9]});
+  });
   it('compares a bare written name with a photo even when the surname order differs', () => {
     const written: IntakeEvidence = { id: 'name', sender_type: 'customer', content_text: 'NANCY MARGOT REYNA RODRIGUEZ' };
     const photo: IntakeEvidence = { id: 'photo', sender_type: 'customer', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'REYNA RODRIGUEZ NANCY MARGOT', document_number: '41326266' } } };

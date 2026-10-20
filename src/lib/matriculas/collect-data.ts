@@ -43,6 +43,7 @@ export function collectEnrollmentData(
   const photoCandidates = new Map<keyof EnrollmentData, Set<string>>();
   const writtenNames = new Set<string>();
   const photoNames = new Set<string>();
+  const recentEmails = new Set<string>();
   const add = (field: keyof EnrollmentData, raw: unknown, written = false, photographed = false) => {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 500) return;
     const parsed = parseEnrollmentData({ [field]: raw });
@@ -83,7 +84,14 @@ export function collectEnrollmentData(
     // Accept only unambiguous shapes; a question or conversational sentence
     // must never become a name, course or document by inference.
     const currentIdentityBatch = belongsToLatestIdentityBatch(message);
-    if (currentIdentityBatch && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) add('email', trimmed);
+    const addEmail = (raw: string) => {
+      add('email', raw);
+      if (currentIdentityBatch) {
+        const parsed = parseEnrollmentData({ email: raw })?.email;
+        if (parsed) recentEmails.add(parsed);
+      }
+    };
+    if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(trimmed)) addEmail(trimmed);
     const bareCourse = courses.filter(([pattern]) =>
       new RegExp(`^${pattern.source}$`, pattern.flags).test(key(trimmed)));
     if (bareCourse.length === 1) add('course', bareCourse[0][1]);
@@ -100,7 +108,7 @@ export function collectEnrollmentData(
       const label = key(labelled[1]);
       const value = labelled[2];
       if (/^NOMBRE/.test(label) && currentIdentityBatch) add('full_name', value, true);
-      else if (/^(CORREO|EMAIL)/.test(label) && currentIdentityBatch) add('email', value);
+      else if (/^(CORREO|EMAIL)/.test(label)) addEmail(value);
       else if (/^(CELULAR|TELEFONO)/.test(label)) {
         const phone = value.replace(/[\s()-]/g, '');
         // Unnumbered supplied phone is additional to the WhatsApp contact number.
@@ -120,9 +128,9 @@ export function collectEnrollmentData(
         add(({DIRECCION:'address', DEPARTAMENTO:'department', DISTRITO:'district'} as const)[label as 'DIRECCION'|'DEPARTAMENTO'|'DISTRITO'],value);
       } else if (label === 'PROMOCION') add('promotion_id', value);
     }
-    for (const line of currentIdentityBatch ? text.split(/\r?\n/) : []) {
+    for (const line of text.split(/\r?\n/)) {
       const value = line.trim();
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) add('email', value);
+      if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value)) addEmail(value);
     }
     const normalized = key(text);
     // A question or a list of courses is not an enrollment decision.
@@ -197,6 +205,8 @@ export function collectEnrollmentData(
         ? [...writtenNames][0]
         : ['address','department','district'].includes(field) && photographed?.size === 1
           ? [...photographed][0]
+        : field === 'email' && recentEmails.size === 1
+          ? [...recentEmails][0]
         : values.size === 1 ? [...values][0] : null;
     if (!next[field] && chosen) Object.assign(next, { [field]: chosen });
   }

@@ -72,6 +72,16 @@ describe('deterministic chat intake', () => {
     ]);
     expect(value).toMatchObject({full_name:'MILENA MILETH PEZO ESPINOZA',document_type:'DNI',document_number:'62179224',email:'milenamilethpezoespinoza0@gmail.com'});
   });
+  it('keeps one unambiguous email sent before a later DNI batch',()=>{
+    const value=collectEnrollmentData({},[
+      {id:'email',created_at:'2026-10-20T14:05:00Z',content_text:'Correo: eskeylamorales1998@gmail.com'},
+      {id:'front',created_at:'2026-10-20T17:02:16Z',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MORALES BAZAN, ESKEYLA ALINA',document_type:'DNI',document_number:'73354819'}}},
+    ]);
+    expect(value.email).toBe('eskeylamorales1998@gmail.com');
+  });
+  it('reads the exact two-line Eskeyla contact block',()=>{
+    expect(collectEnrollmentData({},[{id:'contact',created_at:'2026-10-20T19:05:07Z',content_text:'Celular :987435757\nCorreo: eskeylamorales1998@gmail.com'}])).toMatchObject({email:'eskeylamorales1998@gmail.com'});
+  });
   it('does not replace the holder document with an electoral code from the reverse',()=>{
     const reverse={...back,image_analysis:{category:'identity_document',fields:{...back.image_analysis?.fields,document_type:'Constancia de sufragio',document_number:'000379'}}};
     const value=collectEnrollmentData({},[{...front,content_text:null},reverse]);
