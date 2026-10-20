@@ -31,6 +31,15 @@ const back: IntakeMessage = {
   },
 };
 describe('deterministic chat intake', () => {
+  it('reads WhatsApp labels without a colon and ignores an invalid DNI code from the reverse', () => {
+    const value = collectEnrollmentData({}, [
+      { id: 'written', content_text: 'Nombre Milena Mileth Pezo Espinoza\nCorreo milena@example.com' },
+      { id: 'course', content_text: 'Hola, deseo la Super Promo de 19.90 en Auxiliar de Educación Inicial.' },
+      { id: 'front', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'PEZO ESPINOZA MILENA MILETH', document_type: 'DNI', document_number: '52159224', birth_date: '2000-02-02' } } },
+      { id: 'back', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'MILENA MILETH PEZO', document_type: 'DNI', document_number: '020026F3512115', department: 'PASCO', district: 'YANACANCHA' } } },
+    ]);
+    expect(value).toMatchObject({ full_name: 'MILENA MILETH PEZO ESPINOZA', email: 'milena@example.com', course: 'AUXILIAR DE EDUCACION INICIAL', document_type: 'DNI', document_number: '52159224' });
+  });
   it('does not replace the holder document with an electoral code from the reverse',()=>{
     const reverse={...back,image_analysis:{category:'identity_document',fields:{...back.image_analysis?.fields,document_type:'Constancia de sufragio',document_number:'000379'}}};
     const value=collectEnrollmentData({},[{...front,content_text:null},reverse]);

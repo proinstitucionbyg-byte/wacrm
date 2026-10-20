@@ -63,7 +63,7 @@ export function collectEnrollmentData(
         bareCourse.length === 0) add('full_name', trimmed, true);
     for (const line of text.split(/\r?\n/)) {
       const labelled = line.match(
-        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*:\s*(.+)$/i
+        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*(?:(?::|-)\s*|\s+)(.+)$/i
       );
       if (!labelled) continue;
       const label = key(labelled[1]);
@@ -125,6 +125,11 @@ export function collectEnrollmentData(
     ] as const) {
       // The reverse may contain electoral/printing codes, not the holder's ID.
       if ((field === 'document_number' || field === 'document_type') && !message.image_analysis.fields?.full_name) continue;
+      if (
+        field === 'document_number' &&
+        key(String(message.image_analysis.fields?.document_type ?? '')) === 'DNI' &&
+        !/^\d{8}$/.test(String(message.image_analysis.fields?.document_number ?? '').replace(/[\s()-]/g, ''))
+      ) continue;
       add(field, message.image_analysis.fields?.[field]);
     }
   }

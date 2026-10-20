@@ -48,7 +48,10 @@ export async function collectConversationEnrollments(
     )
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
-    .limit(100);
+    // Keep the original course-selection message available even after a long
+    // automation. A paid lead can easily exceed 100 text/media blocks before
+    // the voucher is validated.
+    .limit(250);
   if (messageError) throw messageError;
   const evidence = (messages ?? []) as IntakeEvidence[];
   let next = collectEnrollmentData(

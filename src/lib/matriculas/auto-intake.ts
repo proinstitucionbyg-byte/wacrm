@@ -17,8 +17,8 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     const writtenNames = new Set<string>(), writtenDocs = new Set<string>();
     for (const message of customer) for (const line of (message.content_text ?? '').replace(/\\n/g, '\n').split(/\r?\n/)) {
       const normalizedLine = key(line);
-      const name = normalizedLine.match(/^(?:NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?)\s*:\s*(.+)$/);
-      const doc = normalizedLine.match(/^(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE)\s*:\s*(.+)$/);
+      const name = normalizedLine.match(/^(?:NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?)\s*(?:(?::|-)\s*|\s+)(.+)$/);
+      const doc = normalizedLine.match(/^(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE)\s*(?:(?::|-)\s*|\s+)(.+)$/);
       if (name) writtenNames.add(key(name[1]));
       else if (/^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(line.trim()) && sameName(line,next.full_name)) writtenNames.add(key(line));
       if (doc) writtenDocs.add(key(doc[1]).replace(/[\s()-]/g, ''));
@@ -27,6 +27,11 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     const photos = customer.filter((message) => message.image_analysis?.category === 'identity_document');
     const consistent = photos.every((photo) => {
       const f = photo.image_analysis?.fields;
+      const photographedDocument = key(String(f?.document_number ?? '')).replace(/[\s()-]/g, '');
+      const reverseDniArtifact = next.document_type === 'DNI' && Boolean(photographedDocument) &&
+        !/^\d{8}$/.test(photographedDocument) && !f?.birth_date &&
+        Boolean(f?.address || f?.department || f?.district);
+      if (reverseDniArtifact) return true;
       return !f?.full_name || (sameName(String(f.full_name), next.full_name!) && (!f.document_number || key(String(f.document_number)).replace(/\s/g, '') === next.document_number));
     });
     const front = photos.some((photo) => sameName(String(photo.image_analysis?.fields?.full_name ?? ''), next.full_name!) && String(photo.image_analysis?.fields?.document_number ?? '').replace(/\s/g, '') === next.document_number);
@@ -38,10 +43,16 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
     next.declaration_message_ids = declarationEvidence(next, customer);
   } else next.declaration_message_ids = [];
   if (!next.offer_confirmed && next.course) {
-    const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => key(message.content_text ?? '').replace(/\\N/g, '\n').replace(/~[^~]*~/g, '').replace(/[*_]/g, '')).filter((text) => courseKey(text) === courseKey(next.course!));
+    const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => ({
+      createdAt: Date.parse(message.created_at!),
+      text: key(message.content_text ?? '').replace(/\\N/g, '\n').replace(/~[^~]*~/g, '').replace(/[*_]/g, ''),
+    })).filter((entry) => Number.isFinite(entry.createdAt) && courseKey(entry.text) === courseKey(next.course!));
+    const latestQuoteAt = Math.max(...quotes.map((entry) => entry.createdAt));
     const prices = new Map<string, number[]>();
-    for (const quote of quotes) {
-      const values = quotedOfferPrices(quote);
+    // Compare the text/audio belonging to the latest promotion block. Older
+    // campaigns in the same chat must not override the offer accepted at pay.
+    for (const quote of quotes.filter((entry) => entry.createdAt >= latestQuoteAt - 10 * 60_000)) {
+      const values = quotedOfferPrices(quote.text);
       if (values) prices.set(JSON.stringify(values), values);
     }
     if (prices.size === 1) {

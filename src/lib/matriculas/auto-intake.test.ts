@@ -19,6 +19,21 @@ describe('automatic intake from compared evidence and official dates',()=>{
     const reverse: IntakeEvidence={id:'reverse',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{document_number:'000379',address:'CALLE UNO'}}};
     expect(prepareAutomaticIntake(data,[...evidence,reverse],calendar,'2026-10-09T12:00:00Z').identity_confirmed).toBe(true);
   });
+  it('accepts a labelled name without colon and ignores an invalid reverse DNI OCR code',()=>{
+    const student={full_name:'MILENA MILETH PEZO ESPINOZA',document_type:'DNI',document_number:'52159224',course:'AUXILIAR DE EDUCACION INICIAL'};
+    const messages: IntakeEvidence[]=[
+      {id:'written',sender_type:'customer',content_text:'Nombre Milena Mileth Pezo Espinoza'},
+      {id:'front',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'PEZO ESPINOZA MILENA MILETH',document_number:'52159224',birth_date:'2000-02-02'}}},
+      {id:'back',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'MILENA MILETH PEZO',document_number:'020026F3512115',department:'PASCO',district:'YANACANCHA'}}},
+    ];
+    expect(prepareAutomaticIntake(student,messages,calendar,'2026-10-20T12:00:00Z').identity_confirmed).toBe(true);
+  });
+  it('uses the latest internally consistent promotion block instead of an older campaign',()=>{
+    const oldQuote={...evidence[2],created_at:'2026-10-18T10:00:00Z'};
+    const latestText={...evidence[2],id:'latest-text',created_at:'2026-10-20T10:00:00Z',content_text:evidence[2].content_text!.replace('79.90','49.90')};
+    const latestAudio={...latestText,id:'latest-audio',created_at:'2026-10-20T10:03:00Z'};
+    expect(prepareAutomaticIntake(data,[oldQuote,latestText,latestAudio],calendar,'2026-10-20T10:05:00Z')).toMatchObject({offer_confirmed:true,prices:[19.9,49.9,49.9,49.9,49.9,49.9]});
+  });
   it('compares written and photographed data and freezes the written offer',()=>{
     expect(prepareAutomaticIntake(data,evidence,calendar,'2026-10-09T12:00:00Z')).toMatchObject({identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9],start_date:'2026-10-06'});
   });
