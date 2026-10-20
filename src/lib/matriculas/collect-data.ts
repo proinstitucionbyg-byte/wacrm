@@ -30,6 +30,7 @@ export function collectEnrollmentData(
 ): EnrollmentData {
   const candidates = new Map<keyof EnrollmentData, Set<string>>();
   const writtenNames = new Set<string>();
+  const photoNames = new Set<string>();
   const add = (field: keyof EnrollmentData, raw: unknown, written = false) => {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 500) return;
     const parsed = parseEnrollmentData({ [field]: raw });
@@ -109,6 +110,10 @@ export function collectEnrollmentData(
     if (promo) add('promotion_id', `SUPER PROMO DE ${promo[1]}`);
     if (message.image_analysis?.category !== 'identity_document') continue;
     photoIds.push(message.id);
+    const photoName = parseEnrollmentData({
+      full_name: message.image_analysis.fields?.full_name,
+    })?.full_name;
+    if (photoName) photoNames.add(photoName);
     for (const field of [
       'full_name',
       'document_type',
@@ -127,10 +132,16 @@ export function collectEnrollmentData(
   // Conflicting OCR/text values remain empty for review; existing edits always win.
   for (const [field, values] of candidates) {
     // A student's explicit written name is kept as provisional data even
-    // when OCR yields a different spelling. Identity remains unconfirmed.
-    const chosen = field === 'full_name' && writtenNames.size === 1
-      ? [...writtenNames][0]
-      : values.size === 1 ? [...values][0] : null;
+    // when OCR yields a different spelling. If ordinary chat phrases also
+    // resemble a name, prefer the single written value that matches the DNI.
+    const writtenPhotoMatches = field === 'full_name'
+      ? [...writtenNames].filter((name) => photoNames.has(name))
+      : [];
+    const chosen = field === 'full_name' && writtenPhotoMatches.length === 1
+      ? writtenPhotoMatches[0]
+      : field === 'full_name' && writtenNames.size === 1
+        ? [...writtenNames][0]
+        : values.size === 1 ? [...values][0] : null;
     if (!next[field] && chosen) Object.assign(next, { [field]: chosen });
   }
   const ids = [...new Set([...(data.identity_message_ids ?? []), ...photoIds])];

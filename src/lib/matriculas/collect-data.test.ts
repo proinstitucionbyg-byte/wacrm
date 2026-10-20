@@ -94,6 +94,25 @@ describe('deterministic chat intake', () => {
     expect(result.full_name).toBe('ANA MARIA PEREZ TORRES');
     expect(result.email).toBe('ana.perez@example.com');
   });
+  it('keeps the written name that matches the DNI when chat phrases resemble names', () => {
+    const result = collectEnrollmentData({}, [
+      { id: 'chat-1', content_text: 'sigamos con la inscripción' },
+      { id: 'chat-2', content_text: 'ahí está el voucher' },
+      { id: 'name', content_text: 'Mariela Haydee Lugones Loayza' },
+      {
+        id: 'dni',
+        content_text: null,
+        image_analysis: {
+          category: 'identity_document',
+          fields: {
+            full_name: 'MARIELA HAYDEE LUGONES LOAYZA',
+            document_number: '70249409',
+          },
+        },
+      },
+    ]);
+    expect(result.full_name).toBe('MARIELA HAYDEE LUGONES LOAYZA');
+  });
   it('preserves manual corrections and confirmed flags', () => {
     const data = {
       full_name: 'CORREGIDO',
