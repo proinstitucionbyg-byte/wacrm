@@ -86,6 +86,14 @@ describe('automatic intake from compared evidence and official dates',()=>{
     const photo: IntakeEvidence = { id: 'photo', sender_type: 'customer', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'REYNA RODRIGUEZ NANCY MARGOT', document_number: '41326266' } } };
     expect(prepareAutomaticIntake({ full_name: 'NANCY MARGOT REYNA RODRIGUEZ', document_number: '41326266' }, [written, photo], calendar, '2026-10-19T12:00:00Z').identity_confirmed).toBe(true);
   });
+  it('accepts a three-word written name only when it matches the photographed DNI', () => {
+    const student = { full_name: 'MENDOZA ALVAREZ HILARIO', document_number: '41177202' };
+    const written: IntakeEvidence = { id: 'name', sender_type: 'customer', created_at: '2026-10-21T01:52:04Z', content_text: 'Hilario Mendoza Alvarez' };
+    const photo: IntakeEvidence = { id: 'front', sender_type: 'customer', created_at: '2026-10-21T01:52:32Z', content_text: null,
+      image_analysis: { category: 'identity_document', fields: { full_name: 'MENDOZA ALVAREZ HILARIO', document_number: '41177202' } } };
+    expect(prepareAutomaticIntake(student, [written, photo], calendar, '2026-10-21T02:00:00Z').identity_confirmed).toBe(true);
+    expect(prepareAutomaticIntake(student, [{ ...written, content_text: 'Hilario Mendoza Otro' }, photo], calendar, '2026-10-21T02:00:00Z').identity_confirmed).not.toBe(true);
+  });
   it('compares a bare written name and number against the same photographed document', () => {
     const student = { full_name: 'MARIELA HAYDEE LUGONES LOAYZA', document_number: '70249409' };
     const written: IntakeEvidence[] = [

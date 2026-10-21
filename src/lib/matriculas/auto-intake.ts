@@ -35,7 +35,7 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
       const name = normalizedLine.match(/^(?:NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?)\s*(?:(?::|-)\s*|\s+)(.+)$/);
       const doc = normalizedLine.match(/^(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE)\s*(?:(?::|-)\s*|\s+)(.+)$/);
       if (name) writtenNames.add(key(name[1]));
-      else if (/^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(line.trim()) && sameName(line,next.full_name)) writtenNames.add(key(line));
+      else if (/^[\p{L}]+(?:[ -][\p{L}]+){2,5}$/u.test(line.trim()) && sameName(line,next.full_name)) writtenNames.add(key(line));
       if (doc) writtenDocs.add(key(doc[1]).replace(/[\s()-]/g, ''));
       else if (normalizedLine.replace(/[\s()-]/g, '') === next.document_number) writtenDocs.add(next.document_number);
     }
