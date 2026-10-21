@@ -103,7 +103,7 @@ function D_NUMERO() {
 }
 function D_PONER(s, celda, valor, formato) { const c = s.getRange(celda); if (formato) c.setNumberFormat(formato); c.setValue(valor); }
 function D_METODO(valor) {
-  const opciones = { 'YAPE': 'Yape/Plin', 'PLIN': 'Yape/Plin', 'YAPE/PLIN': 'Yape/Plin', 'TRANSFERENCIA': 'Tranferencia/Depósito', 'DEPOSITO': 'Tranferencia/Depósito', 'TRANSFERENCIA/DEPOSITO': 'Tranferencia/Depósito', 'TRANFERENCIA/DEPOSITO': 'Tranferencia/Depósito', 'EFECTIVO': 'Efectivo', 'MERCADO PAGO': 'Mercado Pago' };
+  const opciones = { 'YAPE': 'Yape/Plin', 'PLIN': 'Yape/Plin', 'YAPE/PLIN': 'Yape/Plin', 'INTERBANK': 'Transferencia/Depósito', 'BBVA': 'Transferencia/Depósito', 'BCP': 'Transferencia/Depósito', 'TRANSFERENCIA': 'Transferencia/Depósito', 'DEPOSITO': 'Transferencia/Depósito', 'TRANSFERENCIA/DEPOSITO': 'Transferencia/Depósito', 'TRANFERENCIA/DEPOSITO': 'Transferencia/Depósito', 'EFECTIVO': 'Efectivo', 'MERCADO PAGO': 'Mercado Pago' };
   const metodo = opciones[D_CLAVE(valor)];
   if (!metodo) throw new Error('METODO DE PAGO NO RECONOCIDO: ' + D_TEXTO(valor));
   return metodo;
