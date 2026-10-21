@@ -25,6 +25,7 @@ import { hasUnfinishedEnrollmentPayment, paidEnrollmentContinuation } from './en
 import { isLikelyAutomatedInbound } from './automated-inbound'
 import { hasRepeatedUnresolvedMessage, isWaitingForRepetitionHandoff, repetitionHandoffArea, REPETITION_HANDOFF_MARKER } from './repetition'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
+import { verifiedCourseModalityReply } from './modality'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -117,6 +118,18 @@ export async function dispatchInboundToAiReply(
     }
 
     const latestText = latestUserMessage(messages)
+    const modalityReply = verifiedCourseModalityReply(latestText)
+    if (modalityReply) {
+      const { data: claimed, error } = await db.rpc('claim_ai_reply_slot', {
+        conversation_id: conversationId,
+        max_replies: config.autoReplyMaxPerConversation,
+      })
+      if (!error && claimed === true) await engineSendText({
+        accountId, userId: configOwnerUserId, conversationId, contactId,
+        text: modalityReply, aiGenerated: true,
+      })
+      return
+    }
     const enrollmentReply = await paidEnrollmentContinuation(db, accountId, conversationId, latestText)
     const verifiedPayment = requestedArea ? null : verifiedPaymentReply(messages)
     const unfinishedEnrollmentPayment = verifiedPayment

@@ -137,6 +137,14 @@ beforeEach(() => {
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
+  it('corrects a presencial question without calling the model or interrupting the course', async () => {
+    h.state.pendingSequence = [{automation_id:'education',context:{conversation_id:'conv-1'}}]
+    h.buildConversationContext.mockResolvedValue([{role:'user',content:'¿Es precencial?'}])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('cursos son virtuales')}))
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.runAutomation).not.toHaveBeenCalled()
+  })
   it('answers an off-script question without replacing the active course sequence', async () => {
     h.state.pendingSequence = [{automation_id:'education',context:{conversation_id:'conv-1'}}]
     h.state.autoResponders = [{id:'other',name:'OTRA INFORMACION'}]
@@ -391,7 +399,7 @@ describe('dispatchInboundToAiReply — handoff', () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).toHaveBeenCalledTimes(1)
-    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('derivada a ventas') }))
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('derivé tu consulta a ventas') }))
     expect(h.state.rpcCalls).toHaveLength(0)
     expect(h.state.updatePayload?.ai_handed_off_at).toEqual(expect.any(String))
     expect(h.state.updatePayload).not.toHaveProperty('ai_autoreply_disabled')

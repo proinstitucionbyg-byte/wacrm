@@ -1,6 +1,12 @@
 import {describe,expect,it} from 'vitest';
 import {buildSystemPrompt} from './defaults';
 describe('registration claims in AI responses',()=>{
+  it.each(['auto_reply','draft'] as const)('keeps the verified virtual modality in %s after retrieved context',mode=>{
+    const prompt=buildSystemPrompt({mode,userPrompt:'BUSINESS_PROMPT',knowledge:['KNOWLEDGE']});
+    expect(prompt.lastIndexOf('VERIFIED COURSE MODALITY')).toBeGreaterThan(prompt.lastIndexOf('KNOWLEDGE'));
+    expect(prompt).toContain('Never claim that any course or class is presencial');
+    expect(prompt).toContain('answer clearly that they are virtual');
+  });
   it('keeps sales follow-ups focused on completing payment without inventing urgency',()=>{
     const prompt=buildSystemPrompt({mode:'auto_reply',userPrompt:'BUSINESS_PROMPT',knowledge:['KNOWLEDGE']});
     expect(prompt.lastIndexOf('SALES PAYMENT FOLLOW-UP')).toBeGreaterThan(prompt.lastIndexOf('KNOWLEDGE'));

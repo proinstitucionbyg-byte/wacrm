@@ -31,7 +31,7 @@ import {
   ContactRound,
   Pin,
 } from 'lucide-react';
-import { format, isToday, isYesterday, differenceInHours } from 'date-fns';
+import { differenceInHours } from 'date-fns';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -137,14 +137,28 @@ interface MessageThreadProps {
   onToggleContactPanel?: () => void;
 }
 
+const limaDateParts = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
+function limaDateKey(value: string | Date): string {
+  const parts = Object.fromEntries(limaDateParts.formatToParts(new Date(value)).map(({ type, value: part }) => [type, part]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function formatDateSeparator(
   dateStr: string,
   t: ReturnType<typeof useTranslations>
 ): string {
   const date = new Date(dateStr);
-  if (isToday(date)) return t('today');
-  if (isYesterday(date)) return t('yesterday');
-  return format(date, 'MMMM d, yyyy');
+  const fullDate = new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  }).format(date);
+  const today = limaDateKey(new Date());
+  const day = limaDateKey(date);
+  if (day === today) return `${t('today')} · ${fullDate}`;
+  if (day === limaDateKey(new Date(Date.now() - 86_400_000))) return `${t('yesterday')} · ${fullDate}`;
+  return fullDate;
 }
 
 function groupMessagesByDate(messages: Message[]) {
@@ -152,7 +166,7 @@ function groupMessagesByDate(messages: Message[]) {
   let currentDate = '';
 
   for (const msg of messages) {
-    const day = format(new Date(msg.created_at), 'yyyy-MM-dd');
+    const day = limaDateKey(msg.created_at);
     if (day !== currentDate) {
       currentDate = day;
       groups.push({ date: msg.created_at, messages: [msg] });
@@ -1491,7 +1505,7 @@ export function MessageThread({
               <div key={group.date}>
                 {/* Date separator */}
                 <div className="mb-4 flex items-center justify-center">
-                  <span className="bg-muted text-muted-foreground rounded-full px-3 py-1 text-[10px] font-medium">
+                  <span className="bg-muted text-foreground rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm">
                     {formatDateSeparator(group.date, t)}
                   </span>
                 </div>
