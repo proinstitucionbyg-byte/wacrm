@@ -744,11 +744,11 @@ async function executeAutomation(
   automation: Automation,
   input: DispatchInput,
   triggerEventOverride?: string,
-  range?: { startPosition: number; endPosition: number },
+  range?: { startPosition: number; endPosition: number; terminalReentry?: boolean },
 ) {
   const db = supabaseAdmin()
   const priorChain = input.context?.automation_chain_ids ?? []
-  if (priorChain.includes(automation.id)) {
+  if (priorChain.includes(automation.id) && !range?.terminalReentry) {
     console.warn('[automations] circular automation link blocked:', automation.id)
     return null
   }
@@ -1297,9 +1297,6 @@ case 'send_media': {
       if (!targetId) throw new Error('run_automation needs automation_id')
 
       const chain = args.context.automation_chain_ids ?? [args.automation.id]
-      if (chain.includes(targetId)) {
-        throw new Error('run_automation: circular link blocked')
-      }
       if (chain.length >= 10) {
         throw new Error('run_automation: maximum chain length reached')
       }
@@ -1331,6 +1328,34 @@ case 'send_media': {
         }
       }
 
+      // A bounded return to an ancestor is safe only when the selected roots
+      // and every nested branch contain no further automation link.
+      let terminalReentry = false
+      if (chain.includes(targetId)) {
+        if (!hasRange) throw new Error('run_automation: circular link blocked')
+        const { data: allSteps, error: stepsError } = await db.from('automation_steps')
+          .select('id,parent_step_id,position,step_type').eq('automation_id', targetId)
+        if (stepsError || !allSteps) throw new Error('run_automation: cannot verify bounded return')
+        const selected = new Set(allSteps.filter(row => row.parent_step_id === null
+          && row.position >= (cfg.start_step ?? 1) - 1
+          && row.position <= (cfg.end_step ?? 1) - 1).map(row => row.id))
+        if (!selected.size) throw new Error('run_automation: selected block no longer exists')
+        let expanded = true
+        while (expanded) {
+          expanded = false
+          for (const row of allSteps) {
+            if (row.parent_step_id && selected.has(row.parent_step_id) && !selected.has(row.id)) {
+              selected.add(row.id)
+              expanded = true
+            }
+          }
+        }
+        if (allSteps.some(row => selected.has(row.id) && row.step_type === 'run_automation')) {
+          throw new Error('run_automation: circular link blocked')
+        }
+        terminalReentry = true
+      }
+
       const childLogId = await executeAutomation(
         target as Automation,
         {
@@ -1340,7 +1365,8 @@ case 'send_media': {
           context: args.context,
         },
         'automation_link',
-        hasRange ? { startPosition: (cfg.start_step ?? 1) - 1, endPosition: (cfg.end_step ?? 1) - 1 } : undefined,
+        hasRange ? { startPosition: (cfg.start_step ?? 1) - 1, endPosition: (cfg.end_step ?? 1) - 1,
+          terminalReentry } : undefined,
       )
       if (!childLogId) throw new Error('run_automation: target did not start')
       return { detail: `automation ${targetId} started`, childLogId }

@@ -656,6 +656,43 @@ describe('run_automation chaining', () => {
     });
     expect(h.state.logAutomationIds).toEqual(['a1']);
   });
+
+  it('allows a bounded return to an ancestor when that range has no automation links', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep(), { ...automationWithUpdateStep(), id: 'a2' }];
+    h.state.stepsByAutomationId = {
+      a1: [
+        { id: 'link', automation_id: 'a1', step_type: 'run_automation', position: 0,
+          parent_step_id: null, step_config: { automation_id: 'a2' } },
+        { id: 'safe', automation_id: 'a1', step_type: 'update_contact_field', position: 1,
+          parent_step_id: null, step_config: { field: 'company', value: 'safe return' } },
+      ],
+      a2: [{ id: 'return', automation_id: 'a2', step_type: 'run_automation', position: 0,
+        parent_step_id: null, step_config: { automation_id: 'a1', start_step: 2, end_step: 2 } }],
+    };
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(h.state.logAutomationIds).toEqual(['a1', 'a2', 'a1']);
+    expect(h.state.updateCalls).toHaveLength(2);
+  });
+
+  it('blocks a bounded return when a nested branch contains an automation link', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep(), { ...automationWithUpdateStep(), id: 'a2' }];
+    h.state.stepsByAutomationId = {
+      a1: [
+        { id: 'link', automation_id: 'a1', step_type: 'run_automation', position: 0,
+          parent_step_id: null, step_config: { automation_id: 'a2' } },
+        { id: 'branch', automation_id: 'a1', step_type: 'update_contact_field', position: 1,
+          parent_step_id: null, step_config: { field: 'company', value: 'unlinked root' } },
+        { id: 'nested-link', automation_id: 'a1', step_type: 'run_automation', position: 0,
+          parent_step_id: 'branch', step_config: { automation_id: 'a2' } },
+      ],
+      a2: [{ id: 'return', automation_id: 'a2', step_type: 'run_automation', position: 0,
+        parent_step_id: null, step_config: { automation_id: 'a1', start_step: 2, end_step: 2 } }],
+    };
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(h.state.logAutomationIds.filter(id => id === 'a1')).toHaveLength(1);
+  });
 });
 
 describe('automated inbound guard', () => {
