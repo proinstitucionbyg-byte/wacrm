@@ -164,6 +164,16 @@ describe('deterministic chat intake', () => {
     ]);
     expect(result.full_name).toBe('MARIELA HAYDEE LUGONES LOAYZA');
   });
+  it('does not treat a student saying tengo carné as a second name', () => {
+    const result = collectEnrollmentData({}, [
+      { id: 'written', created_at: '2026-10-21T01:43:12Z', content_text: 'AMANDA AIDA ARRIETA URETA\nCelular 906 651 196\namandaaidaureta19@gmail.com\nTengo carne de mi congregación' },
+      { id: 'dni', created_at: '2026-10-21T01:44:32Z', content_text: 'DNI 21076528' },
+      { id: 'photo', created_at: '2026-10-21T01:47:47Z', content_text: null,
+        image_analysis: { category: 'identity_document', fields: { full_name: null, document_type: 'DNI', document_number: '21076598', district: 'LIMA' } } },
+    ]);
+    expect(result.full_name).toBe('AMANDA AIDA ARRIETA URETA');
+    expect(result.identity_confirmed).not.toBe(true);
+  });
   it('preserves manual corrections and confirmed flags', () => {
     const data = {
       full_name: 'CORREGIDO',
