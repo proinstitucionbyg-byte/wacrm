@@ -35,6 +35,14 @@ vi.mock('./admin-client', () => ({
           maybeSingle:async()=>({data:h.state.paymentReview,error:null})}
         return chain
       }
+      if (table === 'enrollment_drafts') {
+        const chain = {select:()=>chain,eq:()=>chain,maybeSingle:async()=>({data:null,error:null})}
+        return chain
+      }
+      if (table === 'enrollment_document_deliveries') {
+        const chain = {select:()=>chain,eq:()=>chain,then:(resolve:(value:unknown)=>unknown)=>Promise.resolve({data:[],error:null}).then(resolve)}
+        return chain
+      }
       if (table === 'automation_pending_executions') {
         const chain = { select:()=>chain,eq:()=>chain,in:()=>chain,
           limit:async()=>({data:h.state.pendingSequence,error:null}) }
@@ -151,6 +159,26 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({text:expect.stringContaining('937467119')}))
     expect(h.generateReply).not.toHaveBeenCalled()
+  })
+  it('does not resend payment accounts after an enrollment payment was validated', async () => {
+    h.state.paymentReview = { status: 'validated', id: 'review-1' } as never
+    h.buildConversationContext.mockResolvedValue([{ role: 'user', content: '¿Cuáles son sus cuentas bancarias?' }])
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('No realices otro pago'),
+    }))
+    expect(h.engineSendText).not.toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('200-300678464-8') }))
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
+  it('replaces an account number hallucinated while a paid registration is incomplete', async () => {
+    h.state.paymentReview = { status: 'validated', id: 'review-1' } as never
+    h.buildConversationContext.mockResolvedValue([{ role: 'user', content: 'Mañana enviaré mi documento' }])
+    h.generateReply.mockResolvedValue({ text: 'Puedes depositar en la cuenta BCP 19493736306035', handoff: false })
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('No realices otro pago'),
+    }))
+    expect(h.engineSendText).not.toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('19493736306035') }))
   })
   it('continues an enrollment with a received payment without restarting Yape',async()=>{
     h.state.paymentReview = {status:'validated'}
@@ -356,7 +384,7 @@ describe('dispatchInboundToAiReply — handoff', () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).toHaveBeenCalledTimes(1)
-    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('consulta a ventas') }))
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('derivada a ventas') }))
     expect(h.state.rpcCalls).toHaveLength(0)
     expect(h.state.updatePayload?.ai_handed_off_at).toEqual(expect.any(String))
     expect(h.state.updatePayload).not.toHaveProperty('ai_autoreply_disabled')

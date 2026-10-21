@@ -49,6 +49,21 @@ export async function startEnrollmentSequence(
       )
     )
       return;
+    const { data: completedConversation, error: completedConversationError } = await db
+      .from('conversations')
+      .select('ai_handoff_area')
+      .eq('id', source.conversation_id)
+      .eq('account_id', accountId)
+      .maybeSingle();
+    if (completedConversationError) throw completedConversationError;
+    if (completedConversation?.ai_handoff_area !== 'FIDELIZACION') {
+      const { error: routeError } = await db.rpc('route_conversation_area', {
+        p_account: accountId,
+        p_conversation: source.conversation_id,
+        p_area: 'FIDELIZACION',
+      });
+      if (routeError) throw routeError;
+    }
     const previous = await db.rpc('has_completed_intake_welcome', {
       p_account: accountId,
       p_enrollment: sourceId,

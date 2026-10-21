@@ -21,7 +21,7 @@ import { academicContext } from '@/lib/matriculas/calendar'
 import { studentSupportArea } from './student-support'
 import { sentOfferPriceReply } from './sent-offer'
 import { verifiedPaymentReply, safePaymentReply } from './payment-details'
-import { paidEnrollmentContinuation } from './enrollment-continuation'
+import { hasUnfinishedEnrollmentPayment, paidEnrollmentContinuation } from './enrollment-continuation'
 import { isLikelyAutomatedInbound } from './automated-inbound'
 import { hasRepeatedUnresolvedMessage, isWaitingForRepetitionHandoff, repetitionHandoffArea, REPETITION_HANDOFF_MARKER } from './repetition'
 import { isGreetingAutomation } from '@/lib/automations/greeting-continuity'
@@ -116,8 +116,15 @@ export async function dispatchInboundToAiReply(
       return
     }
 
-    const enrollmentReply = await paidEnrollmentContinuation(db, accountId, conversationId, latestUserMessage(messages))
-    const offerReply = enrollmentReply ?? (requestedArea ? null : verifiedPaymentReply(messages) ?? sentOfferPriceReply(messages))
+    const latestText = latestUserMessage(messages)
+    const enrollmentReply = await paidEnrollmentContinuation(db, accountId, conversationId, latestText)
+    const verifiedPayment = requestedArea ? null : verifiedPaymentReply(messages)
+    const unfinishedEnrollmentPayment = verifiedPayment
+      ? await hasUnfinishedEnrollmentPayment(db, accountId, conversationId)
+      : false
+    const offerReply = enrollmentReply ?? (unfinishedEnrollmentPayment
+      ? 'Ya recibimos tu comprobante de matrícula. No realices otro pago ni vuelvas a enviar el comprobante; estamos completando la revisión de tu registro y te indicaremos si falta algún dato. 😊'
+      : verifiedPayment ?? (requestedArea ? null : sentOfferPriceReply(messages)))
     if (offerReply) {
       const { data: claimed, error } = await db.rpc('claim_ai_reply_slot', { conversation_id: conversationId, max_replies: config.autoReplyMaxPerConversation })
       if (!error && claimed === true) await engineSendText({ accountId, userId: configOwnerUserId, conversationId, contactId, text: offerReply, aiGenerated: true })
@@ -128,6 +135,19 @@ export async function dispatchInboundToAiReply(
     const directAutomation = requestedArea ? null :
       preferredEnrollmentAutomation(candidates, messages) ?? preferredCourseInformationAutomation(candidates, messages)
     if (directAutomation) {
+      const selectedAutomation = candidates.find(candidate => candidate.id === directAutomation)
+      if (selectedAutomation && /yape|plin|medio.?s? de pago|cuenta bancaria/i.test(selectedAutomation.name)
+          && await hasUnfinishedEnrollmentPayment(db, accountId, conversationId)) {
+        const { data: claimed, error: claimErr } = await db.rpc('claim_ai_reply_slot', {
+          conversation_id: conversationId,
+          max_replies: config.autoReplyMaxPerConversation,
+        })
+        if (claimErr || claimed !== true) return
+        await engineSendText({ accountId, userId: configOwnerUserId, conversationId, contactId,
+          text: 'Ya recibimos tu comprobante de matrícula. No realices otro pago ni vuelvas a enviar el comprobante; estamos completando la revisión de tu registro y te indicaremos si falta algún dato. 😊',
+          aiGenerated: true })
+        return
+      }
       const { data: claimed, error: claimErr } = await db.rpc('claim_ai_reply_slot', {
         conversation_id: conversationId,
         max_replies: config.autoReplyMaxPerConversation,
@@ -203,12 +223,17 @@ export async function dispatchInboundToAiReply(
       scheduleNote: scheduleContext(),
     })
 
-    const { text, handoff, handoffArea, usage, automationId } =
+    const { text: generatedText, handoff, handoffArea, usage, automationId } =
       await generateReply({
         config,
         systemPrompt,
         messages,
       })
+    let text = generatedText
+    if (text && /\b(?:yape|plin|cuenta|transferencia)\b/i.test(text)
+        && await hasUnfinishedEnrollmentPayment(db, accountId, conversationId)) {
+      text = 'Ya recibimos tu comprobante de matrícula. No realices otro pago ni vuelvas a enviar el comprobante; estamos completando la revisión de tu registro y te indicaremos si falta algún dato. 😊'
+    }
 
     // Record token spend on the account's BYO key. Fire-and-forget so it
     // never adds latency to the customer-facing send.

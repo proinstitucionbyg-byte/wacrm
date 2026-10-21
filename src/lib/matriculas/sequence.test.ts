@@ -76,7 +76,10 @@ const complete = () => ({
       ],
     },
   ],
-  conversations: [{ data: { contact_id: 'contact' } }],
+  conversations: [
+    { data: { ai_handoff_area: 'VENTAS' } },
+    { data: { contact_id: 'contact' } },
+  ],
   enrollment_sequence_runs: [{ data: { id: 'sequence' } }, { error: null }],
 });
 beforeEach(() => {
@@ -151,6 +154,18 @@ describe('secuencia protegida de matricula', () => {
     expect(state.writes.find(row=>row.table==='enrollment_sequence_runs'&&row.payload.stage==='final')?.payload.completed_at).toBeTruthy();
     expect(state.writes.at(-1)?.payload.status).toBe('closed');
     expect(runAutomationById).not.toHaveBeenCalled();
+  });
+  it('pasa a Fidelización solo después de registrar y enviar los tres documentos', async () => {
+    const state = database(complete());
+    await startEnrollmentSequence(state.db, 'account', 'draft', 'final');
+    expect(state.db.rpc).toHaveBeenCalledWith('route_conversation_area', {
+      p_account: 'account', p_conversation: 'chat', p_area: 'FIDELIZACION',
+    });
+    const incomplete = complete();
+    incomplete.enrollment_document_deliveries[0].data = [];
+    const pending = database(incomplete);
+    await startEnrollmentSequence(pending.db, 'account', 'draft', 'final');
+    expect(pending.db.rpc).not.toHaveBeenCalledWith('route_conversation_area', expect.anything());
   });
   it.each([
     ['2026-10-06', 'final30'],
