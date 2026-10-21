@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from '@/components/ui/dialog';
 import {ManualEnrollment} from '@/components/enrollments/manual-enrollment';
 import {
   ENROLLMENT_FIELDS,
@@ -431,6 +432,9 @@ function EnrollmentsPageContent() {
   const [canEdit, setCanEdit] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [search,setSearch]=useState('');
+  const [showHistory,setShowHistory]=useState(false);
+  const [selectedId,setSelectedId]=useState<string|null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -441,6 +445,7 @@ function EnrollmentsPageContent() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setDrafts(json.drafts);
+      if(review&&json.drafts.length===1)setSelectedId(json.drafts[0].id);
       setCanEdit(json.canEdit === true);
       setError('');
     } catch (err) {
@@ -452,33 +457,38 @@ function EnrollmentsPageContent() {
   useEffect(() => {
     void load();
   }, [load]);
+  const selected=drafts.find(draft=>draft.id===selectedId);
+  const statusLabel=(draft:EnrollmentDraft)=>draft.status==='registered'?'Registrado':draft.status==='processing'?'En proceso':draft.status==='ready'?'En cola':draft.status==='error'?'Revisar error':draft.payment_status==='pending'?'Validar pago':'Completar datos';
+  const visibleDrafts=drafts.filter(draft=>(showHistory?draft.status==='registered':draft.status!=='registered')&&`${draft.data.full_name||''} ${draft.data.course||''} ${draft.data.document_number||''} ${draft.registered_number||''}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
   return (
     <section className="space-y-5">
       <h1 className="text-2xl font-bold">REGISTRO DE MATRICULAS</h1>
       {canEdit&&<ManualEnrollment onCreated={()=>void load()}/>}
-      <p className="text-muted-foreground text-sm">
-        Los ingresos manuales esperan la validacion del pago. La numeracion, la carpeta y los documentos se generan en la misma cola de registro. Los faltantes no eliminan una aprobacion.
-      </p>
-      <Button variant="outline" onClick={load} disabled={loading}>
-        Actualizar
-      </Button>
+      <div className="space-y-4 rounded-xl border border-border bg-card p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Seguimiento de matrículas</h2><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Aquí revisas los datos, la validación del pago y la entrega de documentos. Los registrados se conservan en el historial; el cuadro de inicios organiza las clases.</p></div><Button variant="outline" onClick={load} disabled={loading}>Actualizar</Button></div>
+        <div className="flex flex-wrap items-center gap-2" aria-label="Filtrar matrículas"><Button variant={!showHistory?'default':'outline'} onClick={()=>setShowHistory(false)}>Pendientes ({drafts.filter(d=>d.status!=='registered').length})</Button><Button variant={showHistory?'default':'outline'} onClick={()=>setShowHistory(true)}>Historial ({drafts.filter(d=>d.status==='registered').length})</Button></div>
+        <input aria-label="Buscar matrículas" placeholder="Buscar estudiante, DNI, curso o número de matrícula" value={search} onChange={event=>setSearch(event.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"/>
       {error ? (
         <p role="alert" className="text-red-400">
           {error}
         </p>
       ) : loading ? (
         <p>Cargando…</p>
-      ) : drafts.length ? (
-        drafts.map((draft) => (
-          <EnrollmentEditor
-            key={`${draft.id}:${draft.version}`}
-            initial={draft}
-            canEdit={canEdit}
-          />
-        ))
+      ) : visibleDrafts.length ? (
+        <div className="max-h-[60dvh] overflow-y-auto rounded-lg border border-border">
+          <div className="sticky top-0 z-10 hidden grid-cols-[2fr_2fr_1fr_1fr] gap-3 border-b border-border bg-muted px-4 py-3 text-xs font-semibold md:grid"><span>ESTUDIANTE</span><span>CURSO</span><span>ESTADO</span><span>DETALLE</span></div>
+          {visibleDrafts.map(draft=><div key={draft.id} className="grid gap-3 border-b border-border p-4 last:border-b-0 md:grid-cols-[2fr_2fr_1fr_1fr] md:items-center">
+            <div className="min-w-0"><p className="break-words font-medium">{draft.data.full_name||'Estudiante sin datos completos'}</p><p className="text-xs text-muted-foreground">{draft.registered_number?`Matrícula ${draft.registered_number}`:'Sin número asignado'}{draft.data.document_number?` · Doc. ${draft.data.document_number}`:''}</p></div>
+            <div className="min-w-0 text-sm"><p className="break-words">{draft.data.course||'Curso por confirmar'}</p><p className="text-xs text-muted-foreground">{draft.data.start_date?`Inicio: ${draft.data.start_date}`:'Inicio por confirmar'}</p></div>
+            <span className={`w-fit rounded-md border px-2 py-1 text-xs ${draft.status==='registered'?'border-emerald-500/30 text-emerald-600':draft.status==='error'?'border-red-500/30 text-red-500':'border-border text-muted-foreground'}`}>{statusLabel(draft)}</span>
+            <Button variant="outline" className="w-full" onClick={()=>setSelectedId(draft.id)}>Ver ficha</Button>
+          </div>)}
+        </div>
       ) : (
-        <p>No hay pagos validados para registrar.</p>
+        <p className="py-6 text-center text-sm text-muted-foreground">{search?'No hay matrículas que coincidan con la búsqueda.':showHistory?'Todavía no hay matrículas registradas.':'No hay matrículas pendientes.'}</p>
       )}
+      </div>
+      <Dialog open={!!selected} onOpenChange={value=>{if(!value)setSelectedId(null);}}><DialogContent className="sm:max-w-5xl"><DialogHeader className="pr-10"><DialogTitle>Ficha de matrícula</DialogTitle><DialogDescription>Revisa los datos y documentos del estudiante seleccionado.</DialogDescription></DialogHeader>{selected&&<EnrollmentEditor key={`${selected.id}:${selected.version}`} initial={selected} canEdit={canEdit}/>}</DialogContent></Dialog>
     </section>
   );
 }

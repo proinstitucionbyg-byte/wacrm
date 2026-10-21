@@ -27,7 +27,7 @@ describe('unresolved repetition guard', () => {
   it('keeps the existing area and identifies academic support from customer history', () => {
     expect(repetitionHandoffArea(repeats(5),'FIDELIZACION')).toBe('fidelizacion')
     expect(repetitionHandoffArea(repeats(5),'VENTAS')).toBe('ventas')
-    expect(repetitionHandoffArea([{role:'user',content:'No puedo ingresar a mi clase'},...repeats(5)])).toBe('fidelizacion')
+    expect(repetitionHandoffArea([{role:'user',content:'Ya estoy estudiando'}, {role:'user',content:'No puedo ingresar a mi clase'},...repeats(5)])).toBe('fidelizacion')
     expect(repetitionHandoffArea(repeats(5))).toBe('ventas')
   })
 })

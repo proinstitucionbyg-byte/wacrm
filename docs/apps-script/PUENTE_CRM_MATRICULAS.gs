@@ -36,6 +36,11 @@ function C_ASESORA_VALIDACION_(celda, nombre) {
   if(opciones.indexOf(nombre)!==-1)return;
   opciones.push(nombre);celda.setDataValidation(regla.copy().requireValueInList(opciones,args[1]!==false).build());
 }
+function C_NORMALIZAR_OPERACION_(value) { return String(value||'').replace(/\s+/g,'').toUpperCase(); }
+function C_OPERACION_DUPLICADA_(refs, ids, reference, jobId) {
+  const normalized=C_NORMALIZAR_OPERACION_(reference);if(!normalized)return false;
+  return refs.some(function(r,i){return C_NORMALIZAR_OPERACION_(r[0])===normalized&&CLAVE_(ids[i][0])!==CLAVE_(jobId);});
+}
 function C_REGISTRAR_(job) {
   const d=job.data, s=HOJA_('MATRICULAS'), admin=SpreadsheetApp.openById(V2.admin), m=MAPA_(s);
   const cursos=['NUTRICION Y DIETETICA M-J 20-22','AUXILIAR DE FARMACIA M-V 18-20','RECURSOS HUMANOS L-M 20-22','ASISTENTE ADMINISTRATIVO M-V 20-22','EDUCACION INICIAL L-M 18-20'];
@@ -47,9 +52,19 @@ function C_REGISTRAR_(job) {
   const montoAceptado=Number(d.amount)===d.prices[0]||(d.prices[0]===19.9&&Number(d.amount)>=19&&Number(d.amount)<=21.9);
   const identidad=(d.identity_confirmed&&d.identity_message_ids.length)||(d.declaration_message_ids||[]).length;
   if(!identidad||!d.offer_confirmed||d.prices.length!==6||!montoAceptado)throw new Error('FALTAN CONFIRMACIONES DE IDENTIDAD U OFERTA');
-  const markerColumn=29, header=CLAVE_(s.getRange(1,markerColumn).getValue());
+  const markerColumn=29, operationColumn=30, header=CLAVE_(s.getRange(1,markerColumn).getValue());
   if(header&&header!=='ID MATRICULA CRM')throw new Error('LA COLUMNA AC ESTA OCUPADA; REVISAR ANTES DE INSTALAR');
   s.getRange(1,markerColumn).setValue('ID MATRICULA CRM');s.hideColumns(markerColumn);
+  const operationHeader=CLAVE_(s.getRange(1,operationColumn).getValue());
+  if(operationHeader&&operationHeader!=='NUMERO DE OPERACION')throw new Error('LA COLUMNA AD ESTA OCUPADA; REVISAR ANTES DE INSTALAR');
+  s.getRange(1,operationColumn).setValue('NUMERO DE OPERACION');
+  s.getRange(2,operationColumn,Math.max(1,s.getMaxRows()-1),1).setNumberFormat('@');
+  const operationReference=String(job.operation_reference||'').trim();
+  if(operationReference&&s.getLastRow()>1){
+    const refs=s.getRange(2,operationColumn,s.getLastRow()-1,1).getDisplayValues();
+    const ids=s.getRange(2,markerColumn,s.getLastRow()-1,1).getDisplayValues();
+    if(C_OPERACION_DUPLICADA_(refs,ids,operationReference,job.id))throw new Error('NUMERO DE OPERACION YA REGISTRADO; NO DUPLICAR MATRICULA');
+  }
   const ids=s.getLastRow()>1?s.getRange(2,markerColumn,s.getLastRow()-1,1).getValues():[], matches=[];
   ids.forEach(function(r,i){if(CLAVE_(r[0])===CLAVE_(job.id))matches.push(i+2);});
   if(matches.length>1)throw new Error('ID CRM DUPLICADO');
@@ -68,6 +83,7 @@ function C_REGISTRAR_(job) {
     // Reserva la misma fila antes de escribir: una validacion no debe duplicar el registro al reintentar.
     s.getRange(fila,markerColumn).setValue(CLAVE_(job.id));SpreadsheetApp.flush();
     s.getRange(fila,1,1,row.length).setValues([row]);SpreadsheetApp.flush();
+    if(operationReference)s.getRange(fila,operationColumn).setValue(operationReference);
   }
   PROCESAR_FILAS_V2_(s,fila,1,1,markerColumn-1,new Date());SpreadsheetApp.flush();
   const numero=s.getRange(fila,m['N°']).getValue(), nombre=s.getRange(fila,m['NOMBRE COMPLETO']).getValue(), doc=s.getRange(fila,m['NUMERO DE DOCUMENTO']).getValue();

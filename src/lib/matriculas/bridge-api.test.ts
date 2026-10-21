@@ -35,9 +35,10 @@ describe('authenticated Google enrollment bridge',()=>{
   });
   it('claims with a version check and returns only its assigned evidence IDs',async()=>{
     mocks.limit.mockResolvedValue({data:[{id,version:1,review_id:id,status:'ready',data:{...valid,sales_adviser:'FORGED'},sales_adviser:'ASHLEY'}],error:null});
-    mocks.single.mockResolvedValueOnce({data:{status:'validated',message_id:'voucher'},error:null}).mockResolvedValueOnce({data:{id,lease_token:'lease',data:valid,sales_adviser:'ASHLEY'},error:null});
+    mocks.single.mockResolvedValueOnce({data:{status:'validated',message_id:'voucher',operation_reference:'OP-000123'},error:null}).mockResolvedValueOnce({data:{id,lease_token:'lease',data:valid,sales_adviser:'ASHLEY'},error:null});
     const response=await claim(request({}));const job=(await response.json()).data.job;
-    expect(job.voucher_message_id).toBe('voucher');expect(job.sales_adviser).toBe('ASHLEY');expect(job.data.sales_adviser).toBeUndefined();
+    expect(job.voucher_message_id).toBe('voucher');expect(job.operation_reference).toBe('OP-000123');expect(job.sales_adviser).toBe('ASHLEY');expect(job.data.sales_adviser).toBeUndefined();
+    expect(mocks.select).toHaveBeenCalledWith('status,message_id,payment_purpose,operation_reference');
     expect(mocks.eq).toHaveBeenCalledWith('version',1);expect(mocks.update.mock.calls[0][0].status).toBe('processing');
   });
   it('does not guess attribution for a historical receipt without a snapshot',async()=>{

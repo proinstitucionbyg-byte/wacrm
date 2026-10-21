@@ -236,7 +236,7 @@ export function collectPaymentData(
     next.amount = Number(amount.replace(',', '.')).toFixed(2);
   const institution =
     typeof fields.institution === 'string' ? key(fields.institution) : '';
-  if (!next.payment_method && ['YAPE', 'PLIN'].includes(institution))
+  if (!next.payment_method && ['YAPE', 'PLIN', 'INTERBANK', 'BBVA', 'BCP'].includes(institution))
     next.payment_method = institution;
   const rawDate = typeof fields.date === 'string' ? key(fields.date) : '';
   const months = [
@@ -253,7 +253,9 @@ export function collectPaymentData(
     'NOV',
     'DIC',
   ];
-  let iso = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : '';
+  // Receipt OCR often includes the time (for example, "2026-10-20 20:50").
+  // Keep only its ISO calendar date; the full timestamp is not needed here.
+  let iso = rawDate.match(/^(\d{4}-\d{2}-\d{2})(?:[ T].*)?$/)?.[1] ?? '';
   const spanish = rawDate.match(
     /^(\d{1,2})\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)[A-Z]*\.?\s+(\d{4})(?:\s|$)/
   );

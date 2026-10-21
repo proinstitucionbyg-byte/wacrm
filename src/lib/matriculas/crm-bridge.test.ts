@@ -8,7 +8,7 @@ function setup() {
     context
   );
   runInContext(
-    "stored={CRM_BASE_URL:'https://crm.example',CRM_SYNC_KEY:'test'}; PropertiesService={getScriptProperties:function(){return {getProperty:function(k){return stored[k];},getProperties:function(){return stored;},setProperty:function(k,v){stored[k]=v;},deleteProperty:function(k){delete stored[k];}};}}; V2={admin:'admin'}; SpreadsheetApp={openById:function(){return {getSheetByName:function(){return null;}};}};",
+    "stored={CRM_BASE_URL:'https://crm.example',CRM_SYNC_KEY:'test'}; CLAVE_=function(v){return String(v||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');}; PropertiesService={getScriptProperties:function(){return {getProperty:function(k){return stored[k];},getProperties:function(){return stored;},setProperty:function(k,v){stored[k]=v;},deleteProperty:function(k){delete stored[k];}};}}; V2={admin:'admin'}; SpreadsheetApp={openById:function(){return {getSheetByName:function(){return null;}};}};",
     context
   );
   runInContext("C_SINCRONIZAR_CUADRO_=function(){};", context);
@@ -21,6 +21,12 @@ describe('puente Google CRM', () => {
     expect(Array.from(run('saved.values'))).toEqual(['ASHLY','INSTITUCION']);
     expect(Array.from(run('choices'))).toEqual(['ASHLY']);
     expect(run('saved.show')).toBe(true);
+  });
+  it('normalizes operation references and rejects a second enrollment row', () => {
+    const run=setup();
+    expect(run("C_OPERACION_DUPLICADA_([['OP 00123']],[['another-job']],' op00123 ','current-job')")).toBe(true);
+    expect(run("C_OPERACION_DUPLICADA_([['OP 00123']],[['current-job']],'OP00123','current-job')")).toBe(false);
+    expect(run("C_OPERACION_DUPLICADA_([['OP 00123']],[['another-job']],'','current-job')")).toBe(false);
   });
   it('does not replace an unrelated adviser validation rule', () => {
     const run = setup();

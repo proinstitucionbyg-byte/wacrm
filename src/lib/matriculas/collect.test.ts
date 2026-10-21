@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
+vi.mock('./paid-intake-handoff', () => ({ syncPaidEnrollmentHandoff: vi.fn() }));
 import { collectConversationEnrollments } from './collect';
+import { syncPaidEnrollmentHandoff } from './paid-intake-handoff';
 const from = vi.fn();
 const eq = vi.fn();
 const update = vi.fn();
@@ -46,6 +48,7 @@ beforeEach(() => {
     data: [{ id: 'text', content_text: 'correo: uno@gmail.com' }],
     error: null,
   });
+  vi.mocked(syncPaidEnrollmentHandoff).mockResolvedValue(undefined);
 });
 describe('scoped enrollment collection', () => {
   it('scopes reads and saves by account/version and includes data sent before the voucher', async () => {
@@ -57,6 +60,13 @@ describe('scoped enrollment collection', () => {
     expect(eq).toHaveBeenCalledWith('conversation_id', 'conversation');
     expect(eq).toHaveBeenCalledWith('version', 2);
     expect(gte).not.toHaveBeenCalled();
+    expect(syncPaidEnrollmentHandoff).toHaveBeenCalledWith(
+      db,
+      'account',
+      'conversation',
+      'draft',
+      expect.objectContaining({ email: 'uno@gmail.com' })
+    );
   });
   it('does not mix several simultaneous drafts', async () => {
     drafts = [{}, {}];
@@ -68,6 +78,7 @@ describe('scoped enrollment collection', () => {
     maybeSingle.mockResolvedValue({ data: { status: 'pending' }, error: null });
     await collectConversationEnrollments(db, 'account', 'conversation');
     expect(update).not.toHaveBeenCalled();
+    expect(syncPaidEnrollmentHandoff).not.toHaveBeenCalled();
   });
   it('collects only the explicitly chosen draft and its own payment', async () => {
     drafts = [

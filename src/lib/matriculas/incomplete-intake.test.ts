@@ -13,6 +13,7 @@ import {
   runIncompleteIntakes,
 } from './incomplete-intake';
 import { runAutomationById } from '@/lib/automations/engine';
+import { routeConversationToArea } from '@/lib/ai/handoff-routing';
 import { collectConversationEnrollments } from './collect';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const H = 3600000,
@@ -202,6 +203,7 @@ function fixture(override: Record<string, Result[]> = {}) {
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(clock);
   vi.mocked(runAutomationById).mockClear().mockResolvedValue(true);
+  vi.mocked(routeConversationToArea).mockClear().mockResolvedValue({ agentId: null });
   vi.mocked(collectConversationEnrollments).mockClear();
 });
 describe('cola real de registro incompleto', () => {
@@ -209,6 +211,8 @@ describe('cola real de registro incompleto', () => {
     const state = fixture();
     await runIncompleteIntakes(state.db);
     expect(collectConversationEnrollments).toHaveBeenCalledWith(state.db, 'account', 'chat', 'draft');
+    // The collector owns the paid-student handoff; this job only sends the reserved welcome block.
+    expect(routeConversationToArea).not.toHaveBeenCalled();
     expect(runAutomationById).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: 'account',

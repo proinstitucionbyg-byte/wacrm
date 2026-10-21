@@ -27,6 +27,8 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [recipients,setRecipients]=useState<{user_id:string;full_name:string|null;nickname:string|null;area:string|null}[]>([]);
   const [selectedRecipients,setSelectedRecipients]=useState<string[]>([]);
+  const [choosingRecipients,setChoosingRecipients]=useState(false);
+  const [recipientSearch,setRecipientSearch]=useState('');
   const [body, setBody] = useState('');
   const [drafts, setDrafts] = useState<ReminderDraft[]>([]);
   const [dueLocal, setDueLocal] = useState('');
@@ -223,7 +225,27 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
             <button type="button" onClick={() => setTeamView(true)} aria-pressed={teamView}
               className={`rounded-md border px-3 py-1 text-sm ${teamView ? 'border-sky-500 text-sky-400' : 'border-border'}`}>Todo el equipo</button>
           </div>}
-          <label className="block text-sm">¿Para quien es el recordatorio?<select multiple value={selectedRecipients} onChange={event=>setSelectedRecipients(Array.from(event.target.selectedOptions,option=>option.value))} className="mt-1 max-h-32 w-full rounded-md border border-border bg-background p-2">{recipients.map(person=><option key={person.user_id} value={person.user_id}>{person.nickname||person.full_name||'Integrante'}{person.user_id===currentUserId?' (yo)':''}{person.area?' — '+person.area:''}</option>)}</select><span className="text-xs text-muted-foreground">Sin seleccionar personas: solo para mi. Puedes elegir varios integrantes.</span></label>
+          <fieldset className="min-w-0 space-y-3 rounded-xl border border-border p-3">
+            <legend className="px-1 text-sm font-medium">¿Para quién es el recordatorio?</legend>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" aria-pressed={!selectedRecipients.length&&!choosingRecipients} onClick={()=>{setSelectedRecipients([]);setChoosingRecipients(false);}} className="rounded-lg border border-border px-3 py-2 text-xs aria-pressed:border-primary aria-pressed:bg-primary/10 aria-pressed:text-primary">Solo para mí</button>
+              <button type="button" aria-pressed={choosingRecipients} onClick={()=>setChoosingRecipients(value=>!value)} className="rounded-lg border border-border px-3 py-2 text-xs aria-pressed:border-primary aria-pressed:bg-primary/10 aria-pressed:text-primary">Elegir personas</button>
+              <button type="button" disabled={!recipients.length||recipients.length>50} aria-pressed={recipients.length>0&&selectedRecipients.length===recipients.length} onClick={()=>{setSelectedRecipients(recipients.map(person=>person.user_id));setChoosingRecipients(false);}} className="rounded-lg border border-border px-3 py-2 text-xs aria-pressed:border-primary aria-pressed:bg-primary/10 aria-pressed:text-primary disabled:opacity-50">Todo el equipo</button>
+            </div>
+            <p className="text-xs text-muted-foreground" aria-live="polite">{!selectedRecipients.length?'Destino: solo tú.':`Destino: ${selectedRecipients.length} ${selectedRecipients.length===1?'persona':'personas'}. Cada una recibe su propio aviso.`}</p>
+            {selectedRecipients.length>0&&<div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">{recipients.filter(person=>selectedRecipients.includes(person.user_id)).map(person=><button type="button" key={person.user_id} onClick={()=>setSelectedRecipients(current=>current.filter(id=>id!==person.user_id))} aria-label={`Quitar a ${person.nickname||person.full_name||'Integrante'}`} className="max-w-full rounded-md bg-muted px-2 py-1 text-xs text-foreground"><span className="break-words">{person.nickname||person.full_name||'Integrante'}{person.user_id===currentUserId?' (yo)':''} ×</span></button>)}</div>}
+            {choosingRecipients&&<div className="space-y-2">
+              <input aria-label="Buscar destinatarios" value={recipientSearch} onChange={event=>setRecipientSearch(event.target.value)} placeholder="Buscar por nombre o área" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"/>
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
+                {recipients.filter(person=>`${person.nickname||''} ${person.full_name||''} ${person.area||''}`.toLocaleLowerCase('es').includes(recipientSearch.toLocaleLowerCase('es'))).map(person=><label key={person.user_id} className="flex cursor-pointer items-center gap-3 border-b border-border p-3 last:border-b-0 hover:bg-muted/50">
+                  <input type="checkbox" checked={selectedRecipients.includes(person.user_id)} disabled={!selectedRecipients.includes(person.user_id)&&selectedRecipients.length>=50} onChange={event=>setSelectedRecipients(current=>event.target.checked?[...current,person.user_id]:current.filter(id=>id!==person.user_id))} className="h-4 w-4 shrink-0 accent-primary"/>
+                  <span className="min-w-0"><span className="block break-words text-sm">{person.nickname||person.full_name||'Integrante'}{person.user_id===currentUserId?' (yo)':''}</span><span className="block text-xs text-muted-foreground">{person.area||'Sin área'}</span></span>
+                </label>)}
+                {!recipients.some(person=>`${person.nickname||''} ${person.full_name||''} ${person.area||''}`.toLocaleLowerCase('es').includes(recipientSearch.toLocaleLowerCase('es')))&&<p className="p-3 text-xs text-muted-foreground">No se encontraron personas.</p>}
+              </div>
+              <button type="button" onClick={()=>setChoosingRecipients(false)} className="text-sm font-medium text-primary">Listo, cerrar selección</button>
+            </div>}
+          </fieldset>
           <label className="block text-sm">¿Qué quieres recordar?
             <textarea value={body} onChange={event => updateBody(event.target.value)} rows={3} maxLength={10000}
               placeholder="Recuérdame mañana a las 3 de la tarde llamar al estudiante"

@@ -62,17 +62,17 @@ export function incompleteIntakeText(
   const fields = missingWrittenFields(data);
   const introduction =
     phase === 'provisional'
-      ? 'Recibimos la validación de tu pago. Todavía necesitamos completar tu registro para emitir tu boleta, cronograma de pagos y ficha de matrícula. El equipo de ventas te acompañará con este trámite.'
+      ? 'Recibimos la validación de tu pago. Todavía necesitamos completar tu registro para emitir tu boleta, cronograma de pagos y ficha de matrícula. El equipo de fidelización te acompañará con este trámite.'
       : phase === 'intake_followup'
         ? 'Queremos ayudarte a completar tu matrícula. Tus documentos siguen pendientes de completar el registro.'
-        : 'Antes de que termine nuestra ventana de atención, déjanos los datos pendientes y confirma tu celular y correo para que ventas pueda continuar ayudándote.';
+        : 'Antes de que termine nuestra ventana de atención, déjanos los datos pendientes y confirma tu celular y correo para que fidelización pueda continuar ayudándote.';
   return (
     introduction +
     '\n\n' +
     (fields.length
       ? 'Por favor envíanos:\n' + fields.map((field) => '• ' + field).join('\n')
       : 'Estamos revisando la información recibida para completar tus documentos. Si detectamos alguna diferencia, te pediremos aclararla.') +
-    '\n\nSi perdiste tu documento, puedes escribir tus datos y su número; conservaremos el pantallazo como respaldo. Si tampoco recuerdas el número, indícanoslo para que ventas te ayude. No completaremos datos por ti.'
+    '\n\nSi perdiste tu documento, puedes escribir tus datos y su número; conservaremos el pantallazo como respaldo. Si tampoco recuerdas el número, indícanoslo para que fidelización te ayude. No completaremos datos por ti.'
   );
 }
 
@@ -167,14 +167,14 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
     const recipients = (profiles ?? []).filter(
       (p) =>
         ['owner', 'admin'].includes(p.account_role) ||
-        p.area?.trim().toUpperCase() === 'VENTAS'
+        p.area?.trim().toUpperCase() === 'FIDELIZACION'
     );
     const owner = profiles?.find((p) => p.account_role === 'owner');
     if (!owner) continue;
     const body =
       'PAGO VALIDADO · DATOS PENDIENTES · DOCUMENTOS NO EMITIDOS\n' +
       fidelityReviewTasks(draft.data).join('\n') +
-      '\nVENTAS DEBE COMPLETAR EL REGISTRO; DESPUES DEL ALTA, FIDELIZACION GESTIONARA EL ACCESO A CLASE CON UN ENLACE VERIFICADO. NO INVENTAR EL ENLACE.\nPLAZO DE BIENVENIDA: ' +
+      '\nFIDELIZACION DEBE COMPLETAR EL REGISTRO; DESPUES DEL ALTA, GESTIONARA EL ACCESO A CLASE CON UN ENLACE VERIFICADO. NO INVENTAR EL ENLACE.\nPLAZO DE BIENVENIDA: ' +
       new Date(watch.welcome_due_at).toLocaleString('es-PE', {
         timeZone: 'America/Lima',
       });
@@ -187,7 +187,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
         title: 'PAGO VALIDADO · DATOS PENDIENTES',
         body,
         target_url: '/inbox?c=' + watch.conversation_id,
-        dedup_key: 'incomplete:' + watch.enrollment_id,
+        dedup_key: 'paid-intake-incomplete:' + watch.enrollment_id,
       })),
       { onConflict: 'account_id,user_id,dedup_key', ignoreDuplicates: true }
     );
@@ -200,7 +200,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
           type: 'system_notice',
           conversation_id: watch.conversation_id,
           title: 'VENTANA CERRADA · DATOS PENDIENTES',
-          body: 'NO SE ENVIARON MENSAJES LIBRES FUERA DE LA VENTANA. VENTAS DEBE CONTINUAR POR UN MEDIO AUTORIZADO O UNA PLANTILLA CONFIGURADA. EL EXPEDIENTE SIGUE PENDIENTE.',
+          body: 'NO SE ENVIARON MENSAJES LIBRES FUERA DE LA VENTANA. FIDELIZACION DEBE CONTINUAR POR UN MEDIO AUTORIZADO O UNA PLANTILLA CONFIGURADA. EL EXPEDIENTE SIGUE PENDIENTE.',
           target_url: '/inbox?c=' + watch.conversation_id,
           dedup_key: 'incomplete-window:' + watch.enrollment_id,
         })),
@@ -213,7 +213,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
         db,
         watch.account_id,
         watch.conversation_id,
-        'ventas'
+        'fidelizacion'
       );
       const { data: blocks, error: blockError } = await db
         .from('automations')

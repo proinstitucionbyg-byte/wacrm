@@ -167,6 +167,12 @@ function INSTALAR_MATRICULAS_V2() {
       ['ANTONELLA', '18:00', '22:00', '', '', 'SI', '', '', ''],
     ]);
     LISTA_(asesoras, 6, ['SI', 'NO']);
+    const asesorasActivas = asesoras.getLastRow() > 1
+      ? asesoras.getRange(2, 1, asesoras.getLastRow() - 1, 6).getValues()
+          .filter(function (r) { return CLAVE_(r[5]) === 'SI' && TEXTO_(r[0]); })
+          .map(function (r) { return CLAVE_(r[0]); })
+      : [];
+    LISTA_(s, m['ASESORA DE VTAS.'], ['INSTITUCION'].concat(asesorasActivas));
     if (!ss.getSheetByName('CUADRO DE INICIOS')) CREAR_TABLA_(ss, 'CUADRO DE INICIOS', ['ID DE INICIO', 'CURSO', 'MODULO', 'FECHA DE INICIO', 'ACTIVO'], []);
     else TABLA_('CUADRO DE INICIOS');
     const validaciones = CREAR_TABLA_(ss, 'VALIDACIONES', ['N°', 'DECISION', 'OBSERVACION', 'DNI ARCHIVO ID', 'VOUCHER ARCHIVO ID', 'BOLETA ARCHIVO ID', 'CRONOGRAMA ARCHIVO ID', 'FICHA ARCHIVO ID'], []);
@@ -275,8 +281,8 @@ function PROCESAR_FILAS_V2_(s, desde, cantidad, c1, c2, ahora) {
     const alta = Number(opciones['PRIORIDAD ALTA DIAS']), media = Number(opciones['PRIORIDAD MEDIA DIAS']);
     if (!Number.isFinite(alta) || !Number.isFinite(media) || alta < 0 || media < alta) throw new Error('UMBRAL DE PRIORIDAD INVALIDO');
     put('PRIORIDAD', PRIORIDAD_(get('FECHA DE INICIO'), ahora, alta, media));
-    const realizado = get('AGREGADOS AL WHATSAPP') === true || ['SI', 'AGREGADO', 'REALIZADO'].indexOf(CLAVE_(get('AGREGADOS AL WHATSAPP'))) !== -1;
-    if (realizado) put('ESTADO', 'REALIZADO'); else if (!get('ESTADO') || CLAVE_(get('ESTADO')) === 'REALIZADO') put('ESTADO', 'NO REALIZADO');
+    // ESTADO (columna W) registra el contacto realizado por la asesora.
+    // No se deriva de AGREGADOS AL WHATSAPP: la asesora decide ese valor.
     if (!get('ASESORA DE INGRESO')) {
       const elegida = ELEGIR_ASESORA_(get('FECHA DE HOY'), get('HORA'), reglas, conteos, opciones['FUERA DE HORARIO']);
       if (elegida) { put('ASESORA DE INGRESO', elegida); const key = DIA_(get('FECHA DE HOY')) + '|' + elegida; conteos[key] = (conteos[key] || 0) + 1; }

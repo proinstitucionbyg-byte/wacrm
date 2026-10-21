@@ -241,6 +241,13 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(systemPrompt).toContain('Returns accepted within 30 days.')
   })
 
+  it('requests DNI or carné de extranjería without listing passport as a requested substitute', async () => {
+    await dispatchInboundToAiReply(ARGS)
+    const systemPrompt = h.generateReply.mock.calls[0][0].systemPrompt as string
+    expect(systemPrompt).toContain('NOMBRE COMPLETO, DNI o CARNE DE EXTRANJERIA y CORREO ELECTRONICO')
+    expect(systemPrompt).not.toContain('DNI o CARNE DE EXTRANJERIA o PASAPORTE')
+  })
+
   it('does not block AI merely because an unrelated automation exists', async () => {
     h.state.autoResponders = [{ id: 'auto-1' }]
     await dispatchInboundToAiReply(ARGS)

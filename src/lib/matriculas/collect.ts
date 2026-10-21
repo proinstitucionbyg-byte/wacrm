@@ -7,6 +7,7 @@ import {
 import { prepareAutomaticIntake, type IntakeEvidence } from './auto-intake';
 import { loadAcademicCalendar } from './calendar';
 import { enrollmentIssues } from './enrollment';
+import { syncPaidEnrollmentHandoff } from './paid-intake-handoff';
 
 /** Only queues a complete, consistent intake after human payment validation. */
 export async function collectConversationEnrollments(
@@ -68,13 +69,15 @@ export async function collectConversationEnrollments(
       review.created_at
     );
   const ready = enrollmentIssues(next).length === 0;
-  if (!ready && JSON.stringify(next) === JSON.stringify(draft.data)) return;
-  const { error: saveError } = await db
-    .from('enrollment_drafts')
-    .update({ data: next, ...(ready ? { status: 'ready', error: null } : {}) })
-    .eq('id', draft.id)
-    .eq('account_id', accountId)
-    .eq('status', 'collecting')
-    .eq('version', draft.version);
-  if (saveError) throw saveError;
+  if (ready || JSON.stringify(next) !== JSON.stringify(draft.data)) {
+    const { error: saveError } = await db
+      .from('enrollment_drafts')
+      .update({ data: next, ...(ready ? { status: 'ready', error: null } : {}) })
+      .eq('id', draft.id)
+      .eq('account_id', accountId)
+      .eq('status', 'collecting')
+      .eq('version', draft.version);
+    if (saveError) throw saveError;
+  }
+  await syncPaidEnrollmentHandoff(db, accountId, conversationId, draft.id, next);
 }

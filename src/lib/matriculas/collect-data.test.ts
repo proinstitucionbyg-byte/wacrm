@@ -244,6 +244,11 @@ describe('deterministic chat intake', () => {
       payment_method: 'YAPE',
     });
   });
+  it('keeps the date from an ISO receipt timestamp and recognizes bank transfers', () => {
+    expect(collectPaymentData({}, {
+      amount: '19.90', date: '2026-10-20 20:50', institution: 'Interbank',
+    })).toEqual({ amount: '19.90', payment_date: '2026-10-20', payment_method: 'INTERBANK' });
+  });
   it('does not invent invalid or ambiguous receipt fields and preserves corrections', () => {
     expect(
       collectPaymentData(

@@ -20,8 +20,8 @@ describe('idle follow-up eligibility', () => {
     expect(canFollowUpAfterLastMessage('bot', '¿Qué curso te interesa?')).toBe(true)
   })
 
-  it('resumes after adviser inactivity using the shared ten-minute window', () => {
-    expect(HUMAN_PAUSE_MS).toBe(10 * 60 * 1000)
+  it('uses a five-minute human pause while student idle follow-up remains ten minutes', () => {
+    expect(HUMAN_PAUSE_MS).toBe(5 * 60 * 1000)
     expect(canFollowUpAfterLastMessage('agent', '¿Qué curso te interesa?')).toBe(true)
     expect(canFollowUpAfterLastMessage('bot', 'Gracias por escribirnos.')).toBe(false)
   })

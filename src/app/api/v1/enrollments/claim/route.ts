@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       if (!cleanData || enrollmentIssues(cleanData).length) continue;
       const { data: review, error: reviewError } = await ctx.supabase
         .from('payment_reviews')
-        .select('status,message_id,payment_purpose')
+        .select('status,message_id,payment_purpose,operation_reference')
         .eq('id', row.review_id)
         .eq('account_id', ctx.accountId)
         .maybeSingle();
@@ -55,7 +55,12 @@ export async function POST(request: Request) {
       if (claimError) throw claimError;
       if (claimed)
         return ok({
-          job: { ...claimed, data: cleanData, voucher_message_id: voucherId },
+          job: {
+            ...claimed,
+            data: cleanData,
+            voucher_message_id: voucherId,
+            operation_reference: review.operation_reference,
+          },
         });
     }
     return ok({ job: null });
