@@ -498,6 +498,21 @@ export async function resumePendingExecution(pending: {
     if (pending.context.payment_resume_previous === true) {
       const previousId = pending.context.payment_resume_pending_id
       if (!previousId) {
+        let nextStepQuery = db.from('automation_steps').select('id')
+          .eq('automation_id', pending.automation_id)
+        if (pending.parent_step_id) nextStepQuery = nextStepQuery.eq('parent_step_id', pending.parent_step_id)
+        else nextStepQuery = nextStepQuery.is('parent_step_id', null)
+        if (pending.branch) nextStepQuery = nextStepQuery.eq('branch', pending.branch)
+        else nextStepQuery = nextStepQuery.is('branch', null)
+        nextStepQuery = nextStepQuery.gte('position', pending.next_step_position)
+        const endPosition = pending.context.automation_step_end_by_id?.[pending.automation_id]
+        if (typeof endPosition === 'number') nextStepQuery = nextStepQuery.lte('position', endPosition)
+        const { data: nextSteps, error: nextStepError } = await nextStepQuery.limit(1)
+        if (!nextStepError && !nextSteps?.length) {
+          await finalizeLog(pending.log_id, 'success', null)
+          await markPending(pending.id, 'done')
+          return
+        }
         await finalizeLog(pending.log_id, 'failed', 'No hay bloque anterior guardado para retomar')
         await markPending(pending.id, 'failed')
         return

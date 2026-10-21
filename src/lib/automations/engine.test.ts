@@ -291,6 +291,19 @@ describe('WhatsApp delivery order', () => {
     expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'pending',run_at:expect.any(String)}))
     expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'done'}))
   })
+  it('finishes the payment sequence when its final wait has no saved course or later block', async () => {
+    h.state.automations = [{...automationWithUpdateStep(),id:'payment',name:'YAPE O PLIN'}]
+    h.state.conversationState = {automation_enabled:true,last_human_message_at:null}
+    h.state.stepsByAutomationId.payment = Array.from({length:9},(_,position)=>({
+      id:`payment-${position}`,automation_id:'payment',parent_step_id:null,branch:null,position,
+      step_type:position===8?'wait':'send_message',step_config:{},
+    }))
+    await resumePendingExecution({id:'payment-final',automation_id:'payment',account_id:ACCOUNT,user_id:'u1',
+      contact_id:'c1',log_id:'payment-log',parent_step_id:null,branch:null,next_step_position:9,
+      context:{conversation_id:'chat',payment_activation_at:new Date().toISOString(),payment_resume_previous:true}})
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'done'}))
+    expect(h.state.logAutomationIds).toEqual([])
+  })
   it('keeps the exact interrupted course wait when starting the payment flow', async () => {
     h.state.owned = {id:'c1'}
     h.state.automations = [
