@@ -88,13 +88,13 @@ interface ReplyDraft {
 
 // Mirrors the chat-media bucket's allowed_mime_types (migration 023) for
 // the file picker so unsupported files are rejected before upload rather
-// than failing with a confusing Storage error. Audio has no picker — it's
-// captured via the recorder.
-const PICKER_ACCEPT: Record<'image' | 'video' | 'document', string> = {
+// than failing with a confusing Storage error.
+const PICKER_ACCEPT: Record<'image' | 'video' | 'document' | 'audio', string> = {
   image: 'image/png,image/jpeg,image/webp',
   video: 'video/mp4,video/3gpp',
   document:
     'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain',
+  audio: 'audio/ogg,audio/mpeg,audio/aac,audio/mp4,audio/amr',
 };
 
 interface MediaDraft {
@@ -197,6 +197,7 @@ export function MessageComposer({
   const [draft, setDraft] = useState<MediaDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   // Mirror of `draft` for the unmount cleanup, which can't read render
@@ -483,7 +484,7 @@ export function MessageComposer({
   );
 
   const handlePicked = useCallback(
-    (kind: 'image' | 'video' | 'document', file: File | undefined) => {
+    (kind: ComposerMediaKind, file: File | undefined) => {
       if (file) void stageUpload(kind, file);
     },
     [stageUpload]
@@ -500,7 +501,7 @@ export function MessageComposer({
       if (event.dataTransfer.files.length !== 1) { toast.error('Adjunta un archivo cada vez.'); return; }
       const file = event.dataTransfer.files[0];
       const kind = (Object.keys(PICKER_ACCEPT) as Array<keyof typeof PICKER_ACCEPT>).find((candidate) => PICKER_ACCEPT[candidate].split(',').includes(file.type));
-      if (!kind) { toast.error('Formato no compatible. Usa una imagen, video, PDF o documento de Office.'); return; }
+      if (!kind) { toast.error('Formato no compatible. Usa imagen, video, audio, PDF o documento de Office.'); return; }
       void stageUpload(kind, file);
     };
     window.addEventListener('dragover', over);
@@ -727,6 +728,16 @@ export function MessageComposer({
           e.target.value = '';
         }}
       />
+      <input
+        ref={audioInputRef}
+        type="file"
+        accept={PICKER_ACCEPT.audio}
+        className="hidden"
+        onChange={(e) => {
+          handlePicked('audio', e.target.files?.[0]);
+          e.target.value = '';
+        }}
+      />
 
       {selectedBlock && text === `MANDAR(${selectedBlock.name})` && (
         <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-border bg-secondary/70 px-3 py-2 text-xs">
@@ -816,9 +827,9 @@ export function MessageComposer({
                 <FileText className="mr-2 h-4 w-4" />
                 {t('document')}
               </DropdownMenuItem>
-              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => void startRecording()}>
+              <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => audioInputRef.current?.click()}>
                 <Mic className="mr-2 h-4 w-4" />
-                {t('voiceNote')}
+                Adjuntar audio
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -916,6 +927,17 @@ export function MessageComposer({
               (sessionExpired || readOnly) && 'cursor-not-allowed opacity-50'
             )}
           />
+
+          <button
+            type="button"
+            aria-label={t('voiceNote')}
+            title={t('voiceNote')}
+            disabled={inputsDisabled || busy}
+            onClick={() => void startRecording()}
+            className="text-muted-foreground hover:text-foreground inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Mic className="h-5 w-5" />
+          </button>
 
           <GatedButton
             size="sm"
