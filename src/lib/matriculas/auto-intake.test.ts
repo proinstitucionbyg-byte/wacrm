@@ -43,6 +43,25 @@ describe('automatic intake from compared evidence and official dates',()=>{
     const latestAudio={...latestText,id:'latest-audio',created_at:'2026-10-20T10:03:00Z'};
     expect(prepareAutomaticIntake(data,[oldQuote,latestText,latestAudio],calendar,'2026-10-20T10:05:00Z')).toMatchObject({offer_confirmed:true,prices:[19.9,49.9,49.9,49.9,49.9,49.9]});
   });
+  it('uses the latest payment-promotion image path when its caption is generic',()=>{
+    const oldQuote={...evidence[2],created_at:'2026-10-18T20:40:00Z'};
+    const latestImage: IntakeEvidence={
+      id:'latest-payment-image',sender_type:'bot',created_at:'2026-10-19T13:47:00Z',
+      content_text:'TU FORMACION ESTA A SOLO 3 PASOS',
+      media_url:'https://example.supabase.co/storage/v1/object/public/media/IMAGENES/CUOTAS%20Y%20PAGOS/PROMO%2049.90/pasos-49.png',
+    };
+    expect(prepareAutomaticIntake(data,[oldQuote,latestImage],calendar,'2026-10-20T06:43:28Z')).toMatchObject({
+      offer_confirmed:true,prices:[19.9,49.9,49.9,49.9,49.9,49.9],
+    });
+  });
+  it('does not infer a promotion from an unrelated media filename',()=>{
+    const unrelated: IntakeEvidence={
+      id:'unrelated',sender_type:'bot',created_at:'2026-10-19T13:47:00Z',
+      content_text:'TU FORMACION ESTA A SOLO 3 PASOS',
+      media_url:'https://example.org/imagenes/general/archivo-49.90.png',
+    };
+    expect(prepareAutomaticIntake(data,[unrelated],calendar,'2026-10-20T06:43:28Z').offer_confirmed).not.toBe(true);
+  });
   it('compares written and photographed data and freezes the written offer',()=>{
     expect(prepareAutomaticIntake(data,evidence,calendar,'2026-10-09T12:00:00Z')).toMatchObject({identity_confirmed:true,offer_confirmed:true,prices:[19.9,79.9,79.9,79.9,79.9,79.9],start_date:'2026-10-06'});
   });

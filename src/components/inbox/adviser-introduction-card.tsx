@@ -36,19 +36,19 @@ export function AdviserIntroductionCard({
 
   if (dismissed) {
     return (
-      <Button type="button" variant="ghost" size="sm" className="mb-2" onClick={() => setDismissed(false)} disabled={disabled}>
+      <Button type="button" variant="ghost" size="sm" className="mb-1 h-7 px-2 text-xs sm:mb-2 sm:h-8 sm:text-sm" onClick={() => setDismissed(false)} disabled={disabled}>
         Preparar mi presentación
       </Button>
     );
   }
 
   return (
-    <section className="mb-3 rounded-lg border border-primary/25 bg-primary/5 p-3" aria-label="Presentación de la asesora">
+    <section className="mb-1 rounded-md border border-primary/25 bg-primary/5 p-2 sm:mb-3 sm:rounded-lg sm:p-3" aria-label="Presentación de la asesora">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium">Tu presentación · {adviser.name}</p>
-        <Button type="button" variant="ghost" size="sm" onClick={dismiss}>Cerrar</Button>
+        <p className="text-xs font-medium sm:text-sm">Tu presentación · {adviser.name}</p>
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs sm:h-8 sm:text-sm" onClick={dismiss}>Cerrar</Button>
       </div>
-      <label className="mt-2 block text-xs">
+      <label className="mt-1 block text-[11px] sm:mt-2 sm:text-xs">
         Área de atención
         <input
           value={area}
@@ -56,18 +56,18 @@ export function AdviserIntroductionCard({
           placeholder="Ventas, fidelización, administración…"
           maxLength={80}
           disabled={disabled}
-          className="mt-1 block w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          className="mt-1 block h-8 w-full rounded-md border bg-background px-2 py-1 text-xs sm:h-auto sm:py-1.5 sm:text-sm"
         />
       </label>
-      <p className="mt-2 text-sm">{preview ?? "Indica tu área para preparar la presentación."}</p>
-      <p className="mt-2 text-xs text-muted-foreground">
+      <p className="mt-1 text-xs sm:mt-2 sm:text-sm">{preview ?? "Indica tu área para preparar la presentación."}</p>
+      <p className="mt-1 hidden text-xs text-muted-foreground sm:mt-2 sm:block">
         {hasDraft ? "Ya tienes un borrador. Envíalo o bórralo antes de usar esta presentación." : "Podrás editarla antes de pulsar Enviar o Enter. No se envía automáticamente."}
       </p>
       <Button
         type="button"
         variant="outline"
         size="sm"
-        className="mt-2"
+        className="mt-1 h-7 px-2 text-xs sm:mt-2 sm:h-8 sm:text-sm"
         disabled={disabled || hasDraft || !preview}
         onClick={() => {
           if (disabled || hasDraft || !preview) return;

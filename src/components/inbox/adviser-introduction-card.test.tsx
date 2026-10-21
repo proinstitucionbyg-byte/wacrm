@@ -32,4 +32,12 @@ describe("tarjeta de presentación", () => {
     expect(html).toContain("Indica tu área");
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Usar presentación<\/button>/);
   });
+
+  it("usa medidas compactas en celular y conserva el tamaño de escritorio", () => {
+    const html = renderToStaticMarkup(<AdviserIntroductionCard storageKey="test-intro" adviser={{ name: "Ashley", area: "VENTAS" }} disabled={false} hasDraft={false} onUse={vi.fn()} />);
+    expect(html).toContain("mb-1 rounded-md");
+    expect(html).toContain("sm:mb-3");
+    expect(html).toContain("hidden text-xs");
+    expect(html).toContain("sm:block");
+  });
 });

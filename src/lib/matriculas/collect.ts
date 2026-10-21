@@ -44,7 +44,7 @@ export async function collectConversationEnrollments(
   const { data: messages, error: messageError } = await db
     .from('messages')
     .select(
-      'id,content_text,image_analysis,sender_type,ai_generated,created_at'
+      'id,content_text,media_url,image_analysis,sender_type,ai_generated,created_at'
     )
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })

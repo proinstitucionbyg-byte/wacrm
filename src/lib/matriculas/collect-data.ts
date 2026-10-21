@@ -4,6 +4,7 @@ import { isGuardianMessage } from './identity-evidence';
 export interface IntakeMessage {
   id: string;
   content_text: string | null;
+  media_url?: string | null;
   created_at?: string;
   image_analysis?: {
     category?: string;

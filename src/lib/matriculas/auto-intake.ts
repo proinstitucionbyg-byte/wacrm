@@ -9,6 +9,17 @@ const sameName = (left: string, right: string) => {
   const words = (value: string) => key(value).replace(/[.,]/g, ' ').replace(/\s+/g, ' ').split(' ').sort().join(' ');
   return words(left) === words(right);
 };
+const paymentPromotionFromMediaUrl = (value: string | null | undefined) => {
+  if (!value) return null;
+  let decoded = value;
+  try { decoded = decodeURIComponent(value); } catch { /* malformed URLs are ignored below */ }
+  const match = key(decoded).match(/\/IMAGENES\/CUOTAS Y PAGOS\/PROMO (\d+(?:[.,]\d{1,2})?)\//);
+  if (!match) return null;
+  const monthly = Number(match[1].replace(',', '.'));
+  return Number.isFinite(monthly) && monthly > 0
+    ? [19.9, ...Array(5).fill(monthly)]
+    : null;
+};
 /** Matching written identifiers to the photo is not payment validation. The caller requires the CEO's payment decision first. */
 export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvidence[], calendar: AcademicModule[], receivedAt: string): EnrollmentData {
   const next = { ...data };
@@ -53,11 +64,13 @@ export function prepareAutomaticIntake(data: EnrollmentData, messages: IntakeEvi
   if (!next.offer_confirmed && next.course) {
     const quotes = messages.filter((message) => message.sender_type === 'bot' && message.ai_generated !== true && message.created_at && message.created_at <= receivedAt).map((message) => {
       const text = key(message.content_text ?? '').replace(/\\N/g, '\n').replace(/~[^~]*~/g, '').replace(/[*_]/g, '');
+      const mediaPrices = paymentPromotionFromMediaUrl(message.media_url);
       return {
       createdAt: Date.parse(message.created_at!),
       text,
-      prices: quotedOfferPrices(text),
-    }}).filter((entry) => Number.isFinite(entry.createdAt) && entry.prices && courseKey(entry.text) === courseKey(next.course!));
+      prices: mediaPrices ?? quotedOfferPrices(text),
+      belongsToCourse: Boolean(mediaPrices) || courseKey(text) === courseKey(next.course!),
+    }}).filter((entry) => Number.isFinite(entry.createdAt) && entry.prices && entry.belongsToCourse);
     const latestQuoteAt = Math.max(...quotes.map((entry) => entry.createdAt));
     const prices = new Map<string, number[]>();
     // Compare the text/audio belonging to the latest promotion block. Older
