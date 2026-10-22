@@ -10,6 +10,7 @@ import { isBsuid } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { resumeDeliveredMessage, runAutomationsForTrigger } from '@/lib/automations/engine'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
+import { isExplicitSalesDecline } from '@/lib/ai/sales-decline'
 import { canAutoReplyToInboundImage } from '@/lib/ai/inbound-image-routing'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
@@ -838,7 +839,24 @@ const lastHuman = conversation.last_human_message_at
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
 const inboundText = inboundRoutingText(contentText ?? message.text?.body ?? null, audioTranscript)
 const automatedInbound = isLikelyAutomatedInbound(inboundText)
-const allAutomaticRepliesDisabled = conversation.ai_enabled === false && conversation.automation_enabled === false
+const salesDeclined = !automatedInbound && isExplicitSalesDecline(inboundText)
+if (salesDeclined) {
+  const db = supabaseAdmin()
+  const { error: disableError } = await db.from('conversations')
+    .update({ ai_enabled: false, automation_enabled: false, automation_disabled_at: new Date().toISOString() })
+    .eq('id', conversation.id).eq('account_id', accountId)
+  if (disableError) throw disableError
+  // Keep each course position for audit, but never resume a sales wait after
+  // the student has explicitly declined. Enrollment welcomes are independent.
+  const { error: cancelError } = await db.from('automation_pending_executions')
+    .update({ status: 'cancelled' })
+    .eq('account_id', accountId).eq('contact_id', contactRecord.id)
+    .eq('status', 'pending')
+    .is('context->>enrollment_sequence_id', null)
+    .is('context->>manual_agent_id', null)
+  if (cancelError) throw cancelError
+}
+const allAutomaticRepliesDisabled = salesDeclined || (conversation.ai_enabled === false && conversation.automation_enabled === false)
 
 const followupReplyHandled = !allAutomaticRepliesDisabled && interactiveReplyId
   ? await handleIdleFollowupReply({
@@ -861,7 +879,7 @@ if (!allAutomaticRepliesDisabled && !automatedInbound && !teacherHandled && !hum
   await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
 }
 const automationPaused =
-  conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
+  salesDeclined || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
   let automationMatched = false
   let flowConsumed = automatedInbound || followupReplyHandled || teacherHandled
 
@@ -943,6 +961,7 @@ for (const triggerType of automationTriggers) {
   // eligibility gates + try/catch and never throws.
   if (
   conversation.ai_enabled !== false &&
+  !salesDeclined &&
   !humanRecentlyActive &&
   !flowConsumed &&
     !automationMatched &&
