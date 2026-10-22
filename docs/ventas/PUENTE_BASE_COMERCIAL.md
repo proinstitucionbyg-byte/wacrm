@@ -11,7 +11,7 @@ Orden de captura: A consecutivo, B nombre, C teléfono/usuario/ID externo, D cur
 
 ## Activación
 
-1. Desplegar el código WACRM que agrega `/api/v1/sales/leads`.
+1. El endpoint `/api/v1/sales/leads` ya está publicado. Se verificó en producción: sin llave devuelve `401 Missing or invalid API key`, como debe.
 2. En WACRM, crear una llave API restringida al permiso `contacts:read`. No usar una llave con permisos de escritura, pagos o mensajes.
 3. En la hoja, abrir **Extensiones → Apps Script** y pegar el contenido de `VENTAS_BASE_CRM_SYNC.gs`.
 4. En Apps Script, abrir **Configuración del proyecto → Propiedades de secuencia de comandos** y guardar:
@@ -22,7 +22,7 @@ Orden de captura: A consecutivo, B nombre, C teléfono/usuario/ID externo, D cur
 
 ## Límites verificados
 
-- La sincronización es CRM → hoja y solo lectura. Cambiar la columna Estado comercial no cambia etiquetas del CRM todavía.
+- La sincronización es CRM → hoja y solo lectura. Cambiar la columna Estado comercial no cambia etiquetas del CRM todavía. La carga recurrente aún no está activa: faltan la llave `contacts:read` y la autorización del Apps Script.
 - El curso se marca por coincidencia con palabras y botones entre los últimos 10 mensajes guardados. Si queda vacío, confirmar en el chat; no se inventa el curso.
 - El panel muestra volumen, estados, ventas y conversión por asesora. La lista de perfiles y rotación se debe revisar antes de repartir leads. En la consulta actual, Ashly Agente y Luis Palacios aparecen en Ventas, pero el reparto estaba apagado y ambos tenían 0 %.
 - Las comisiones siguen vacías hasta contrastar las reglas actuales con el tarifario vigente. Las hojas antiguas de 29.90/39.90 son históricas y no se copian como reglas actuales.
