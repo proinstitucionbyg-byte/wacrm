@@ -235,7 +235,7 @@ beforeEach(() => {
   h.state.pendingInserts = [];
   h.state.pendingRows = [];
   h.state.pendingUpdates = [];
-  h.state.conversationState = null;
+  h.state.conversationState = {automation_enabled:true,last_human_message_at:null};
   h.state.messageStatus = 'sent';
   h.state.newerCustomer = false;
   h.state.claimedPending = null;
@@ -357,6 +357,28 @@ describe('WhatsApp delivery order', () => {
     expect(h.state.pendingUpdates.some(update => update.status === 'cancelled')).toBe(false);
     expect(h.state.logAutomationIds).toEqual([]);
     expect(engineSendInteractive).not.toHaveBeenCalled();
+  });
+  it('cancels a parked block when the conversation automation is disabled', async () => {
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.conversationState = {automation_enabled:false,last_human_message_at:null};
+    await resumePendingExecution({id:'disabled-wait',automation_id:'a1',account_id:ACCOUNT,user_id:'u1',
+      contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,next_step_position:48,
+      context:{conversation_id:'chat'}});
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'cancelled'}));
+    expect(h.state.pendingUpdates.some(update => update.status === 'pending')).toBe(false);
+    expect(engineSendInteractive).not.toHaveBeenCalled();
+  });
+  it('keeps the first unsent position as cancelled when automation is disabled', async () => {
+    h.state.owned = {id:'c1'};
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [{id:'first',automation_id:'a1',step_type:'send_message',position:7,
+      parent_step_id:null,step_config:{text:'Información del curso'}}];
+    h.state.conversationState = {automation_enabled:false,last_human_message_at:null};
+    await runAutomationById({accountId:ACCOUNT,automationId:'a1',contactId:'c1',conversationId:'chat'});
+    expect(engineSendText).not.toHaveBeenCalled();
+    expect(h.state.pendingInserts).toContainEqual(expect.objectContaining({
+      next_step_position:7,status:'cancelled',context:expect.objectContaining({message_text:'',conversation_id:'chat'}),
+    }));
   });
   it('defers a newly started block at its first unsent step during adviser attention', async () => {
     h.state.owned = {id:'c1'};

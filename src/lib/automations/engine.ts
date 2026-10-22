@@ -572,23 +572,33 @@ export async function resumePendingExecution(pending: {
       return
     }
   } else if (pending.context?.conversation_id) {
-    const { data: conv } = await db
+    const { data: conv, error: conversationError } = await db
       .from('conversations')
       .select('automation_enabled, last_human_message_at, automation_disabled_at')
       .eq('id', pending.context.conversation_id)
+      .eq('account_id', pending.account_id)
       .maybeSingle()
+    if (conversationError || !conv) {
+      await markPending(pending.id, conversationError ? 'failed' : 'cancelled')
+      return
+    }
+    if (conv.automation_enabled === false) {
+      await markPending(pending.id, 'cancelled')
+      return
+    }
     const lastHuman = conv?.last_human_message_at
       ? new Date(conv.last_human_message_at).getTime()
       : 0
     const humanActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
-    if (conv && (conv.automation_enabled === false || humanActive)) {
+    if (humanActive) {
       const disabledAt = Date.parse(conv.automation_disabled_at ?? '')
       const retryAt = Math.max(Date.now() + 60_000,
-        humanActive ? lastHuman + HUMAN_PAUSE_MS : 0,
+        lastHuman + HUMAN_PAUSE_MS,
         Number.isFinite(disabledAt) ? disabledAt + HUMAN_PAUSE_MS : 0)
-      await db.from('automation_pending_executions')
+      const { error: deferError } = await db.from('automation_pending_executions')
         .update({status:'pending',run_at:new Date(retryAt).toISOString()})
         .eq('id',pending.id).eq('status','running')
+      if (deferError) await markPending(pending.id, 'failed')
       return
     }
   }
@@ -878,14 +888,18 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         .maybeSingle()
       if (pauseError) throw pauseError
       const humanAt = Date.parse(conversation?.last_human_message_at ?? '')
-      if (conversation?.automation_enabled === false || (Number.isFinite(humanAt) && Date.now() < humanAt + HUMAN_PAUSE_MS)) {
+      const automationDisabled = conversation?.automation_enabled === false
+      const humanActive = Number.isFinite(humanAt) && Date.now() < humanAt + HUMAN_PAUSE_MS
+      if (automationDisabled || humanActive) {
         const runAt = Math.max(Date.now() + 30_000, Number.isFinite(humanAt) ? humanAt + HUMAN_PAUSE_MS : 0)
         const { error: deferError } = await db.from('automation_pending_executions').insert({
           automation_id: args.automation.id, account_id: args.automation.account_id,
           user_id: args.automation.user_id, contact_id: args.contactId, log_id: args.logId,
           parent_step_id: args.parentStepId, branch: args.branch,
           next_step_position: step.position, context: args.context,
-          run_at: new Date(runAt).toISOString(), status: 'pending',
+          // Retain the next position for review without leaving disabled
+          // conversations in the cron queue indefinitely.
+          run_at: new Date(runAt).toISOString(), status: automationDisabled ? 'cancelled' : 'pending',
         })
         if (deferError) throw deferError
         await appendResults(args.logId, results, 'partial', null)
