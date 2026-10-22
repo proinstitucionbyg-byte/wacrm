@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import { TagManager } from '@/components/settings/tag-manager';
 import { useCan } from '@/hooks/use-can';
+import { usePendingPaymentCount } from '@/hooks/use-pending-payment-count';
 import { toast } from 'sonner';
 import { isVisibleInInbox } from '@/lib/inbox/cleanup';
 import { InboxRecovery } from './inbox-recovery';
@@ -92,6 +93,7 @@ export function ConversationList({
   const canTag = useCan('inbox.tag'),
     canManageTags = useCan('tags.manage'),
     canViewPayments = useCan('payments.view');
+  const pendingPayments = usePendingPaymentCount(canViewPayments);
   const [checkedChats, setCheckedChats] = useState<string[]>([]),
     [labelOpen, setLabelOpen] = useState(false),
     [managerOpen, setManagerOpen] = useState(false),
@@ -307,6 +309,11 @@ export function ConversationList({
             className="block rounded-md border border-amber-500/40 p-2 text-center text-xs font-semibold text-amber-400"
           >
             VALIDACION DE PAGOS
+            {pendingPayments > 0 && (
+              <span aria-label={`${pendingPayments} pagos pendientes de validación`} className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-slate-950">
+                {pendingPayments}
+              </span>
+            )}
           </Link>
         )}
         {canTag && (

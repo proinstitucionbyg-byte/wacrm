@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useMemberPermissions } from "@/hooks/use-member-permissions";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
+import { usePendingPaymentCount } from "@/hooks/use-pending-payment-count";
 import {
   Bell,
   CheckCheck,
@@ -188,6 +189,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const { can } = useMemberPermissions();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
+  const pendingPayments = usePendingPaymentCount(can('payments', 'view'));
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
@@ -301,6 +303,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               // viewing this section".
               const showNotificationBadge =
                 item.href === "/notifications" && unreadNotifications > 0;
+              const showPaymentBadge = item.href === "/payments" && pendingPayments > 0;
 
               return (
                 <li key={item.href}>
@@ -354,6 +357,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                         className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground"
                       >
                         {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                      </span>
+                    )}
+                    {showPaymentBadge && (
+                      <span aria-label={`${pendingPayments} pagos pendientes de validación`} className="flex min-h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-semibold text-slate-950">
+                        {pendingPayments}
                       </span>
                     )}
                   </Link>
