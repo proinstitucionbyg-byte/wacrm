@@ -176,6 +176,24 @@ describe('deterministic chat intake', () => {
     expect(result.full_name).toBe('AMANDA AIDA ARRIETA URETA');
     expect(result.identity_confirmed).not.toBe(true);
   });
+  it('does not turn Amanda\'s later conversational sentence into her name', () => {
+    const result = collectEnrollmentData({}, [
+      { id: 'name', content_text: 'AMANDA AIDA ARRIETA URETA' },
+      { id: 'conversation', content_text: 'Es un retiró de mi congregación' },
+      { id: 'photo', content_text: null, image_analysis: { category: 'identity_document', fields: { full_name: 'AMANDA AIDA ARRIETA URETA' } } },
+    ]);
+    expect(result.full_name).toBe('AMANDA AIDA ARRIETA URETA');
+    expect(result.identity_confirmed).not.toBe(true);
+  });
+  it('reads Garfield\'s bare date and mobile without confirming his identity', () => {
+    const result = collectEnrollmentData({ phone1: '' }, [
+      { id: 'answer', content_text: '10-12-1989\n920850059' },
+      { id: 'old-photo', content_text: null, image_analysis: { category: 'identity_document', fields: { birth_date: '1983-12-10' } } },
+    ]);
+    expect(result.birth_date).toBe('1989-12-10');
+    expect(result.phone1).toBe('920850059');
+    expect(result.identity_confirmed).not.toBe(true);
+  });
   it('preserves manual corrections and confirmed flags', () => {
     const data = {
       full_name: 'CORREGIDO',

@@ -26,7 +26,7 @@ const normalizeIdentityName = (value: unknown) => {
 };
 const isBarePersonName = (value: string) =>
   /^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(value) &&
-  !/\b(SOY|TENGO|QUIERO|COMO|CUANDO|CURSO|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL|DISTRITO|DEPARTAMENTO|DIRECCION|DOCUMENTO|CELULAR|TELEFONO|OK|POR|FAVOR|INFORMACION)\b|\b(?:INSCRIB|MATRICUL)\w*/.test(key(value));
+  !/\b(ES|UN|UNA|MI|SOY|TENGO|QUIERO|COMO|CUANDO|CURSO|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL|DISTRITO|DEPARTAMENTO|DIRECCION|DOCUMENTO|CELULAR|TELEFONO|OK|POR|FAVOR|INFORMACION|CONGREGACION)\b|\b(?:INSCRIB|MATRICUL)\w*/.test(key(value));
 const courses = [
   [/\bNUTRICION(?: Y DIETETICA)?\b/, 'NUTRICION Y DIETETICA'],
   [/\b(?:AUXILIAR DE )?FARMACIA\b/, 'AUXILIAR DE FARMACIA'],
@@ -43,6 +43,7 @@ export function collectEnrollmentData(
   const candidates = new Map<keyof EnrollmentData, Set<string>>();
   const photoCandidates = new Map<keyof EnrollmentData, Set<string>>();
   const writtenNames = new Set<string>();
+  const writtenBirthDates = new Set<string>();
   const photoNames = new Set<string>();
   const recentEmails = new Set<string>();
   const add = (field: keyof EnrollmentData, raw: unknown, written = false, photographed = false) => {
@@ -59,6 +60,7 @@ export function collectEnrollmentData(
       photoCandidates.set(field, photographedValues);
     }
     if (written && field === 'full_name') writtenNames.add(value);
+    if (written && field === 'birth_date') writtenBirthDates.add(value);
   };
   const photoIds: string[] = [];
   const guardianIds: string[] = [];
@@ -81,6 +83,14 @@ export function collectEnrollmentData(
     // Some captions arrive with literal backslash-n from the sender.
     const text = (message.content_text ?? '').replace(/\\n/g, '\n');
     const trimmed = text.trim();
+    // Accept a student's unlabelled answer only when the entire line is an
+    // unambiguous date or a Peruvian mobile number. These stay provisional.
+    for (const line of text.split(/\r?\n/)) {
+      const bare = line.trim();
+      const date = bare.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+      if (date) add('birth_date', `${date[3]}-${date[2].padStart(2,'0')}-${date[1].padStart(2,'0')}`, true);
+      if (!data.phone1 && /^9\d{8}$/.test(bare)) add('phone1', bare);
+    }
     // Students often answer the prompted fields as separate bare messages.
     // Accept only unambiguous shapes; a question or conversational sentence
     // must never become a name, course or document by inference.
@@ -124,7 +134,7 @@ export function collectEnrollmentData(
         add('document_number', value);
       } else if (label === 'FECHA DE NACIMIENTO') {
         const date = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-        add('birth_date', date ? `${date[3]}-${date[2].padStart(2,'0')}-${date[1].padStart(2,'0')}` : value);
+        add('birth_date', date ? `${date[3]}-${date[2].padStart(2,'0')}-${date[1].padStart(2,'0')}` : value, true);
       } else if (['DIRECCION','DEPARTAMENTO','DISTRITO'].includes(label)) {
         add(({DIRECCION:'address', DEPARTAMENTO:'department', DISTRITO:'district'} as const)[label as 'DIRECCION'|'DEPARTAMENTO'|'DISTRITO'],value);
       } else if (label === 'PROMOCION') add('promotion_id', value);
@@ -204,6 +214,8 @@ export function collectEnrollmentData(
       ? writtenPhotoMatches[0]
       : field === 'full_name' && writtenNames.size === 1
         ? [...writtenNames][0]
+        : field === 'birth_date' && writtenBirthDates.size === 1
+          ? [...writtenBirthDates][0]
         : ['address','department','district'].includes(field) && photographed?.size === 1
           ? [...photographed][0]
         : field === 'email' && recentEmails.size === 1
