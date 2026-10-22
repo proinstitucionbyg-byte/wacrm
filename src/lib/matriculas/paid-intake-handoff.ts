@@ -83,7 +83,10 @@ export async function syncPaidEnrollmentHandoff(
           dedup_key: 'paid-intake-incomplete:' + draftId,
           requires_action: true,
         })),
-        { onConflict: 'account_id,user_id,dedup_key', ignoreDuplicates: true }
+        // The same paid case can gain data later. Keep one notification, but
+        // refresh its missing-fields list so advisers never ask again for
+        // information that is already in the conversation.
+        { onConflict: 'account_id,user_id,dedup_key' }
       );
       if (noticeError) throw noticeError;
     }

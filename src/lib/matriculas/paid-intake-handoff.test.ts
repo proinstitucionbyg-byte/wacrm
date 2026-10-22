@@ -5,7 +5,7 @@ const { route } = vi.hoisted(() => ({ route: vi.fn() }));
 vi.mock('@/lib/ai/handoff-routing', () => ({ routeConversationToArea: route }));
 import { syncPaidEnrollmentHandoff, URGENT_PAID_INTAKE_TAG } from './paid-intake-handoff';
 
-const writes: { table: string; method: string; payload?: unknown }[] = [];
+const writes: { table: string; method: string; payload?: unknown; options?: unknown }[] = [];
 const resultFor: Record<string, unknown> = {};
 function dbFixture() {
   const db = {
@@ -13,7 +13,7 @@ function dbFixture() {
       const chain: Record<string, (...args: unknown[]) => unknown> = {};
       for (const method of ['select','eq','limit','delete','insert','upsert','update'])
         chain[method] = (...args: unknown[]) => {
-          if (['delete','insert','upsert','update'].includes(method)) writes.push({table,method,payload:args[0]});
+          if (['delete','insert','upsert','update'].includes(method)) writes.push({table,method,payload:args[0],options:args[1]});
           return chain;
         };
       chain.maybeSingle = async () => resultFor[table] ?? { data: null, error: null };
@@ -43,6 +43,9 @@ describe('handoff de matrícula pagada', () => {
     const notice = writes.find((write) => write.table === 'notifications')?.payload as Record<string, unknown>[];
     expect(notice[0].title).toContain('URGENTE');
     expect(notice[0].dedup_key).toBe('paid-intake-incomplete:draft');
+    expect(writes.find((write) => write.table === 'notifications')?.options).toEqual({
+      onConflict: 'account_id,user_id,dedup_key',
+    });
   });
 
   it('quita solo la urgencia cuando los requisitos están completos y ya estaba en Fidelización', async () => {

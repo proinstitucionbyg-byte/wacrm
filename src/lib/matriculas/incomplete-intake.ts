@@ -189,7 +189,7 @@ export async function runIncompleteIntakes(db: SupabaseClient) {
         target_url: '/inbox?c=' + watch.conversation_id,
         dedup_key: 'paid-intake-incomplete:' + watch.enrollment_id,
       })),
-      { onConflict: 'account_id,user_id,dedup_key', ignoreDuplicates: true }
+      { onConflict: 'account_id,user_id,dedup_key' }
     );
     if (notices.error) throw notices.error;
     if (Number.isFinite(lastInbound) && now >= lastInbound + 24 * HOUR) {
