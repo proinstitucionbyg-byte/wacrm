@@ -29,12 +29,17 @@ type RawConversation = {
   unread_count: number | null;
   automation_enabled: boolean;
   ai_enabled: boolean;
-  conversation_sales_routes: Array<{
+  conversation_sales_routes: {
     agent_id: string | null;
     state: string;
     created_at: string;
     lease_expires_at: string | null;
-  }>;
+  } | Array<{
+    agent_id: string | null;
+    state: string;
+    created_at: string;
+    lease_expires_at: string | null;
+  }> | null;
   messages: RawMessage[];
 };
 
@@ -51,6 +56,8 @@ type RawContact = {
 };
 
 function newestRoute(routes: RawConversation['conversation_sales_routes']) {
+  if (!routes) return null;
+  if (!Array.isArray(routes)) return routes;
   return [...routes].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
 }
 
