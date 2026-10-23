@@ -59,6 +59,20 @@ export function suggestIdentityData(
     if (!next[key] && typeof value === 'string' && value.trim())
       next[key] = upper(value);
   }
+  const rawDocumentType = analysis.fields?.document_type;
+  if (!next.document_type && typeof rawDocumentType === 'string') {
+    const documentType = rawDocumentType
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+    if (/\bDNI\b/.test(documentType)) next.document_type = 'DNI';
+    else if (/\bPASAPORTE\b/.test(documentType)) next.document_type = 'PASAPORTE';
+    else if (/^CE$|CARN[EÉ] DE EXTRANJER[IÍ]A/.test(documentType))
+      next.document_type = 'CARNE DE EXTRANJERIA';
+    else if (documentType === 'OTRO') next.document_type = 'OTRO';
+  }
   return next;
 }
 const text = (value: string) => value.trim().replace(/\s+/g, ' ');

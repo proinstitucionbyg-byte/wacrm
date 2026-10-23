@@ -26,6 +26,7 @@ describe('matricula posterior a pago humano', () => {
           category: 'identity_document',
           fields: {
             full_name: 'OTRO NOMBRE',
+          document_type: 'DNI peruano',
             document_number: '12345678',
             birth_date: '2000-01-02',
             address: null,
@@ -35,6 +36,7 @@ describe('matricula posterior a pago humano', () => {
     ).toEqual({
       full_name: 'NOMBRE ESCRITO',
       identity_confirmed: false,
+      document_type: 'DNI',
       document_number: '12345678',
       birth_date: '2000-01-02',
     });

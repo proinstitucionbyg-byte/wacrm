@@ -469,7 +469,7 @@ function EnrollmentEditor({
                       setData((current) => suggestIdentityData(current, image.image_analysis))
                     }
                   >
-                    Completar campos vacíos con la lectura
+                    Sugerir datos leídos para revisar
                   </Button>
                 )}
               </div>
