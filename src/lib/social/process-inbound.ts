@@ -18,11 +18,13 @@ import { saveSocialImage } from './storage'
 import { handleTeacherInbound } from '@/lib/matriculas/teachers'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
+import { tagCommercialInquiry } from '@/lib/sales/attribution'
 
 export interface SocialDispatchContext {
   accountId: string; userId: string; contactId: string; conversationId: string
   messageId: string; text: string; replyId: string | null
   isFirstInboundMessage: boolean; wasCreated: boolean; hasImageEvidence: boolean
+  hasAdReferral?: boolean
   previousInboundAt?: string; inboundAt?: string
 }
 
@@ -115,7 +117,7 @@ export async function storeSocialInbound(db: SupabaseClient, channel: SocialChan
   catch (error) { console.error('[social] enrollment data needs review', error) }
   return { accountId: account.id, userId: account.owner_user_id, contactId: contact.id, conversationId: conversation.id,
     messageId: inbound.messageId, text: dispatchText, replyId: inbound.replyId, isFirstInboundMessage: (count ?? 0) === 0, wasCreated, hasImageEvidence,
-    previousInboundAt, inboundAt: inbound.createdAt }
+    hasAdReferral: !!inbound.referral, previousInboundAt, inboundAt: inbound.createdAt }
 }
 
 /** Same precedence as WhatsApp: human pause, sales routing, flows, stored
@@ -124,6 +126,14 @@ export async function dispatchSocialInbound(db: SupabaseClient, input: SocialDis
   const { data: conversation, error } = await db.from('conversations').select('id,ai_enabled,automation_enabled,last_human_message_at')
     .eq('id', input.conversationId).eq('account_id', input.accountId).eq('contact_id', input.contactId).maybeSingle()
   if (error || !conversation) throw error ?? new Error('Conversación no disponible.')
+  await tagCommercialInquiry(db, {
+    accountId: input.accountId,
+    contactId: input.contactId,
+    userId: input.userId,
+    text: input.text,
+    firstInbound: input.isFirstInboundMessage,
+    hasAdReferral: input.hasAdReferral === true,
+  })
   if (isLikelyAutomatedInbound(input.text)) return
   if (conversation.ai_enabled === false && conversation.automation_enabled === false) return
   const lastHuman = conversation.last_human_message_at ? new Date(conversation.last_human_message_at).getTime() : 0

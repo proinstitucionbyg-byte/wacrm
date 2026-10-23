@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-const mocks = vi.hoisted(() => ({ download: vi.fn(), save: vi.fn(), analyze: vi.fn(), transcribe: vi.fn(), usage: vi.fn(), collect: vi.fn(), sequence: vi.fn(), flows: vi.fn(), automations: vi.fn(), ai: vi.fn(), sales: vi.fn(), followup: vi.fn() }))
+const mocks = vi.hoisted(() => ({ download: vi.fn(), save: vi.fn(), analyze: vi.fn(), transcribe: vi.fn(), usage: vi.fn(), collect: vi.fn(), sequence: vi.fn(), flows: vi.fn(), automations: vi.fn(), ai: vi.fn(), sales: vi.fn(), followup: vi.fn(), tagCommercialInquiry: vi.fn() }))
 vi.mock('./storage', () => ({ saveSocialImage: mocks.save }))
 vi.mock('./media', () => ({ downloadSocialMedia: mocks.download }))
 vi.mock('@/lib/ai/analyze-image', () => ({ analyzeInboundImage: mocks.analyze }))
@@ -13,6 +13,7 @@ vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: mocks.aut
 vi.mock('@/lib/ai/auto-reply', () => ({ dispatchInboundToAiReply: mocks.ai }))
 vi.mock('@/lib/ai/sales-routing', () => ({ routeInboundSales: mocks.sales }))
 vi.mock('@/lib/ai/followup', () => ({ handleIdleFollowupReply: mocks.followup }))
+vi.mock('@/lib/sales/attribution', () => ({ tagCommercialInquiry: mocks.tagCommercialInquiry }))
 vi.mock('@/lib/matriculas/teachers', () => ({ handleTeacherInbound: async () => false }))
 import { storeSocialInbound, dispatchSocialInbound, type SocialDispatchContext } from './process-inbound'
 import type { SocialInbound } from './inbound'
@@ -44,6 +45,7 @@ beforeEach(() => {
   mocks.flows.mockResolvedValue({ consumed: false })
   mocks.automations.mockResolvedValue(false)
   mocks.followup.mockResolvedValue(false)
+  mocks.tagCommercialInquiry.mockResolvedValue(true)
   mocks.download.mockResolvedValue({ buffer: Buffer.from('image'), contentType: 'image/jpeg' })
   mocks.analyze.mockResolvedValue({ analysis: { status: 'pending_review', category: 'payment_receipt' }, usage: null })
 })
@@ -51,8 +53,9 @@ afterEach(() => vi.unstubAllEnvs())
 describe('social intake', () => {
   it('stores supplied referral evidence on the original inbound message', async () => {
     const {db,writes}=database([ok({id:'contact',phone:''}),ok({id:'conv'}),ok(),{count:0},ok({id:'msg'}),ok()]);
-    await storeSocialInbound(db,'messenger',account,{...incoming,referral:{ad_id:'998',source:'ADS'}});
+    const context = await storeSocialInbound(db,'messenger',account,{...incoming,referral:{ad_id:'998',source:'ADS'}});
     expect(writes).toContainEqual(expect.objectContaining({table:'messages',value:expect.objectContaining({source_referral:{ad_id:'998',source:'ADS'}})}));
+    expect(context?.hasAdReferral).toBe(true)
   })
   it('stores a social message and collects enrollment data', async () => {
     const { db, writes, filters } = database([ok({ id: 'contact', phone: '' }), ok({ id: 'conv' }), ok(), { count: 0 }, ok({ id: 'msg' }), ok()])
@@ -124,10 +127,21 @@ describe('social funnel dispatch', () => {
   it('does not answer a conversation with both automatic controls disabled', async () => {
     const { db } = database([ok({ id: 'conv', ai_enabled: false, automation_enabled: false })])
     await dispatchSocialInbound(db, { ...dispatch, replyId: 'payment_followup_done' })
+    expect(mocks.tagCommercialInquiry).toHaveBeenCalledWith(db, expect.objectContaining({
+      accountId: 'acct', contactId: 'contact', firstInbound: false, hasAdReferral: false,
+    }))
     expect(mocks.followup).not.toHaveBeenCalled()
     expect(mocks.sales).not.toHaveBeenCalled()
     expect(mocks.flows).not.toHaveBeenCalled()
     expect(mocks.automations).not.toHaveBeenCalled()
+    expect(mocks.ai).not.toHaveBeenCalled()
+  })
+  it('labels an ad-referred lead even while automatic replies are paused', async () => {
+    const { db } = database([ok({ id: 'conv', ai_enabled: false, automation_enabled: false })])
+    await dispatchSocialInbound(db, { ...dispatch, text: 'Hola', hasAdReferral: true })
+    expect(mocks.tagCommercialInquiry).toHaveBeenCalledWith(db, expect.objectContaining({
+      text: 'Hola', firstInbound: false, hasAdReferral: true,
+    }))
     expect(mocks.ai).not.toHaveBeenCalled()
   })
   it('keeps automation and AI active after the sales assignment', async () => {
