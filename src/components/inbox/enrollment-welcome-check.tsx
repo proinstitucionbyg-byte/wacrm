@@ -132,6 +132,7 @@ export function EnrollmentWelcomeCheck({
         saved = await patch.json();
       }
       if (!patch.ok) throw Error(saved.error ?? 'No se pudieron guardar los datos.');
+      setError('');
       setEditedFields([]);
       setIntake({ ...intake, data: saved.draft.data, version: saved.draft.version, issues: saved.issues, can_edit: true });
       setIntakeData(saved.draft.data);
