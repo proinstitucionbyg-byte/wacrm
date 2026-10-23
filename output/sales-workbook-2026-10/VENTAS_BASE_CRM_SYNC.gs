@@ -8,8 +8,10 @@ const SALES_SYNC = {
   sheet: 'BASE GENERAL',
   firstDataRow: 3,
   batchSize: 100,
+  adviserDirectorySize: 100,
   crmIdColumn: 17, // Q: hidden technical key; A stays the permanent visible sequence.
   courseDetailsColumn: 18, // R: CRM-owned detail when a lead is interested in multiple courses.
+  institutionalAdviser: 'ASESOR INSTITUTO', // System attribution; never consumes a human adviser slot.
 };
 
 function onOpen() {
@@ -101,6 +103,11 @@ function SYNC_VENTAS_CRM() {
     if (!sheet) throw new Error('No existe la pestaña BASE GENERAL.');
     const advisersSheet = ss.getSheetByName('ASESORAS');
     if (!advisersSheet) throw new Error('No existe la pestaña ASESORAS.');
+    const advisers = fetchSalesAdvisers_(base, key);
+    if (advisers && advisers.length > SALES_SYNC.adviserDirectorySize) {
+      throw new Error('La hoja admite hasta ' + SALES_SYNC.adviserDirectorySize + ' asesoras. No se sincronizó una lista incompleta.');
+    }
+    if (advisers) syncSalesAdviserDirectory_(advisersSheet, advisers);
     const activeAdviserByName = new Map(advisersSheet.getRange('I3:I102').getDisplayValues().flat().filter(Boolean).map((name) => [normalizeNameKey_(name), name]));
 
     const leads = fetchAllSalesLeads_(base, key);
@@ -143,7 +150,7 @@ function SYNC_VENTAS_CRM() {
         createdAt,
         lead.institute || 'INSTICRECE',
         lead.commercial_status || '', // the initial CRM status; later edits sync back through sales:write
-        normalizeAdviser_(lead.assigned_adviser, activeAdviserByName),
+        normalizeAdviser_(lead, activeAdviserByName),
         normalizeChannel_(lead.channel),
         (lead.crm_tags || []).join(', '),
         lead.assigned_at ? new Date(lead.assigned_at) : '',
@@ -184,6 +191,7 @@ function SYNC_VENTAS_CRM() {
     props.setProperty('SALES_SYNC_LAST_OK', new Date().toISOString());
     props.setProperty('SALES_SYNC_LAST_COUNT', String(leads.length));
     SpreadsheetApp.flush();
+    if (!advisers) ss.toast('Los contactos sí se sincronizaron. Para actualizar asesoras, agrega sales:read a CRM_API_KEY.', 'CRM', 10);
     return { received: leads.length, added: newRows.length, updated: updated };
   } finally {
     lock.releaseLock();
@@ -192,6 +200,20 @@ function SYNC_VENTAS_CRM() {
 
 function normalizeNameKey_(value) {
   return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Replaces only CRM-owned adviser directory fields; keeps sheet links and rotation notes. */
+function syncSalesAdviserDirectory_(sheet, advisers) {
+  const rows = advisers.map((adviser) => [
+    adviser.user_id,
+    adviser.name || 'Sin nombre',
+    adviser.email || '',
+    'Ventas',
+    adviser.cargo || 'Agente',
+    adviser.active_for_sales ? 'Activo' : 'Inactivo',
+  ]);
+  while (rows.length < SALES_SYNC.adviserDirectorySize) rows.push(['', '', '', '', '', '']);
+  sheet.getRange(3, 1, SALES_SYNC.adviserDirectorySize, 6).setValues(rows);
 }
 
 function normalizeIdentifier_(value) {
@@ -203,8 +225,20 @@ function contactIdentityKey_(identifier, channel) {
   return normalizedIdentifier ? normalizeChannel_(channel) + '|' + normalizedIdentifier : '';
 }
 
-function normalizeAdviser_(value, activeAdviserByName) {
-  return activeAdviserByName.get(normalizeNameKey_(value)) || '';
+function normalizeAdviser_(lead, activeAdviserByName) {
+  const assignedName = String(lead && lead.assigned_adviser || '').trim();
+  // Keep attribution on existing leads after a person is deactivated.
+  // The ASESORAS active list controls new assignment choices; it must not
+  // erase who handled a historical/current lead from BASE GENERAL.
+  if (lead && lead.assigned_adviser_id && assignedName) return assignedName;
+  const activeAdviser = activeAdviserByName.get(normalizeNameKey_(assignedName));
+  if (activeAdviser) return activeAdviser;
+
+  // Keep attribution with the institution while AI/automation is enabled and
+  // there is no human assignee. A real assigned adviser always takes priority.
+  const hasHumanAssignee = !!(lead && lead.assigned_adviser_id);
+  const systemIsHandling = !!(lead && (lead.ai_enabled === true || lead.automation_enabled === true));
+  return !hasHumanAssignee && systemIsHandling ? SALES_SYNC.institutionalAdviser : '';
 }
 
 function normalizeChannel_(value) {
@@ -247,4 +281,23 @@ function fetchAllSalesLeads_(base, key) {
     if (!cursor) return all;
   }
   throw new Error('La consulta superó 100 páginas; se detuvo para no importar una lista incompleta.');
+}
+
+function fetchSalesAdvisers_(base, key) {
+  const response = UrlFetchApp.fetch(base + '/api/v1/sales/advisers', {
+    method: 'get',
+    headers: { Authorization: 'Bearer ' + key },
+    muteHttpExceptions: true,
+  });
+  const status = response.getResponseCode();
+  const body = JSON.parse(response.getContentText() || '{}');
+  if (status !== 200) {
+    if (status === 403) return null; // Preserve contact sync until the key is granted sales:read.
+    const message = body.error && body.error.message || 'revisa que la llave tenga el permiso sales:read';
+    throw new Error('No se sincronizó el directorio de asesoras (' + status + '): ' + message);
+  }
+  if (!body.data || !Array.isArray(body.data.advisers)) {
+    throw new Error('La respuesta del CRM no contiene el directorio esperado.');
+  }
+  return body.data.advisers;
 }
