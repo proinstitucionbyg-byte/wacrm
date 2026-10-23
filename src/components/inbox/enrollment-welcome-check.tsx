@@ -207,7 +207,9 @@ export function EnrollmentWelcomeCheck({
   return (
     <div className="contents" data-enrollment-welcome-slot>
       {intake && intake.can_edit && (intakeFields.length > 0 || intake.issues.some((issue) => issue.startsWith('VERIFICAR IDENTIDAD:') || issue.startsWith('CONFIRMAR LA OFERTA'))) && (
-        <section className="mx-2 my-1 w-full max-w-2xl rounded-lg border border-amber-500/50 bg-background p-1.5 text-[10px] leading-tight sm:mx-4" aria-label="Registrar datos faltantes de matrícula">
+        <details className="mx-2 my-1 w-fit max-w-[calc(100%-1rem)] rounded-lg border border-amber-500/50 bg-background text-[10px] leading-tight sm:mx-4 sm:max-w-sm" aria-label="Registrar datos faltantes de matrícula">
+          <summary className="cursor-pointer list-none px-2 py-1.5 font-semibold">DATOS DE MATRÍCULA PENDIENTES · Abrir</summary>
+          <div className="max-h-[28vh] overflow-y-auto border-t border-amber-500/30 p-1.5">
           <strong>DATOS FALTANTES · SOLO PARA COMPLETAR LO QUE YA FALTA</strong>
           <p className="mt-0.5 text-muted-foreground">Completa aquí los pendientes y verifica cada dato con el chat. Dirección y segundo celular son opcionales. La revisión de identidad y la oferta se completan en este mismo cuadro.</p>
           <div className="mt-1 grid gap-1 sm:grid-cols-2">
@@ -290,7 +292,8 @@ export function EnrollmentWelcomeCheck({
             </details>
           )}
           <Button size="sm" className="mt-1 h-7 px-2 text-[11px]" disabled={busy === 'intake' || currentIntakeIssues.length > 0 || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim())} onClick={() => void registerMissingIntake()}>{busy === 'intake' ? 'GUARDANDO…' : 'GUARDAR Y CONTINUAR'}</Button>
-        </section>
+          </div>
+        </details>
       )}
       {intake?.issues.length && !intake.can_edit ? (
         <div className="mx-2 my-1 w-full max-w-2xl rounded border border-amber-500/30 p-1.5 text-[10px] leading-tight text-amber-700 sm:mx-4">
