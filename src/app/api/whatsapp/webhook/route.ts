@@ -50,6 +50,111 @@ function supabaseAdmin() {
   return _adminClient
 }
 
+const HUMAN_ASSISTANCE_TAG = 'ASISTENCIA ASESOR HUMANO'
+
+type KeywordConfig = {
+  keywords?: unknown
+  match_type?: unknown
+  case_sensitive?: unknown
+  internal_only?: unknown
+}
+
+function configuredKeywordMatches(text: string, config: KeywordConfig | null | undefined): boolean {
+  if (!text || !Array.isArray(config?.keywords) || config.keywords.length === 0) return false
+  const caseSensitive = config.case_sensitive === true
+  const haystack = caseSensitive ? text : text.toLowerCase()
+  const matchType = config.match_type === 'exact' ? 'exact' : 'contains'
+  return config.keywords.some((raw) => {
+    if (typeof raw !== 'string' || !raw.trim()) return false
+    const keyword = caseSensitive ? raw : raw.toLowerCase()
+    return matchType === 'exact' ? haystack === keyword : haystack.includes(keyword)
+  })
+}
+
+/** A first text from a new conversation must match a real configured route;
+ * unknown openings are paused and sent to a human queue instead of the AI. */
+async function pauseUnknownFirstInboundForHuman(args: {
+  accountId: string
+  conversationId: string
+  contactId: string
+  userId: string
+  isFirstInboundMessage: boolean
+  text: string
+}): Promise<boolean> {
+  const text = args.text.trim()
+  if (!args.isFirstInboundMessage || !text) return false
+
+  const db = supabaseAdmin()
+  const [automationsResult, flowsResult] = await Promise.all([
+    db.from('automations')
+      .select('trigger_config')
+      .eq('account_id', args.accountId)
+      .eq('trigger_type', 'keyword_match')
+      .eq('is_active', true),
+    db.from('flows')
+      .select('trigger_config')
+      .eq('account_id', args.accountId)
+      .eq('trigger_type', 'keyword')
+      .eq('status', 'active'),
+  ])
+
+  const lookupFailed = !!automationsResult.error || !!flowsResult.error
+  if (automationsResult.error) console.error('[webhook] initial keyword automation lookup failed:', automationsResult.error)
+  if (flowsResult.error) console.error('[webhook] initial keyword flow lookup failed:', flowsResult.error)
+  const keywordMatch = !lookupFailed && (
+    (automationsResult.data ?? []).some((row: { trigger_config: KeywordConfig | null }) => {
+      const config = (row.trigger_config ?? {}) as KeywordConfig
+      return config.internal_only !== true && configuredKeywordMatches(text, config)
+    }) ||
+    (flowsResult.data ?? []).some((row: { trigger_config: KeywordConfig | null }) => configuredKeywordMatches(text, row.trigger_config))
+  )
+  if (keywordMatch) return false
+
+  const disabledAt = new Date().toISOString()
+  const { error: pauseError } = await db.from('conversations')
+    .update({ ai_enabled: false, automation_enabled: false, automation_disabled_at: disabledAt })
+    .eq('id', args.conversationId)
+    .eq('account_id', args.accountId)
+  if (pauseError) console.error('[webhook] could not persist unknown-inbound pause:', pauseError)
+
+  try {
+    const { data: existingTag, error: tagLookupError } = await db.from('tags')
+      .select('id')
+      .eq('account_id', args.accountId)
+      .eq('name', HUMAN_ASSISTANCE_TAG)
+      .limit(1)
+      .maybeSingle()
+    if (tagLookupError) throw tagLookupError
+
+    let tagId = existingTag?.id as string | undefined
+    if (!tagId) {
+      const { data: createdTag, error: createTagError } = await db.from('tags').insert({
+        user_id: args.userId,
+        account_id: args.accountId,
+        name: HUMAN_ASSISTANCE_TAG,
+        color: '#f97316',
+        kind: 'access',
+        audience: { users: [], areas: ['VENTAS'], roles: ['owner', 'admin', 'coordinator'] },
+      }).select('id').single()
+      if (createTagError) throw createTagError
+      tagId = createdTag?.id as string | undefined
+    }
+    if (!tagId) throw new Error('No se pudo resolver la etiqueta de asistencia humana')
+
+    const { error: attachError } = await db.from('contact_tags').upsert(
+      { contact_id: args.contactId, tag_id: tagId },
+      { onConflict: 'contact_id,tag_id', ignoreDuplicates: true },
+    )
+    if (attachError) throw attachError
+  } catch (error) {
+    console.error('[webhook] could not tag unknown first inbound for human assistance:', error)
+  }
+
+  // If reading the configured routes failed, fail closed: leave this chat
+  // paused for a person rather than guess which automation should answer.
+  return true
+}
+
 interface WhatsAppMessage {
   referral?: unknown
     user_id?: string
@@ -839,6 +944,14 @@ const lastHuman = conversation.last_human_message_at
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
 const inboundText = inboundRoutingText(contentText ?? message.text?.body ?? null, audioTranscript)
 const automatedInbound = isLikelyAutomatedInbound(inboundText)
+const unknownFirstInboundNeedsHuman = await pauseUnknownFirstInboundForHuman({
+  accountId,
+  conversationId: conversation.id,
+  contactId: contactRecord.id,
+  userId: configOwnerUserId,
+  isFirstInboundMessage,
+  text: inboundText,
+})
 const salesDeclined = !automatedInbound && isExplicitSalesDecline(inboundText)
 if (salesDeclined) {
   const db = supabaseAdmin()
@@ -856,7 +969,7 @@ if (salesDeclined) {
     .is('context->>manual_agent_id', null)
   if (cancelError) throw cancelError
 }
-const allAutomaticRepliesDisabled = salesDeclined || (conversation.ai_enabled === false && conversation.automation_enabled === false)
+const allAutomaticRepliesDisabled = unknownFirstInboundNeedsHuman || salesDeclined || (conversation.ai_enabled === false && conversation.automation_enabled === false)
 
 const followupReplyHandled = !allAutomaticRepliesDisabled && interactiveReplyId
   ? await handleIdleFollowupReply({
@@ -879,9 +992,9 @@ if (!allAutomaticRepliesDisabled && !automatedInbound && !teacherHandled && !hum
   await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
 }
 const automationPaused =
-  salesDeclined || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
+  unknownFirstInboundNeedsHuman || salesDeclined || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
   let automationMatched = false
-  let flowConsumed = automatedInbound || followupReplyHandled || teacherHandled
+  let flowConsumed = unknownFirstInboundNeedsHuman || automatedInbound || followupReplyHandled || teacherHandled
 
 if (!automationPaused) {
   const flowResult = await dispatchInboundToFlows({
