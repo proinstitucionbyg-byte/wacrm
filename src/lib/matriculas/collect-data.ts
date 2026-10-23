@@ -35,6 +35,14 @@ const courses = [
   [/\b(?:AUXILIAR DE )?EDUCACION INICIAL\b/, 'AUXILIAR DE EDUCACION INICIAL'],
 ] as const;
 
+// Exact course buttons used by the CRM may use shorter display names than
+// the canonical course catalog. Keep these exact aliases narrow so ordinary
+// chat mentioning "admin" cannot accidentally create an enrollment.
+const exactCourseChoices = new Map<string, string>([
+  ['SUPER PROMO ADMIN', 'ASISTENTE ADMINISTRATIVO'],
+  ['SUPER PROMO ASISTENTE ADMINISTRATIVO', 'ASISTENTE ADMINISTRATIVO'],
+]);
+
 /** Deterministic extraction, no AI call. Photos and chat text never approve payment/identity/offer. */
 export function collectEnrollmentData(
   data: EnrollmentData,
@@ -106,6 +114,12 @@ export function collectEnrollmentData(
     const bareCourse = courses.filter(([pattern]) =>
       new RegExp(`^${pattern.source}$`, pattern.flags).test(key(trimmed)));
     if (bareCourse.length === 1) add('course', bareCourse[0][1]);
+    const exactChoiceKey = key(trimmed)
+      .replace(/\p{Extended_Pictographic}|[\uFE0E\uFE0F\u200D]/gu, '')
+      .replace(/[.!?]+$/g, '')
+      .trim();
+    const exactChoice = exactCourseChoices.get(exactChoiceKey);
+    if (exactChoice) add('course', exactChoice);
     if (isBarePersonName(trimmed) && bareCourse.length === 0) add('full_name', trimmed, true);
     for (const line of text.split(/\r?\n/)) {
       const lineValue = line.trim();

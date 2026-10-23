@@ -233,6 +233,14 @@ describe('deterministic chat intake', () => {
         collectEnrollmentData({}, [{ id: 'text', content_text }]).course
       ).toBeUndefined();
   });
+  it('recognizes the exact abbreviated Asistente Administrativo promo button', () => {
+    expect(collectEnrollmentData({}, [
+      { id: 'button', content_text: '💼 Super Promo Admin.' },
+    ]).course).toBe('ASISTENTE ADMINISTRATIVO');
+    expect(collectEnrollmentData({}, [
+      { id: 'chat', content_text: '¿Tienen algo para admin?' },
+    ]).course).toBeUndefined();
+  });
   it('does not silently remove invalid telephone letters or duplicate the WhatsApp number', () => {
     for (const content_text of [
       'celular: +51 987 000 000',
