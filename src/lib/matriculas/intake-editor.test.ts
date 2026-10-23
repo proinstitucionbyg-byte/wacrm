@@ -48,4 +48,17 @@ describe('inbox enrollment missing-data editor', () => {
       email: 'nuevo@correo.pe',
     });
   });
+
+  it('keeps identity evidence and review checkboxes when rebasing a concurrent save', () => {
+    expect(rebaseIntakeEditorData(
+      { full_name: 'ANDRES RENGIFO', email: 'nuevo@correo.pe' },
+      { full_name: 'ANDRES RENGIFO', email: 'nuevo@correo.pe', identity_message_ids: ['photo-1'], identity_confirmed: true },
+      ['identity_message_ids', 'identity_confirmed'],
+    )).toEqual({
+      full_name: 'ANDRES RENGIFO',
+      email: 'nuevo@correo.pe',
+      identity_message_ids: ['photo-1'],
+      identity_confirmed: true,
+    });
+  });
 });

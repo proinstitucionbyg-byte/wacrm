@@ -45,7 +45,7 @@ export function EnrollmentWelcomeCheck({
   const [intakeData, setIntakeData] = useState<EnrollmentData>({});
   const [confirmedFields, setConfirmedFields] = useState<string[]>([]);
   const [intakeFields, setIntakeFields] = useState<EnrollmentField[]>([]);
-  const [editedFields, setEditedFields] = useState<EnrollmentField[]>([]);
+  const [editedFields, setEditedFields] = useState<(keyof EnrollmentData)[]>([]);
   const [identityReviewed, setIdentityReviewed] = useState(false);
   const [offerReviewed, setOfferReviewed] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -127,37 +127,45 @@ export function EnrollmentWelcomeCheck({
     setError('');
     setFeedback('');
     try {
-      let patch = await fetch(`/api/enrollments/${intake.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: intakeData, version: intake.version }),
-      });
-      let saved = await patch.json();
-      if (patch.status === 409 && saved.error === 'Otra persona cambió la ficha. Actualiza antes de guardar.') {
-        const latestDraft = saved.latest as IntakeDraft | null;
-        if (!latestDraft) throw Error('No se pudo actualizar la ficha. Tus datos siguen guardados en este navegador.');
-        const rebasedData = rebaseIntakeEditorData(latestDraft.data ?? {}, intakeData, editedFields);
-        const nextFields = [...new Set([...intakeFields, ...missingRequiredEnrollmentFields(latestDraft.data ?? {})])];
-        const latestIssues = enrollmentIssues(latestDraft.data ?? {});
-        setIntake({ ...latestDraft, issues: latestIssues, can_edit: latestDraft.status === 'collecting' });
-        setIntakeFields(nextFields);
-        setIntakeData(rebasedData);
-        window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify({ intakeId: intake.id, baseVersion: latestDraft.version, data: rebasedData, confirmedFields }));
-        if (latestDraft.status !== 'collecting') throw Error('La ficha avanzó a registro mientras la completabas. Conservé tus datos en este navegador, pero no los envié para evitar duplicar el trámite.');
-        setError('La ficha se actualizó en paralelo. Conservé lo que escribiste y estoy guardándolo sobre la versión nueva…');
+      let patch: Response;
+      let saved: {
+        error?: string;
+        latest?: IntakeDraft | null;
+        draft?: { data: EnrollmentData; version: number };
+        issues?: string[];
+      };
+      let dataToSave = intakeData;
+      let versionToSave = intake.version;
+      for (let attempt = 0; ; attempt += 1) {
         patch = await fetch(`/api/enrollments/${intake.id}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: rebasedData, version: latestDraft.version }),
+          body: JSON.stringify({ data: dataToSave, version: versionToSave }),
         });
         saved = await patch.json();
+        if (patch.status !== 409 || saved.error !== 'Otra persona cambió la ficha. Actualiza antes de guardar.' || !saved.latest) break;
+        const latestDraft = saved.latest;
+        if (!latestDraft) break;
+        if (latestDraft.status !== 'collecting') throw Error('La ficha avanzó a registro mientras la completabas. Conservé tus datos en este navegador; no repetí el trámite.');
+        dataToSave = rebaseIntakeEditorData(latestDraft.data ?? {}, dataToSave, editedFields);
+        versionToSave = latestDraft.version;
+        const nextFields = [...new Set([...intakeFields, ...missingRequiredEnrollmentFields(latestDraft.data ?? {})])];
+        setIntake({ ...latestDraft, issues: enrollmentIssues(latestDraft.data ?? {}), can_edit: true });
+        setIntakeFields(nextFields);
+        setIntakeData(dataToSave);
+        window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify({ intakeId: intake.id, baseVersion: versionToSave, data: dataToSave, confirmedFields }));
+        if (attempt >= 2) throw Error('La ficha sigue cambiando en paralelo. Tus datos y casillas siguen en pantalla; espera unos segundos y pulsa GUARDAR Y CONTINUAR otra vez.');
+        setError('La ficha cambió en paralelo. Conservé lo escrito y seleccionado; reintentando el guardado…');
       }
       if (!patch.ok) throw Error(saved.error ?? 'No se pudieron guardar los datos.');
+      if (!saved.draft) throw Error('El servidor no devolvió la ficha guardada. Tus datos siguen en pantalla; vuelve a intentarlo.');
       setError('');
       setEditedFields([]);
-      setIntake({ ...intake, data: saved.draft.data, version: saved.draft.version, issues: saved.issues, can_edit: true });
+      const savedIssues = saved.issues ?? [];
+      setIntake({ ...intake, data: saved.draft.data, version: saved.draft.version, issues: savedIssues, can_edit: true });
       setIntakeData(saved.draft.data);
       window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify({ intakeId: intake.id, baseVersion: saved.draft.version, data: saved.draft.data, confirmedFields }));
-      if (saved.issues?.length) {
-        setError(`Datos guardados. Aún no se envían documentos: ${saved.issues.map(explainIntakeIssue).join(' · ')}`);
+      if (savedIssues.length) {
+        setError(`Datos guardados. Aún no se envían documentos: ${savedIssues.map(explainIntakeIssue).join(' · ')}`);
         return;
       }
       const submit = await fetch(`/api/enrollments/${intake.id}/submit`, {
@@ -182,7 +190,7 @@ export function EnrollmentWelcomeCheck({
       prices[index] = value.trim() ? Number(value) : 0;
       return { ...current, prices };
     });
-    setEditedFields((fields) => [...new Set([...fields, 'promotion_id' as EnrollmentField])]);
+    setEditedFields((fields) => [...new Set<keyof EnrollmentData>([...fields, 'prices', 'promotion_id', 'offer_confirmed'])]);
     setOfferReviewed(false);
     setIntakeData((current) => ({ ...current, offer_confirmed: false }));
   }
@@ -192,6 +200,7 @@ export function EnrollmentWelcomeCheck({
       const identity_message_ids = checked ? [...new Set([...ids, id])] : ids.filter((value) => value !== id);
       return { ...current, identity_message_ids, declaration_message_ids: [], identity_confirmed: false };
     });
+    setEditedFields((fields) => [...new Set<keyof EnrollmentData>([...fields, 'identity_message_ids', 'declaration_message_ids', 'identity_confirmed'])]);
     setIdentityReviewed(false);
   }
   const currentIntakeIssues = intake ? enrollmentIssues(intakeData) : [];
@@ -217,8 +226,9 @@ export function EnrollmentWelcomeCheck({
             ))}
           </div>
           {intake.issues.some((issue) => issue.startsWith('VERIFICAR IDENTIDAD:')) && (
-            <fieldset className="mt-1 rounded border border-border p-1.5">
-              <legend className="px-1 font-semibold">Revisión de identidad</legend>
+            <details className="mt-1 rounded border border-border px-1.5 py-1">
+              <summary className="cursor-pointer font-semibold">Revisión de identidad · {intake.identity_candidates?.length ?? 0} fotos para revisar</summary>
+              <div className="pt-1">
               {intake.identity_candidates?.length ? (
                 <>
                   <p>Marca la(s) foto(s) del documento que revisaste en el chat. La lectura automática es solo una sugerencia.</p>
@@ -236,6 +246,7 @@ export function EnrollmentWelcomeCheck({
                     const checked = event.target.checked;
                     setIdentityReviewed(checked);
                     setIntakeData((current) => ({ ...current, identity_confirmed: checked, identity_message_ids: checked ? current.identity_message_ids : [] }));
+                    setEditedFields((fields) => [...new Set<keyof EnrollmentData>([...fields, 'identity_confirmed', 'identity_message_ids'])]);
                   }} /> Revisé la(s) foto(s) seleccionada(s) y coinciden con el nombre y documento escritos.</label>
                 </>
               ) : <p>No hay una foto de identidad identificada en este chat. No marques la identidad como revisada; solicita o adjunta la evidencia desde este mismo chat.</p>}
@@ -249,6 +260,7 @@ export function EnrollmentWelcomeCheck({
                         const selected = intakeData.declaration_message_ids ?? [];
                         const ids = event.target.checked ? [...new Set([...selected, candidate.id])] : selected.filter((value) => value !== candidate.id);
                         setIntakeData((current) => ({ ...current, declaration_message_ids: ids.slice(0, 4), identity_message_ids: [], identity_confirmed: false }));
+                        setEditedFields((fields) => [...new Set<keyof EnrollmentData>([...fields, 'declaration_message_ids', 'identity_message_ids', 'identity_confirmed'])]);
                         setIdentityReviewed(false);
                       }} />
                       <span>{new Date(candidate.created_at).toLocaleString('es-PE', { timeZone: 'America/Lima' })} · {candidate.content_text.slice(0, 180)}</span>
@@ -257,11 +269,13 @@ export function EnrollmentWelcomeCheck({
                   <p className="mt-1">Mensajes seleccionados: {intakeData.declaration_message_ids?.length ?? 0}/4. El servidor comprobará que contengan los tres datos.</p>
                 </details>
               ) : null}
-            </fieldset>
+              </div>
+            </details>
           )}
           {intake.issues.some((issue) => issue.startsWith('CONFIRMAR LA OFERTA')) && (
-            <fieldset className="mt-1 rounded border border-border p-1.5">
-              <legend className="px-1 font-semibold">Oferta que recibió · 6 pagos</legend>
+            <details className="mt-1 rounded border border-border px-1.5 py-1">
+              <summary className="cursor-pointer font-semibold">Oferta recibida · completar 6 pagos</summary>
+              <div className="pt-1">
               <p>Registra el primer pago y las cinco cuotas según el último bloque de promoción enviado en este chat.</p>
               <div className="mt-1 grid grid-cols-3 gap-1 sm:grid-cols-6">
                 {Array.from({ length: 6 }, (_, index) => <label key={index} className="min-w-0">{index === 0 ? '1.er pago' : `Cuota ${index + 1}`}<input aria-label={index === 0 ? 'Primer pago' : `Cuota ${index + 1}`} type="number" min="0.01" step="0.01" value={intakeData.prices?.[index] ? String(intakeData.prices[index]) : ''} onChange={(event) => updatePrices(index, event.target.value)} className="mt-0.5 w-full rounded border border-border bg-background px-1 py-1" /></label>)}
@@ -270,13 +284,15 @@ export function EnrollmentWelcomeCheck({
                 const checked = event.target.checked;
                 setOfferReviewed(checked);
                 setIntakeData((current) => ({ ...current, offer_confirmed: checked, promotion_id: current.promotion_id || `OFERTA ${current.prices?.[0]?.toFixed(2)} + 5 CUOTAS ${current.prices?.[1]?.toFixed(2)}` }));
+                setEditedFields((fields) => [...new Set<keyof EnrollmentData>([...fields, 'offer_confirmed', 'promotion_id'])]);
               }} /> Confirmé que estos son los seis pagos ofrecidos al estudiante.</label>
-            </fieldset>
+              </div>
+            </details>
           )}
           <Button size="sm" className="mt-1 h-7 px-2 text-[11px]" disabled={busy === 'intake' || currentIntakeIssues.length > 0 || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim())} onClick={() => void registerMissingIntake()}>{busy === 'intake' ? 'GUARDANDO…' : 'GUARDAR Y CONTINUAR'}</Button>
         </section>
       )}
-      {intake?.issues.length ? (
+      {intake?.issues.length && !intake.can_edit ? (
         <div className="mx-2 my-1 w-full max-w-2xl rounded border border-amber-500/30 p-1.5 text-[10px] leading-tight text-amber-700 sm:mx-4">
           <strong>ANTES DE ENVIAR A REGISTRO</strong>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">

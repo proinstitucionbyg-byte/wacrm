@@ -13,12 +13,12 @@ export interface IntakeEditorDraft {
 export function rebaseIntakeEditorData(
   serverData: EnrollmentData,
   localData: EnrollmentData,
-  editedFields: EnrollmentField[]
+  editedFields: (keyof EnrollmentData)[]
 ): EnrollmentData {
   const rebased = { ...serverData };
   for (const field of editedFields) {
     const value = localData[field];
-    if (typeof value === 'string') rebased[field] = value;
+    if (value !== undefined) Object.assign(rebased, { [field]: value });
   }
   return rebased;
 }
