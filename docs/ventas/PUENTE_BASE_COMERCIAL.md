@@ -13,9 +13,11 @@ Hoja nativa: https://docs.google.com/spreadsheets/d/1qtO6wN-jbbZppcM7qWjoJ2Bv9HV
 
 ## Flujo de estado comercial que se está incorporando
 
-La columna H se enviará a WACRM como etiqueta de proceso comercial. La ruta nueva recibe únicamente uno de los estados permitidos, reemplaza solo etiquetas de esa lista y conserva las etiquetas de área, asesora, pago y fidelización. No valida pagos ni cambia la asignación de área.
+La columna H se sincroniza a WACRM como etiqueta de proceso comercial. La ruta recibe únicamente uno de los estados permitidos, reemplaza solo etiquetas de esa lista y conserva las etiquetas de área, asesora, pago y fidelización. No valida pagos ni cambia la asignación de área.
 
-La ruta requiere una llave independiente con alcance `sales:write`, y Apps Script necesita guardarla en `CRM_WRITE_API_KEY` como propiedad del proyecto. La llave actual de lectura no se amplía. La escritura queda pendiente hasta que esa llave exista; este documento no afirma que ya está operando en producción.
+La ruta requiere una llave independiente con alcance `sales:write`; la llave de lectura no se amplía. El 22 de octubre de 2026 se creó `Base Comercial - estado comercial` con únicamente ese alcance, se guardó como propiedad privada `CRM_WRITE_API_KEY` en Apps Script y se instaló el activador `SYNC_ESTADO_VENTA_EDITADO_CRM` para ediciones de la columna H. EasyPanel reporta el commit `8351431df129efbceb6b9e37c5d0ab63e6f318b3` en `main`.
+
+El código y la instalación del activador están verificados. Falta confirmar el primer cambio real de un estado en la hoja; no se modificó un contacto solo para hacer una prueba. La operación se limita a reemplazar una etiqueta comercial permitida y deja intactas las etiquetas de área, asesora, pago y fidelización.
 
 ## Columnas y protecciones
 
@@ -25,7 +27,6 @@ El número de operación tiene validación para impedir duplicados. El consecuti
 
 ## Pendiente para cerrar el punto 6
 
-1. Desplegar la ruta nueva y aplicar su migración en Supabase.
-2. Crear una llave `sales:write` separada y guardarla en Apps Script; después instalar el activador de edición que acaba de incorporarse al script.
-3. Confirmar asesoras activas antes de crear o compartir sus bases individuales. No activar personas ni repartir contactos automáticamente.
-4. Confirmar el tarifario de comisiones vigente antes de calcular montos o rankings pagables.
+1. Confirmar el recorrido completo con el primer cambio real de estado en la columna H.
+2. Confirmar asesoras activas antes de crear o compartir sus bases individuales. No activar personas ni repartir contactos automáticamente.
+3. Confirmar el tarifario de comisiones vigente antes de calcular montos o rankings pagables.
