@@ -187,3 +187,25 @@ export function enrollmentIssues(data: EnrollmentData): string[] {
     issues.push('PAGO PARCIAL O DISTINTO DE LA OFERTA: REVISAR');
   return [...new Set(issues)];
 }
+
+/** Required registration fields that are still blank; optional address fields stay out. */
+export function missingRequiredEnrollmentFields(
+  data: EnrollmentData
+): (keyof typeof ENROLLMENT_FIELDS)[] {
+  return (
+    [
+      'full_name',
+      'document_type',
+      'document_number',
+      'birth_date',
+      'phone1',
+      'email',
+      'course',
+      'start_date',
+      'promotion_id',
+      'payment_date',
+      'amount',
+      'payment_method',
+    ] as const
+  ).filter((key) => !data[key]?.trim());
+}

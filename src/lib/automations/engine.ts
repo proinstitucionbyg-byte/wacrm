@@ -444,6 +444,27 @@ export async function resumePendingExecution(pending: {
     await markPending(pending.id, 'failed')
     return
   }
+  // A manually disabled conversation pauses every automatic sequence,
+  // including enrollment welcomes and payment follow-ups. Keep its exact
+  // next step so an explicit reactivation can resume it later.
+  if (pending.context?.conversation_id) {
+    const { data: conv, error: pauseError } = await db.from('conversations')
+      .select('automation_enabled')
+      .eq('id', pending.context.conversation_id)
+      .eq('account_id', pending.account_id)
+      .maybeSingle()
+    if (pauseError || !conv) {
+      await db.from('automation_pending_executions')
+        .update({ status: 'pending', run_at: new Date(Date.now() + 60_000).toISOString() })
+        .eq('id', pending.id).eq('status', 'running')
+      return
+    }
+    if (conv.automation_enabled === false) {
+      await db.from('automation_pending_executions').update({ status: 'paused' })
+        .eq('id', pending.id).eq('status', 'running')
+      return
+    }
+  }
   if (isCourseDetour(automation) && pending.context?.course_detour_capture && pending.contact_id && pending.context.conversation_id) {
     try {
       const state = await captureCourseCheckpoint(db, pending.account_id, pending.contact_id, pending.context.conversation_id)
@@ -681,6 +702,7 @@ export async function resumePendingExecution(pending: {
         : undefined,
       logId: pending.log_id,
       triggerEvent: 'resumed_wait',
+      pendingExecutionId: pending.id,
     })
     if(pending.context?.enrollment_sequence_id){
       const {data: outcome,error: outcomeError}=await db.from('automation_logs').select('status').eq('id',pending.log_id).maybeSingle()
@@ -829,6 +851,7 @@ interface ExecuteArgs {
   endPosition?: number
   logId: string | null
   triggerEvent: string
+  pendingExecutionId?: string
 }
 
 async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
@@ -880,17 +903,39 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     // An adviser can reply while a block is waiting for delivery or while
     // this loop is advancing. Keep the exact next step instead of sending
     // over the adviser or losing the remaining sequence.
-    if (args.context.conversation_id && !args.context.manual_agent_id && !args.context.enrollment_sequence_id) {
+    if (args.context.conversation_id) {
       const { data: conversation, error: pauseError } = await db.from('conversations')
         .select('last_human_message_at,automation_enabled')
         .eq('id', args.context.conversation_id)
         .eq('account_id', args.automation.account_id)
         .maybeSingle()
       if (pauseError) throw pauseError
+      if (conversation?.automation_enabled === false) {
+        const payload = {
+          automation_id: args.automation.id,
+          account_id: args.automation.account_id,
+          user_id: args.automation.user_id,
+          contact_id: args.contactId,
+          log_id: args.logId,
+          parent_step_id: args.parentStepId,
+          branch: args.branch,
+          next_step_position: step.position,
+          context: args.context,
+          run_at: new Date().toISOString(),
+          status: 'paused',
+        };
+        if (args.pendingExecutionId) {
+          await db.from('automation_pending_executions').update(payload)
+            .eq('id', args.pendingExecutionId).eq('status', 'running');
+        } else {
+          await db.from('automation_pending_executions').insert(payload);
+        }
+        await appendResults(args.logId, results, 'partial', null);
+        return;
+      }
       const humanAt = Date.parse(conversation?.last_human_message_at ?? '')
-      const automationDisabled = conversation?.automation_enabled === false
       const humanActive = Number.isFinite(humanAt) && Date.now() < humanAt + HUMAN_PAUSE_MS
-      if (automationDisabled || humanActive) {
+      if (!args.context.manual_agent_id && !args.context.enrollment_sequence_id && humanActive) {
         const runAt = Math.max(Date.now() + 30_000, Number.isFinite(humanAt) ? humanAt + HUMAN_PAUSE_MS : 0)
         const { error: deferError } = await db.from('automation_pending_executions').insert({
           automation_id: args.automation.id, account_id: args.automation.account_id,
@@ -899,7 +944,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
           next_step_position: step.position, context: args.context,
           // Retain the next position for review without leaving disabled
           // conversations in the cron queue indefinitely.
-          run_at: new Date(runAt).toISOString(), status: automationDisabled ? 'cancelled' : 'pending',
+          run_at: new Date(runAt).toISOString(), status: 'pending',
         })
         if (deferError) throw deferError
         await appendResults(args.logId, results, 'partial', null)
@@ -1619,6 +1664,7 @@ async function markPending(id: string, status: 'done' | 'failed' | 'cancelled') 
     .from('automation_pending_executions')
     .update({ status })
     .eq('id', id)
+    .eq('status', 'running')
 }
 
 async function notifyDeliveryFailure(

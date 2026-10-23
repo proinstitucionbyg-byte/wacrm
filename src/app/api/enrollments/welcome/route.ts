@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { requirePermission } from '@/lib/auth/permissions';
+import { canInAccount, requirePermission } from '@/lib/auth/permissions';
 import { toErrorResponse } from '@/lib/auth/account';
 import { UUID_PATTERN } from '@/lib/team-chat';
+import { enrollmentIssues, type EnrollmentData } from '@/lib/matriculas/enrollment';
 export async function GET(request: Request) {
   try {
     const ctx = await requirePermission('inbox', 'view');
@@ -20,7 +21,37 @@ export async function GET(request: Request) {
       .order('started_at', { ascending: false })
       .limit(1);
     if (error) throw error;
-    return NextResponse.json({ tasks: data ?? [] });
+    const { data: draft, error: draftError } = await ctx.supabase
+      .from('enrollment_drafts')
+      .select('id,version,data,status,review_id')
+      .eq('account_id', ctx.accountId)
+      .eq('conversation_id', conversation)
+      .eq('status', 'collecting')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (draftError) throw draftError;
+    let intake = null;
+    if (draft) {
+      const { data: review, error: reviewError } = await ctx.supabase
+        .from('payment_reviews')
+        .select('status,payment_purpose')
+        .eq('id', draft.review_id)
+        .eq('account_id', ctx.accountId)
+        .maybeSingle();
+      if (reviewError) throw reviewError;
+      if (review?.status === 'validated' && review.payment_purpose === 'enrollment'
+          && await canInAccount(ctx, 'enrollments', 'edit')) {
+        intake = {
+          id: draft.id,
+          version: draft.version,
+          data: draft.data as EnrollmentData,
+          issues: enrollmentIssues(draft.data as EnrollmentData),
+          can_edit: await canInAccount(ctx, 'enrollments', 'edit'),
+        };
+      }
+    }
+    return NextResponse.json({ tasks: data ?? [], intake });
   } catch (error) {
     return toErrorResponse(error);
   }

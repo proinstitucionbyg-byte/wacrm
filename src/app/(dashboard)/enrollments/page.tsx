@@ -8,10 +8,12 @@ import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from '@
 import {ManualEnrollment} from '@/components/enrollments/manual-enrollment';
 import {
   ENROLLMENT_FIELDS,
+  missingRequiredEnrollmentFields,
   suggestIdentityData,
   type EnrollmentData,
   type EnrollmentDraft,
 } from '@/lib/matriculas/enrollment';
+import { restoreEnrollmentEditorData } from '@/lib/matriculas/editor-draft';
 
 type Evidence = {
   id: string;
@@ -39,6 +41,10 @@ function EnrollmentEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [collecting, setCollecting] = useState(true);
+  const [hydrated, setHydrated] = useState(false);
+  const [recovered, setRecovered] = useState(false);
+  const [confirmedMissing, setConfirmedMissing] = useState<string[]>([]);
+  const cacheKey = `wacrm:enrollment:editor:${initial.id}`;
   useEffect(() => {
     let cancelled = false;
     setCollecting(true);
@@ -54,8 +60,14 @@ function EnrollmentEditor({
         const json = await res.json();
         if (!res.ok) throw new Error(json.error);
         if (cancelled) return;
+        let restored = { data: json.draft.data as EnrollmentData, restored: false };
+        if (canEdit && json.draft.status === 'collecting') {
+          try { restored = restoreEnrollmentEditorData(json.draft.data, sessionStorage.getItem(cacheKey)); } catch { /* Private browsing may disable storage. */ }
+        }
         setDraft(json.draft);
-        setData(json.draft.data);
+        setData(restored.data);
+        setRecovered(restored.restored);
+        setHydrated(true);
         setImages(json.images);
         setDocuments(json.documents ?? []);
         setIssues(json.issues);
@@ -69,10 +81,23 @@ function EnrollmentEditor({
     return () => {
       cancelled = true;
     };
-  }, [initial.id, canEdit]);
+  }, [initial.id, canEdit, cacheKey]);
   const locked =
     !canEdit || ['ready', 'processing', 'registered'].includes(draft.status);
   const dirty = JSON.stringify(data) !== JSON.stringify(draft.data);
+  useEffect(() => {
+    if (!hydrated || !canEdit) return;
+    try {
+      if (dirty && !locked) sessionStorage.setItem(cacheKey, JSON.stringify({ baseData: draft.data, data, savedAt: Date.now() }));
+      else sessionStorage.removeItem(cacheKey);
+    } catch { /* Keep editing if storage is unavailable. */ }
+  }, [hydrated, canEdit, dirty, locked, cacheKey, draft.data, data]);
+  useEffect(() => {
+    if (!dirty || locked) return;
+    const protect = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', protect);
+    return () => window.removeEventListener('beforeunload', protect);
+  }, [dirty, locked]);
   async function collectSelected() {
     setSaving(true);setError('');
     try {
@@ -120,6 +145,7 @@ function EnrollmentEditor({
       if (!res.ok) throw new Error(json.error);
       setDraft(json.draft);
       setData(json.draft.data);
+      setRecovered(false);
       setIssues(json.issues);
       setError('');
       toast.success('Datos guardados. El pago conserva su validación.');
@@ -129,6 +155,47 @@ function EnrollmentEditor({
       setSaving(false);
     }
   }
+  async function registerMissingData() {
+    const missing = missingRequiredEnrollmentFields(data);
+    if (!missing.length || missing.some((key) => !confirmedMissing.includes(key) || !data[key]?.trim())) return;
+    setSaving(true);
+    setError('');
+    try {
+      const savedResponse = await fetch(`/api/enrollments/${draft.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data, version: draft.version }),
+      });
+      const saved = await savedResponse.json();
+      if (!savedResponse.ok) throw new Error(saved.error);
+      setDraft(saved.draft);
+      setData(saved.draft.data);
+      setIssues(saved.issues);
+      setRecovered(false);
+      if (saved.issues.length) {
+        toast.success('Datos confirmados y guardados. La revisión humana pendiente sigue protegida.');
+        return;
+      }
+      const submitResponse = await fetch(`/api/enrollments/${draft.id}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: saved.draft.version }),
+      });
+      const submitted = await submitResponse.json();
+      if (!submitResponse.ok) throw new Error(submitted.error);
+      setDraft(submitted.draft);
+      setIssues(submitted.issues ?? []);
+      toast.success('Datos completos. Ficha enviada a la cola de registro; confirma el envío de documentos en su estado.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron registrar los datos faltantes.');
+    } finally {
+      setSaving(false);
+    }
+  }
+  function updateMissingField(key: keyof typeof ENROLLMENT_FIELDS, value: string) {
+    setData({ ...data, [key]: value });
+    setConfirmedMissing((current) => current.filter((field) => field !== key));
+  }
   if (collecting)
     return <p className="p-5 text-sm">RECOGIENDO LOS DATOS DEL CHAT...</p>;
   return (
@@ -137,6 +204,7 @@ function EnrollmentEditor({
         {data.full_name || 'MATRICULA CON DATOS PENDIENTES'}
       </h2>
       <p className="text-muted-foreground text-xs">{data.course || 'CURSO PENDIENTE'} · OPERACIÓN {draft.operation_reference || 'POR CONFIRMAR'}</p>
+      {recovered && dirty && <p role="status" className="rounded border border-amber-500/40 p-2 text-xs">Recuperé los cambios sin guardar de esta pestaña. Revisa la ficha y pulsa Guardar datos.</p>}
       {!locked && <div className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={saving || dirty || !data.course} onClick={collectSelected}>Recoger datos para esta matrícula</Button><p className="text-muted-foreground text-xs">Si tiene varias matrículas, guarda primero el curso en la ficha correspondiente a este comprobante.</p></div>}
       {!canEdit && (
         <p className="text-muted-foreground text-sm">
@@ -201,6 +269,34 @@ function EnrollmentEditor({
               );
             })}
           </div>
+        </section>
+      )}
+      {!locked && draft.status === 'collecting' && missingRequiredEnrollmentFields(data).length > 0 && (
+        <section className="rounded-lg border border-primary/30 p-3" aria-label="Completar solo los datos faltantes">
+          <h3 className="text-sm font-semibold">COMPLETAR SOLO LOS DATOS QUE FALTAN</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Usa lo que ya está en la conversación. Marca cada dato después de confirmarlo. Dirección y segundo celular no son obligatorios.</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {missingRequiredEnrollmentFields(data).map((key) => (
+              <label key={key} className="text-xs">
+                {ENROLLMENT_FIELDS[key]}
+                {key === 'document_type' ? (
+                  <select disabled={saving} value={data[key] ?? ''} onChange={(event) => updateMissingField(key, event.target.value)} className="border-border bg-background mt-1 block w-full rounded border p-2">
+                    <option value="">Seleccionar</option>
+                    {['DNI', 'CARNE DE EXTRANJERIA', 'PASAPORTE', 'OTRO'].map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                ) : (
+                  <input disabled={saving} type={['birth_date', 'start_date', 'payment_date'].includes(key) ? 'date' : key === 'email' ? 'email' : 'text'} value={data[key] ?? ''} onChange={(event) => updateMissingField(key, event.target.value)} className="border-border bg-background mt-1 block w-full rounded border p-2" />
+                )}
+                <span className="mt-2 flex items-center gap-2">
+                  <input type="checkbox" disabled={saving || !data[key]?.trim()} checked={confirmedMissing.includes(key)} onChange={(event) => setConfirmedMissing((current) => event.target.checked ? [...new Set([...current, key])] : current.filter((item) => item !== key))} />
+                  Dato confirmado
+                </span>
+              </label>
+            ))}
+          </div>
+          <Button className="mt-3" disabled={saving || missingRequiredEnrollmentFields(data).some((key) => !confirmedMissing.includes(key) || !data[key]?.trim())} onClick={registerMissingData}>
+            {saving ? 'GUARDANDO…' : 'REGISTRAR DATOS FALTANTES'}
+          </Button>
         </section>
       )}
       {draft.conversation_id && (

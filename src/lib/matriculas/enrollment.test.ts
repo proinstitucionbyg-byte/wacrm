@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   enrollmentIssues,
+  missingRequiredEnrollmentFields,
   parseEnrollmentData,
   suggestIdentityData,
 } from './enrollment';
 describe('matricula posterior a pago humano', () => {
+  it('shows only blank required fields in the compact adviser form', () => {
+    expect(missingRequiredEnrollmentFields({full_name:'ALUMNO',document_type:'PASAPORTE',document_number:'ABC123',phone1:'+51999999999',address:'AV. PRUEBA'})).toEqual([
+      'birth_date','email','course','start_date','promotion_id','payment_date','amount','payment_method',
+    ]);
+  });
   it('requiere fecha de nacimiento pero no bloquea los documentos por domicilio opcional', () => {
     const issues=enrollmentIssues({full_name:'ALUMNO',document_type:'DNI',document_number:'12345678'});
     expect(issues).toContain('FALTA FECHA DE NACIMIENTO');

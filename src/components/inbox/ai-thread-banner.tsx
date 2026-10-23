@@ -168,14 +168,12 @@ export function AiThreadBanner({
     const enable = aiDisabled && !automationOn;
     setBusy(true);
     try {
-      const { error } = await createClient().from('conversations').update({
-        ai_enabled: enable,
-        automation_enabled: enable,
-        // A null timestamp means the scheduler must not reactivate them.
-        ai_disabled_at: null,
-        automation_disabled_at: null,
-      }).eq('id', conversationId);
+      const { data, error } = await createClient().rpc('set_conversation_automatic_pause', {
+        p_conversation: conversationId,
+        p_paused: !enable,
+      });
       if (error) throw error;
+      if (data !== true) throw new Error('No se pudo actualizar esta conversación');
       setAiDisabled(!enable);
       setAutomationOn(enable);
       onChange?.({ ai_enabled: enable, automation_enabled: enable });
