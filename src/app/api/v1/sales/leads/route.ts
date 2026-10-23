@@ -2,6 +2,7 @@ import { requireApiKey } from '@/lib/auth/api-context';
 import { buildPage, keysetFilter, parseListParams } from '@/lib/api/v1/pagination';
 import { okList, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { SALES_COMMERCIAL_STATUSES } from '@/lib/sales/commercial-status';
+import { courseInterestFromMessages } from '@/lib/sales/course-interest';
 
 const SALES_TAGS = new Set<string>([
   'AREA VENTAS',
@@ -63,27 +64,6 @@ function newestRoute(routes: RawConversation['conversation_sales_routes']) {
   return [...routes].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
 }
 
-function courseFromMessages(messages: RawMessage[]): string {
-  const text = messages
-    .filter((message) => message.sender_type === 'customer')
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))
-    .map((message) => `${message.interactive_reply_id ?? ''} ${message.content_text ?? ''}`)
-    .join(' ')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-
-  const found = new Set<string>();
-  if (/nutricion|dietetica/.test(text)) found.add('Nutrición y dietética');
-  if (/farmacia/.test(text)) found.add('Auxiliar de farmacia');
-  if (/educacion inicial|inicial/.test(text)) found.add('Educación inicial');
-  if (/recursos humanos|gestion humana|talento humano/.test(text)) found.add('Recursos humanos');
-  if (/asistente administrativo|administracion|administrativo/.test(text)) found.add('Asistente administrativo');
-  if (found.size === 1) return [...found][0];
-  if (found.size > 1) return `Varios: ${[...found].join(', ')}`;
-  return '';
-}
-
 export async function GET(request: Request) {
   try {
     const ctx = await requireApiKey(request, 'contacts:read');
@@ -105,8 +85,8 @@ export async function GET(request: Request) {
       .order('id', { ascending: false })
       .order('created_at', { referencedTable: 'conversations', ascending: false })
       .limit(1, { referencedTable: 'conversations' })
+      .eq('conversations.messages.sender_type', 'customer')
       .order('created_at', { referencedTable: 'conversations.messages', ascending: false })
-      .limit(10, { referencedTable: 'conversations.messages' })
       .limit(limit + 1);
 
     const cursorFilter = keysetFilter(cursor);
@@ -149,14 +129,16 @@ export async function GET(request: Request) {
       const latestCustomerMessage = [...messages]
         .filter((message) => message.sender_type === 'customer')
         .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
+      const courseInterest = courseInterestFromMessages(messages);
 
       return [{
         id: contact.id,
         name: contact.name?.trim() || 'Sin nombre',
         phone_or_user_id: contact.phone_normalized || contact.external_id || contact.phone || '',
         channel: contact.channel || 'whatsapp',
-        course_interest: courseFromMessages(messages),
-        course_basis: 'coincidencia en los últimos 10 mensajes del CRM; confirmar si está vacío',
+        course_interest: courseInterest.course,
+        course_details: courseInterest.details,
+        course_basis: 'coincidencia en los mensajes entrantes de la conversación más reciente; confirmar si está vacío',
         created_at: contact.created_at,
         institute: 'INSTICRECE',
         crm_tags: tags,

@@ -9,6 +9,7 @@ const SALES_SYNC = {
   firstDataRow: 3,
   batchSize: 100,
   crmIdColumn: 17, // Q: hidden technical key; A stays the permanent visible sequence.
+  courseDetailsColumn: 18, // R: CRM-owned detail when a lead is interested in multiple courses.
 };
 
 function onOpen() {
@@ -151,6 +152,7 @@ function SYNC_VENTAS_CRM() {
         '', // adviser notes are not overwritten
         lead.campaign_or_ad || '',
         lead.id,
+        lead.course_details || (String(lead.course_interest || '').startsWith('Varios:') ? String(lead.course_interest).slice(8).trim() : ''),
       ];
       const identityKey = contactIdentityKey_(lead.phone_or_user_id, lead.channel);
       const identifierKey = normalizeIdentifier_(lead.phone_or_user_id);
@@ -165,6 +167,7 @@ function SYNC_VENTAS_CRM() {
       sheet.getRange(existing, 9).setValue(row[8]);
       sheet.getRange(existing, 10, 1, 4).setValues([row.slice(9, 13)]);
       sheet.getRange(existing, 16, 1, 2).setValues([[row[15], row[16]]]);
+      sheet.getRange(existing, SALES_SYNC.courseDetailsColumn).setValue(row[17]);
       sheet.getRange(existing, 5).setNumberFormat('dd/mm/yyyy');
       sheet.getRange(existing, 6).setNumberFormat('hh:mm');
       updated++;
@@ -172,7 +175,7 @@ function SYNC_VENTAS_CRM() {
 
     if (newRows.length) {
       const start = Math.max(sheet.getLastRow() + 1, SALES_SYNC.firstDataRow);
-      sheet.getRange(start, 1, newRows.length, 17).setValues(newRows);
+      sheet.getRange(start, 1, newRows.length, 18).setValues(newRows);
       sheet.getRange(start, 5, newRows.length, 1).setNumberFormat('dd/mm/yyyy');
       sheet.getRange(start, 6, newRows.length, 1).setNumberFormat('hh:mm');
       sheet.getRange(start, 12, newRows.length, 2).setNumberFormat('dd/mm/yyyy hh:mm');
