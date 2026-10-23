@@ -27,6 +27,12 @@ describe('registration claims in AI responses',()=>{
     expect(prompt.lastIndexOf('Enrollment status must come from a completed registration operation')).toBeGreaterThan(prompt.lastIndexOf('KNOWLEDGE'));
     expect(prompt).toContain('A payment review approval alone does not prove registration or document delivery');
   });
+  it('does not mistake a university student asking about courses for an enrolled INSTICRECE student',()=>{
+    const prompt=buildSystemPrompt({mode:'auto_reply',userPrompt:'BUSINESS_PROMPT',knowledge:['KNOWLEDGE']});
+    expect(prompt).toContain('"soy estudiante universitario" or "soy estudiante" alone may refer to another institution');
+    expect(prompt).toContain('keep answering that request');
+    expect(prompt).toContain('Do not switch to questions about trámites, classes or justifications');
+  });
   it('requires greeting continuity and a response for unknown messages',()=>{
     const prompt=buildSystemPrompt({mode:'auto_reply',userPrompt:null});
     expect(prompt).toContain('SALUDO Y CONTINUIDAD');
