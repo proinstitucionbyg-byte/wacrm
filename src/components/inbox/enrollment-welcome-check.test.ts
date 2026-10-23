@@ -23,4 +23,16 @@ describe('enrollment welcome card regression', () => {
     expect(source).toContain('rebaseIntakeEditorData');
     expect(source).toContain('max-w-2xl');
   });
+
+  it('allows identity evidence and six-payment offer review from the same inbox card', () => {
+    const source = readFileSync(
+      new URL('./enrollment-welcome-check.tsx', import.meta.url),
+      'utf8'
+    );
+    expect(source).toContain('identity_candidates');
+    expect(source).toContain('declaration_candidates');
+    expect(source).toContain('Revisé la(s) foto(s) seleccionada(s)');
+    expect(source).toContain('Confirmé que estos son los seis pagos ofrecidos');
+    expect(source).not.toContain('Abrir Registro de Matrículas para completar la revisión');
+  });
 });
