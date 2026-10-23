@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'vitest';
+import {
+  intakeEditorStorageKey,
+  readIntakeEditorDraft,
+  visibleIntakeFields,
+} from './intake-editor';
+
+describe('inbox enrollment missing-data editor', () => {
+  it('keeps the original missing fields visible after selecting DNI', () => {
+    const fields = ['document_type', 'document_number'] as const;
+    expect(visibleIntakeFields([...fields])).toEqual([...fields]);
+  });
+
+  it('restores field values and checked confirmations after a remount at the same server version', () => {
+    const draft = {
+      intakeId: 'intake-1',
+      baseVersion: 4,
+      data: { document_type: 'DNI', document_number: '12345678' },
+      confirmedFields: ['document_type'],
+    };
+    expect(readIntakeEditorDraft(JSON.stringify(draft), 'intake-1', 4)).toEqual(draft);
+  });
+
+  it('does not apply a local draft to another intake or an updated server version', () => {
+    const draft = JSON.stringify({
+      intakeId: 'intake-1',
+      baseVersion: 4,
+      data: { document_number: '12345678' },
+      confirmedFields: [],
+    });
+    expect(readIntakeEditorDraft(draft, 'intake-2', 4)).toBeNull();
+    expect(readIntakeEditorDraft(draft, 'intake-1', 5)).toBeNull();
+  });
+
+  it('names a separate local draft for each intake', () => {
+    expect(intakeEditorStorageKey('intake-1')).not.toBe(intakeEditorStorageKey('intake-2'));
+  });
+});

@@ -10,4 +10,15 @@ describe('enrollment welcome card regression', () => {
     expect(source).not.toMatch(/setInterval\s*\(/);
     expect(source).toContain('data-enrollment-welcome-slot');
   });
+
+  it('keeps the missing-field snapshot visible and restores an unsaved draft', () => {
+    const source = readFileSync(
+      new URL('./enrollment-welcome-check.tsx', import.meta.url),
+      'utf8'
+    );
+    expect(source).toContain('visibleIntakeFields(intakeFields)');
+    expect(source).toContain('window.sessionStorage.setItem');
+    expect(source).toContain('readIntakeEditorDraft(');
+    expect(source).toContain('Confirmé que coincide con el chat');
+  });
 });
