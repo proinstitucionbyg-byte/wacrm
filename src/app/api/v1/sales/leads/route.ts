@@ -1,11 +1,13 @@
 import { requireApiKey } from '@/lib/auth/api-context';
 import { buildPage, keysetFilter, parseListParams } from '@/lib/api/v1/pagination';
 import { okList, toApiErrorResponse } from '@/lib/api/v1/respond';
+import { SALES_COMMERCIAL_STATUSES } from '@/lib/sales/commercial-status';
 
-const SALES_TAGS = new Set([
+const SALES_TAGS = new Set<string>([
   'AREA VENTAS',
   'SEGUIMIENTO DE VENTAS',
   'VENTA',
+  ...SALES_COMMERCIAL_STATUSES,
 ]);
 
 type RawMessage = {
@@ -158,6 +160,7 @@ export async function GET(request: Request) {
         created_at: contact.created_at,
         institute: 'INSTICRECE',
         crm_tags: tags,
+        commercial_status: tags.find((tag) => SALES_COMMERCIAL_STATUSES.includes(tag as typeof SALES_COMMERCIAL_STATUSES[number])) ?? '',
         assigned_adviser_id: assignedAgentId,
         assigned_adviser: assignedProfile?.nickname?.trim() || assignedProfile?.full_name?.trim() || '',
         assigned_at: route?.created_at ?? null,

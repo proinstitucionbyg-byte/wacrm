@@ -16,6 +16,7 @@ function onOpen() {
     .addItem('Sincronizar contactos de ventas', 'SYNC_VENTAS_CRM')
     .addSeparator()
     .addItem('Instalar sincronización cada 10 minutos', 'INSTALAR_SYNC_VENTAS_CRM')
+    .addItem('Instalar sincronización del estado comercial', 'INSTALAR_SYNC_ESTADO_VENTAS_CRM')
     .addToUi();
 }
 
@@ -32,6 +33,59 @@ function INSTALAR_SYNC_VENTAS_CRM() {
   SYNC_VENTAS_CRM();
 }
 
+/** Installs a separate edit trigger only after a restricted sales:write key is configured. */
+function INSTALAR_SYNC_ESTADO_VENTAS_CRM() {
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('CRM_BASE_URL') || !props.getProperty('CRM_WRITE_API_KEY')) {
+    throw new Error('Configura CRM_BASE_URL y CRM_WRITE_API_KEY (llave limitada a sales:write) antes de instalar.');
+  }
+  const handler = 'SYNC_ESTADO_VENTA_EDITADO_CRM';
+  ScriptApp.getProjectTriggers()
+    .filter((trigger) => trigger.getHandlerFunction() === handler)
+    .forEach((trigger) => ScriptApp.deleteTrigger(trigger));
+  ScriptApp.newTrigger(handler)
+    .forSpreadsheet(SpreadsheetApp.getActive())
+    .onEdit()
+    .create();
+  SpreadsheetApp.getActive().toast('El estado comercial se enviará al CRM al editar la columna H.', 'CRM', 5);
+}
+
+/** Sends only the sales-status dropdown value; all other CRM tags remain untouched. */
+function SYNC_ESTADO_VENTA_EDITADO_CRM(e) {
+  if (!e || !e.range) return;
+  const sheet = e.range.getSheet();
+  if (sheet.getName() !== SALES_SYNC.sheet || e.range.getColumn() !== 8 || e.range.getRow() < SALES_SYNC.firstDataRow) return;
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) return;
+
+  const props = PropertiesService.getScriptProperties();
+  const base = String(props.getProperty('CRM_BASE_URL') || '').replace(/\/$/, '');
+  const key = props.getProperty('CRM_WRITE_API_KEY');
+  if (!base || !key) {
+    sheet.getParent().toast('No se sincronizó: falta configurar la llave separada sales:write.', 'CRM', 8);
+    return;
+  }
+  const contactId = String(sheet.getRange(e.range.getRow(), SALES_SYNC.crmIdColumn).getDisplayValue() || '').trim();
+  if (!contactId) {
+    sheet.getParent().toast('No se sincronizó: esta fila aún no tiene ID estable del CRM en Q.', 'CRM', 8);
+    return;
+  }
+
+  const status = String(e.range.getDisplayValue() || '').trim();
+  const response = UrlFetchApp.fetch(base + '/api/v1/sales/leads/' + encodeURIComponent(contactId), {
+    method: 'patch',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + key },
+    payload: JSON.stringify({ commercial_status: status || null }),
+    muteHttpExceptions: true,
+  });
+  if (response.getResponseCode() !== 200) {
+    const body = JSON.parse(response.getContentText() || '{}');
+    sheet.getParent().toast('No se sincronizó con el CRM (' + response.getResponseCode() + '): ' + (body.error && body.error.message || 'revisa la llave o el registro.'), 'CRM', 10);
+    return;
+  }
+  sheet.getParent().toast('Estado comercial actualizado en las etiquetas del CRM.', 'CRM', 5);
+}
+
 function SYNC_VENTAS_CRM() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(20000);
@@ -44,13 +98,29 @@ function SYNC_VENTAS_CRM() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SALES_SYNC.sheet);
     if (!sheet) throw new Error('No existe la pestaña BASE GENERAL.');
+    const advisersSheet = ss.getSheetByName('ASESORAS');
+    if (!advisersSheet) throw new Error('No existe la pestaña ASESORAS.');
+    const activeAdviserByName = new Map(advisersSheet.getRange('I3:I102').getDisplayValues().flat().filter(Boolean).map((name) => [normalizeNameKey_(name), name]));
 
     const leads = fetchAllSalesLeads_(base, key);
     const lastRow = Math.max(sheet.getLastRow(), SALES_SYNC.firstDataRow - 1);
-    const ids = lastRow >= SALES_SYNC.firstDataRow
-      ? sheet.getRange(SALES_SYNC.firstDataRow, SALES_SYNC.crmIdColumn, lastRow - SALES_SYNC.firstDataRow + 1, 1).getDisplayValues().flat()
+    const existingRows = lastRow >= SALES_SYNC.firstDataRow
+      ? sheet.getRange(SALES_SYNC.firstDataRow, 1, lastRow - SALES_SYNC.firstDataRow + 1, SALES_SYNC.crmIdColumn).getDisplayValues()
       : [];
-    const rowById = new Map(ids.map((id, index) => [id, SALES_SYNC.firstDataRow + index]).filter(([id]) => id));
+    const rowById = new Map();
+    const rowByIdentity = new Map();
+    const rowByIdentifier = new Map();
+    existingRows.forEach((existingRow, index) => {
+      const rowNumber = SALES_SYNC.firstDataRow + index;
+      const crmId = existingRow[SALES_SYNC.crmIdColumn - 1];
+      const identifier = existingRow[2];
+      const channel = existingRow[9];
+      if (crmId) rowById.set(crmId, rowNumber);
+      const identityKey = contactIdentityKey_(identifier, channel);
+      if (identityKey && !rowByIdentity.has(identityKey)) rowByIdentity.set(identityKey, rowNumber);
+      const identifierKey = normalizeIdentifier_(identifier);
+      if (identifierKey && !rowByIdentifier.has(identifierKey)) rowByIdentifier.set(identifierKey, rowNumber);
+    });
 
     const newRows = [];
     let updated = 0;
@@ -67,13 +137,13 @@ function SYNC_VENTAS_CRM() {
         0, // sequence number filled only for new contacts below
         lead.name || 'Sin nombre',
         lead.phone_or_user_id || '',
-        lead.course_interest || '',
+        normalizeCourse_(lead.course_interest),
         createdAt,
         createdAt,
         lead.institute || 'INSTICRECE',
-        '', // commercial status remains under adviser control
-        lead.assigned_adviser || '',
-        lead.channel || '',
+        lead.commercial_status || '', // the initial CRM status; later edits sync back through sales:write
+        normalizeAdviser_(lead.assigned_adviser, activeAdviserByName),
+        normalizeChannel_(lead.channel),
         (lead.crm_tags || []).join(', '),
         lead.assigned_at ? new Date(lead.assigned_at) : '',
         lead.last_interaction_at ? new Date(lead.last_interaction_at) : '',
@@ -82,7 +152,9 @@ function SYNC_VENTAS_CRM() {
         lead.campaign_or_ad || '',
         lead.id,
       ];
-      const existing = rowById.get(lead.id);
+      const identityKey = contactIdentityKey_(lead.phone_or_user_id, lead.channel);
+      const identifierKey = normalizeIdentifier_(lead.phone_or_user_id);
+      const existing = rowById.get(lead.id) || (identityKey ? rowByIdentity.get(identityKey) : null) || (identifierKey ? rowByIdentifier.get(identifierKey) : null);
       if (!existing) {
         row[0] = ++sequence;
         newRows.push(row);
@@ -113,6 +185,44 @@ function SYNC_VENTAS_CRM() {
   } finally {
     lock.releaseLock();
   }
+}
+
+function normalizeNameKey_(value) {
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizeIdentifier_(value) {
+  return normalizeNameKey_(value).replace(/\s+/g, '');
+}
+
+function contactIdentityKey_(identifier, channel) {
+  const normalizedIdentifier = normalizeIdentifier_(identifier);
+  return normalizedIdentifier ? normalizeChannel_(channel) + '|' + normalizedIdentifier : '';
+}
+
+function normalizeAdviser_(value, activeAdviserByName) {
+  return activeAdviserByName.get(normalizeNameKey_(value)) || '';
+}
+
+function normalizeChannel_(value) {
+  const channel = String(value || '').trim().toLowerCase();
+  if (channel === 'whatsapp') return 'WhatsApp';
+  if (channel === 'instagram') return 'Instagram';
+  if (channel === 'messenger' || channel === 'facebook') return 'Messenger';
+  if (channel === 'tiktok' || channel === 'tik tok') return 'TikTok';
+  return 'Otro';
+}
+
+function normalizeCourse_(value) {
+  const course = String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!course) return 'Otro';
+  if (course.includes('varios') || course.includes(',')) return 'Varios';
+  if (course.includes('nutricion') || course.includes('dietetic')) return 'Nutrición';
+  if (course.includes('farmacia')) return 'Farmacia';
+  if (course.includes('inicial')) return 'Inicial';
+  if (course.includes('recurso humano') || course.includes('gestion humana') || course.includes('talento humano')) return 'Recursos Humanos';
+  if (course.includes('administr')) return 'Administrativo';
+  return 'Otro';
 }
 
 function fetchAllSalesLeads_(base, key) {
