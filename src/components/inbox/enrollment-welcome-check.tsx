@@ -2,14 +2,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { ENROLLMENT_FIELDS, missingRequiredEnrollmentFields, type EnrollmentData } from '@/lib/matriculas/enrollment';
-import { intakeEditorStorageKey, readIntakeEditorDraft, visibleIntakeFields, type EnrollmentField } from '@/lib/matriculas/intake-editor';
+import { ENROLLMENT_FIELDS, enrollmentIssues, missingRequiredEnrollmentFields, type EnrollmentData } from '@/lib/matriculas/enrollment';
+import { intakeEditorStorageKey, readIntakeEditorDraft, rebaseIntakeEditorData, visibleIntakeFields, type EnrollmentField } from '@/lib/matriculas/intake-editor';
 interface IntakeDraft {
   id: string;
   version: number;
   data: EnrollmentData;
   issues: string[];
   can_edit: boolean;
+  status?: string;
 }
 interface WelcomeTask {
   id: string;
@@ -31,6 +32,7 @@ export function EnrollmentWelcomeCheck({
   const [intakeData, setIntakeData] = useState<EnrollmentData>({});
   const [confirmedFields, setConfirmedFields] = useState<string[]>([]);
   const [intakeFields, setIntakeFields] = useState<EnrollmentField[]>([]);
+  const [editedFields, setEditedFields] = useState<EnrollmentField[]>([]);
   const [feedback, setFeedback] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const load = useCallback(async () => {
@@ -106,16 +108,35 @@ export function EnrollmentWelcomeCheck({
     setError('');
     setFeedback('');
     try {
-      const patch = await fetch(`/api/enrollments/${intake.id}`, {
+      let patch = await fetch(`/api/enrollments/${intake.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: intakeData, version: intake.version }),
       });
-      const saved = await patch.json();
+      let saved = await patch.json();
+      if (patch.status === 409 && saved.error === 'Otra persona cambió la ficha. Actualiza antes de guardar.') {
+        const latestDraft = saved.latest as IntakeDraft | null;
+        if (!latestDraft) throw Error('No se pudo actualizar la ficha. Tus datos siguen guardados en este navegador.');
+        const rebasedData = rebaseIntakeEditorData(latestDraft.data ?? {}, intakeData, editedFields);
+        const nextFields = [...new Set([...intakeFields, ...missingRequiredEnrollmentFields(latestDraft.data ?? {})])];
+        const latestIssues = enrollmentIssues(latestDraft.data ?? {});
+        setIntake({ ...latestDraft, issues: latestIssues, can_edit: latestDraft.status === 'collecting' });
+        setIntakeFields(nextFields);
+        setIntakeData(rebasedData);
+        window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify({ intakeId: intake.id, baseVersion: latestDraft.version, data: rebasedData, confirmedFields }));
+        if (latestDraft.status !== 'collecting') throw Error('La ficha avanzó a registro mientras la completabas. Conservé tus datos en este navegador, pero no los envié para evitar duplicar el trámite.');
+        setError('La ficha se actualizó en paralelo. Conservé lo que escribiste y estoy guardándolo sobre la versión nueva…');
+        patch = await fetch(`/api/enrollments/${intake.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: rebasedData, version: latestDraft.version }),
+        });
+        saved = await patch.json();
+      }
       if (!patch.ok) throw Error(saved.error ?? 'No se pudieron guardar los datos.');
+      setEditedFields([]);
+      setIntake({ ...intake, data: saved.draft.data, version: saved.draft.version, issues: saved.issues, can_edit: true });
+      setIntakeData(saved.draft.data);
+      window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify({ intakeId: intake.id, baseVersion: saved.draft.version, data: saved.draft.data, confirmedFields }));
       if (saved.issues?.length) {
-        setIntake({ ...intake, data: saved.draft.data, version: saved.draft.version, issues: saved.issues });
-        setIntakeData(saved.draft.data);
-        window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify({ intakeId: intake.id, baseVersion: saved.draft.version, data: saved.draft.data, confirmedFields }));
         setError(`Datos guardados. Aún no se envían documentos: ${saved.issues.join(' · ')}`);
         return;
       }
@@ -138,29 +159,29 @@ export function EnrollmentWelcomeCheck({
   return (
     <div className="contents" data-enrollment-welcome-slot>
       {intake && intake.can_edit && intakeFields.length > 0 && (
-        <section className="mx-2 my-1 rounded-lg border border-amber-500/50 bg-background p-2 text-[11px] leading-tight sm:mx-4" aria-label="Registrar datos faltantes de matrícula">
+        <section className="mx-2 my-1 w-full max-w-2xl rounded-lg border border-amber-500/50 bg-background p-1.5 text-[10px] leading-tight sm:mx-4" aria-label="Registrar datos faltantes de matrícula">
           <strong>DATOS FALTANTES · SOLO PARA COMPLETAR LO QUE YA FALTA</strong>
-          <p className="mt-1 text-muted-foreground">Completa lo pendiente y marca cada dato solo después de cotejarlo con el chat. Dirección y segundo celular son opcionales. Esto guarda los datos; no confirma identidad ni emite documentos.</p>
-          <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+          <p className="mt-0.5 text-muted-foreground">Completa y verifica con el chat. Dirección y segundo celular son opcionales; guardar no confirma identidad ni emite documentos.</p>
+          <div className="mt-1 grid gap-1 sm:grid-cols-2">
             {visibleIntakeFields(intakeFields).map((key) => (
               <label key={key} className="min-w-0">
                 <span className="font-medium">{ENROLLMENT_FIELDS[key]}</span>
                 {key === 'document_type' ? (
-                  <select disabled={busy === 'intake'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-0.5 w-full rounded border border-border bg-background px-2 py-1.5">
+                  <select disabled={busy === 'intake'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setEditedFields((fields) => [...new Set([...fields, key])]); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-0.5 w-full rounded border border-border bg-background px-1.5 py-1 text-[11px]">
                     <option value="">Seleccionar</option>{['DNI','CARNE DE EXTRANJERIA','PASAPORTE','OTRO'].map((type) => <option key={type}>{type}</option>)}
                   </select>
                 ) : (
-                  <input disabled={busy === 'intake'} type={['birth_date','start_date','payment_date'].includes(key) ? 'date' : key === 'email' ? 'email' : 'text'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-0.5 w-full rounded border border-border bg-background px-2 py-1.5" />
+                  <input disabled={busy === 'intake'} type={['birth_date','start_date','payment_date'].includes(key) ? 'date' : key === 'email' ? 'email' : 'text'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setEditedFields((fields) => [...new Set([...fields, key])]); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-0.5 w-full rounded border border-border bg-background px-1.5 py-1 text-[11px]" />
                 )}
-                <span className="mt-1 flex min-h-5 items-center gap-1.5"><input className="size-3.5" type="checkbox" disabled={busy === 'intake' || !intakeData[key]?.trim()} checked={confirmedFields.includes(key)} onChange={(event) => setConfirmedFields((fields) => event.target.checked ? [...new Set([...fields,key])] : fields.filter((field) => field !== key))} /> Confirmé que coincide con el chat</span>
+                <span className="mt-0.5 flex min-h-4 items-center gap-1"><input className="size-3" type="checkbox" disabled={busy === 'intake' || !intakeData[key]?.trim()} checked={confirmedFields.includes(key)} onChange={(event) => setConfirmedFields((fields) => event.target.checked ? [...new Set([...fields,key])] : fields.filter((field) => field !== key))} /> Verificado en chat</span>
               </label>
             ))}
           </div>
-          <Button size="sm" className="mt-1.5 h-8 px-2.5 text-xs" disabled={busy === 'intake' || missingRequiredEnrollmentFields(intakeData).length > 0 || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim())} onClick={() => void registerMissingIntake()}>{busy === 'intake' ? 'GUARDANDO…' : 'GUARDAR Y CONTINUAR'}</Button>
+          <Button size="sm" className="mt-1 h-7 px-2 text-[11px]" disabled={busy === 'intake' || missingRequiredEnrollmentFields(intakeData).length > 0 || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim())} onClick={() => void registerMissingIntake()}>{busy === 'intake' ? 'GUARDANDO…' : 'GUARDAR Y CONTINUAR'}</Button>
         </section>
       )}
       {intake?.issues.length ? (
-        <div className="mx-2 my-1 rounded border border-amber-500/30 p-2 text-[11px] leading-tight text-amber-700 sm:mx-4">
+        <div className="mx-2 my-1 w-full max-w-2xl rounded border border-amber-500/30 p-1.5 text-[10px] leading-tight text-amber-700 sm:mx-4">
           <strong>ANTES DE ENVIAR A REGISTRO</strong>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             {intake.issues
@@ -186,11 +207,11 @@ export function EnrollmentWelcomeCheck({
       {task && (
         <div
           data-enrollment-welcome-id={task.id}
-          className="mx-2 my-1 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2 text-xs leading-tight sm:mx-4 sm:my-2 sm:p-3 sm:text-sm"
+          className="mx-2 my-1 w-full max-w-2xl rounded-lg border border-sky-500/40 bg-sky-500/10 p-1.5 text-[10px] leading-tight sm:mx-4 sm:my-1.5"
         >
           {task.stage === 'provisional' && (
-            <div className="mb-3 rounded-lg border border-amber-500 bg-amber-500/15 p-3">
-              <strong>
+            <div className="mb-1 rounded border border-amber-500 bg-amber-500/15 p-1.5">
+              <strong className="text-[10px]">
                 PAGO VALIDADO · DATOS PENDIENTES · DOCUMENTOS NO EMITIDOS
               </strong>
               <p>

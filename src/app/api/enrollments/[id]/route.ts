@@ -133,11 +133,22 @@ export async function PATCH(
       .select('*')
       .maybeSingle();
     if (error) throw error;
-    if (!saved)
+    if (!saved) {
+      const { data: latest, error: latestError } = await ctx.supabase
+        .from('enrollment_drafts')
+        .select('id,version,data,status')
+        .eq('id', id)
+        .eq('account_id', ctx.accountId)
+        .maybeSingle();
+      if (latestError) throw latestError;
       return NextResponse.json(
-        { error: 'Otra persona cambió la ficha. Actualiza antes de guardar.' },
+        {
+          error: 'Otra persona cambió la ficha. Actualiza antes de guardar.',
+          latest,
+        },
         { status: 409 }
       );
+    }
     return NextResponse.json({ draft: saved, issues: enrollmentIssues(data) });
   } catch (error) {
     return toErrorResponse(error);

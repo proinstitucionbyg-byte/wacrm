@@ -19,6 +19,8 @@ describe('enrollment welcome card regression', () => {
     expect(source).toContain('visibleIntakeFields(intakeFields)');
     expect(source).toContain('window.sessionStorage.setItem');
     expect(source).toContain('readIntakeEditorDraft(');
-    expect(source).toContain('Confirmé que coincide con el chat');
+    expect(source).toContain('Verificado en chat');
+    expect(source).toContain('rebaseIntakeEditorData');
+    expect(source).toContain('max-w-2xl');
   });
 });

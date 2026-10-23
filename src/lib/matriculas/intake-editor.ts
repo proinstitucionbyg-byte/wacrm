@@ -9,6 +9,20 @@ export interface IntakeEditorDraft {
   confirmedFields: string[];
 }
 
+/** Reapply only fields the operator edited over a newer server snapshot. */
+export function rebaseIntakeEditorData(
+  serverData: EnrollmentData,
+  localData: EnrollmentData,
+  editedFields: EnrollmentField[]
+): EnrollmentData {
+  const rebased = { ...serverData };
+  for (const field of editedFields) {
+    const value = localData[field];
+    if (typeof value === 'string') rebased[field] = value;
+  }
+  return rebased;
+}
+
 /** Keep the fields that were missing when the editor opened visible until save. */
 export function visibleIntakeFields(
   initialFields: EnrollmentField[]

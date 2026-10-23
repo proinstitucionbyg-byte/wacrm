@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   intakeEditorStorageKey,
   readIntakeEditorDraft,
+  rebaseIntakeEditorData,
   visibleIntakeFields,
 } from './intake-editor';
 
@@ -34,5 +35,17 @@ describe('inbox enrollment missing-data editor', () => {
 
   it('names a separate local draft for each intake', () => {
     expect(intakeEditorStorageKey('intake-1')).not.toBe(intakeEditorStorageKey('intake-2'));
+  });
+
+  it('rebases only locally edited fields and preserves newer server fields', () => {
+    expect(rebaseIntakeEditorData(
+      { full_name: 'MARÍA PÉREZ', phone1: '999111222', email: 'nuevo@correo.pe' },
+      { full_name: 'Maria Perez', phone1: '999333444', email: 'anterior@correo.pe' },
+      ['full_name', 'phone1'],
+    )).toEqual({
+      full_name: 'Maria Perez',
+      phone1: '999333444',
+      email: 'nuevo@correo.pe',
+    });
   });
 });

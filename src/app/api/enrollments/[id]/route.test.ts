@@ -144,9 +144,10 @@ describe('post-validation enrollment draft', () => {
     mocks.single
       .mockReset()
       .mockResolvedValueOnce({ data: { status: 'collecting' }, error: null })
-      .mockResolvedValueOnce({ data: null, error: null });
-    expect(
-      (await PATCH(request({ data: {}, version: 1 }), context())).status
-    ).toBe(409);
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: { id, version: 2, data: { phone1: '999111222' }, status: 'collecting' }, error: null });
+    const response = await PATCH(request({ data: {}, version: 1 }), context());
+    expect(response.status).toBe(409);
+    expect((await response.json()).latest.version).toBe(2);
   });
 });
