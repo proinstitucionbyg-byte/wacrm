@@ -6,6 +6,7 @@ import { courseInterestFromMessages } from '@/lib/sales/course-interest';
 
 const SALES_TAGS = new Set<string>([
   'AREA VENTAS',
+  'ASESOR INSTITUTO',
   'SEGUIMIENTO DE VENTAS',
   'VENTA',
   ...SALES_COMMERCIAL_STATUSES,

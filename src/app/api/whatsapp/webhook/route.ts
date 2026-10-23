@@ -17,6 +17,7 @@ import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { handleTeacherInbound } from '@/lib/matriculas/teachers'
 import { routeInboundSales } from '@/lib/ai/sales-routing'
+import { tagCommercialInquiry } from '@/lib/sales/attribution'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
 import { inboundRoutingText } from '@/lib/automations/routing-text'
 import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
@@ -943,6 +944,14 @@ const lastHuman = conversation.last_human_message_at
   : 0
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
 const inboundText = inboundRoutingText(contentText ?? message.text?.body ?? null, audioTranscript)
+await tagCommercialInquiry(supabaseAdmin(), {
+  accountId,
+  contactId: contactRecord.id,
+  userId: configOwnerUserId,
+  text: inboundText,
+  firstInbound: isFirstInboundMessage,
+  hasAdReferral: !!message.referral,
+})
 const automatedInbound = isLikelyAutomatedInbound(inboundText)
 const unknownFirstInboundNeedsHuman = await pauseUnknownFirstInboundForHuman({
   accountId,
