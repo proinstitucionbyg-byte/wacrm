@@ -24,7 +24,7 @@ describe('identidad con respaldo escrito y tutor',()=>{
   it('la excepcion no marca una foto verificada',()=>{
     const prepared=prepareAutomaticIntake(data,[message],[],'2026-10-09T12:00:00Z');
     expect(prepared.declaration_message_ids).toEqual([id]);expect(prepared.identity_confirmed).not.toBe(true);
-    expect(enrollmentIssues(prepared)).not.toContain('COMPARAR NOMBRE Y DOCUMENTO CON SUS FOTOS');
+    expect(enrollmentIssues(prepared)).not.toContain('VERIFICAR IDENTIDAD: SELECCIONAR FOTO O RESPALDO ESCRITO COMPLETO');
   });
   it('una foto contradictoria no se evade con la declaracion',()=>{
     const photo={id:'photo',sender_type:'customer',content_text:null,image_analysis:{category:'identity_document',fields:{full_name:'OTRA PERSONA',document_number:'12345678'}}};

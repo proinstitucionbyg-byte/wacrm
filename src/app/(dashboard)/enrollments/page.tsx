@@ -44,6 +44,7 @@ function EnrollmentEditor({
   const [hydrated, setHydrated] = useState(false);
   const [recovered, setRecovered] = useState(false);
   const [confirmedMissing, setConfirmedMissing] = useState<string[]>([]);
+  const [missingFields, setMissingFields] = useState<(keyof typeof ENROLLMENT_FIELDS)[]>([]);
   const cacheKey = `wacrm:enrollment:editor:${initial.id}`;
   useEffect(() => {
     let cancelled = false;
@@ -60,12 +61,19 @@ function EnrollmentEditor({
         const json = await res.json();
         if (!res.ok) throw new Error(json.error);
         if (cancelled) return;
-        let restored = { data: json.draft.data as EnrollmentData, restored: false };
+        let restored: ReturnType<typeof restoreEnrollmentEditorData> = {
+          data: json.draft.data as EnrollmentData,
+          restored: false,
+          confirmedMissing: [],
+        };
         if (canEdit && json.draft.status === 'collecting') {
           try { restored = restoreEnrollmentEditorData(json.draft.data, sessionStorage.getItem(cacheKey)); } catch { /* Private browsing may disable storage. */ }
         }
         setDraft(json.draft);
         setData(restored.data);
+        const nextMissingFields = missingRequiredEnrollmentFields(json.draft.data);
+        setMissingFields(nextMissingFields);
+        setConfirmedMissing(restored.confirmedMissing.filter((key) => nextMissingFields.includes(key) && Boolean(restored.data[key]?.trim())));
         setRecovered(restored.restored);
         setHydrated(true);
         setImages(json.images);
@@ -81,17 +89,20 @@ function EnrollmentEditor({
     return () => {
       cancelled = true;
     };
-  }, [initial.id, canEdit, cacheKey]);
+  }, [initial.id, initial.version, canEdit, cacheKey]);
   const locked =
     !canEdit || ['ready', 'processing', 'registered'].includes(draft.status);
+  const hasIdentityPhotos = Boolean(data.identity_message_ids?.length);
+  const hasWrittenEvidence = Boolean(data.declaration_message_ids?.length);
+  const identityCheckId = `identity-check-${draft.id}`;
   const dirty = JSON.stringify(data) !== JSON.stringify(draft.data);
   useEffect(() => {
     if (!hydrated || !canEdit) return;
     try {
-      if (dirty && !locked) sessionStorage.setItem(cacheKey, JSON.stringify({ baseData: draft.data, data, savedAt: Date.now() }));
+      if ((dirty || confirmedMissing.length > 0) && !locked) sessionStorage.setItem(cacheKey, JSON.stringify({ baseData: draft.data, data, confirmedMissing, savedAt: Date.now() }));
       else sessionStorage.removeItem(cacheKey);
     } catch { /* Keep editing if storage is unavailable. */ }
-  }, [hydrated, canEdit, dirty, locked, cacheKey, draft.data, data]);
+  }, [hydrated, canEdit, dirty, locked, cacheKey, draft.data, data, confirmedMissing]);
   useEffect(() => {
     if (!dirty || locked) return;
     const protect = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -107,7 +118,7 @@ function EnrollmentEditor({
       const refreshed = await fetch(`/api/enrollments/${draft.id}`,{cache:'no-store'});
       const json = await refreshed.json();
       if (!refreshed.ok) throw new Error(json.error);
-      setDraft(json.draft);setData(json.draft.data);setIssues(json.issues);setImages(json.images);setDocuments(json.documents??[]);
+      setDraft(json.draft);setData(json.draft.data);setMissingFields(missingRequiredEnrollmentFields(json.draft.data));setConfirmedMissing([]);setIssues(json.issues);setImages(json.images);setDocuments(json.documents??[]);
       toast.success('Datos recogidos para esta ficha y su comprobante.');
     } catch(error) {setError(error instanceof Error?error.message:'No se pudo recoger la ficha.');}
     finally {setSaving(false);}
@@ -145,7 +156,9 @@ function EnrollmentEditor({
       if (!res.ok) throw new Error(json.error);
       setDraft(json.draft);
       setData(json.draft.data);
+      setMissingFields(missingRequiredEnrollmentFields(json.draft.data));
       setRecovered(false);
+      setConfirmedMissing([]);
       setIssues(json.issues);
       setError('');
       toast.success('Datos guardados. El pago conserva su validación.');
@@ -156,8 +169,7 @@ function EnrollmentEditor({
     }
   }
   async function registerMissingData() {
-    const missing = missingRequiredEnrollmentFields(data);
-    if (!missing.length || missing.some((key) => !confirmedMissing.includes(key) || !data[key]?.trim())) return;
+    if (missingFields.some((key) => !confirmedMissing.includes(key) || !data[key]?.trim())) return;
     setSaving(true);
     setError('');
     try {
@@ -170,8 +182,10 @@ function EnrollmentEditor({
       if (!savedResponse.ok) throw new Error(saved.error);
       setDraft(saved.draft);
       setData(saved.draft.data);
+      setMissingFields(missingRequiredEnrollmentFields(saved.draft.data));
       setIssues(saved.issues);
       setRecovered(false);
+      setConfirmedMissing([]);
       if (saved.issues.length) {
         toast.success('Datos confirmados y guardados. La revisión humana pendiente sigue protegida.');
         return;
@@ -193,7 +207,7 @@ function EnrollmentEditor({
     }
   }
   function updateMissingField(key: keyof typeof ENROLLMENT_FIELDS, value: string) {
-    setData({ ...data, [key]: value });
+    setData((current) => ({ ...current, [key]: value }));
     setConfirmedMissing((current) => current.filter((field) => field !== key));
   }
   if (collecting)
@@ -271,30 +285,32 @@ function EnrollmentEditor({
           </div>
         </section>
       )}
-      {!locked && draft.status === 'collecting' && missingRequiredEnrollmentFields(data).length > 0 && (
-        <section className="rounded-lg border border-primary/30 p-3" aria-label="Completar solo los datos faltantes">
+      {!locked && draft.status === 'collecting' && missingFields.length > 0 && (
+        <section className="rounded-lg border border-primary/30 p-2.5 sm:p-3" aria-label="Completar solo los datos faltantes">
           <h3 className="text-sm font-semibold">COMPLETAR SOLO LOS DATOS QUE FALTAN</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Usa lo que ya está en la conversación. Marca cada dato después de confirmarlo. Dirección y segundo celular no son obligatorios.</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {missingRequiredEnrollmentFields(data).map((key) => (
-              <label key={key} className="text-xs">
+          <p className="mt-1 text-xs text-muted-foreground">Completa los datos que falten según la conversación. Cada casilla se mantiene en pantalla hasta guardar, para que al elegir el tipo de documento no se muevan los campos. Marca “Dato confirmado” después de revisar. Dirección y segundo celular no son obligatorios.</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {missingFields.map((key) => (
+              <div key={key} className="min-w-0 rounded-md border border-border/70 p-2 text-xs">
+                <label htmlFor={`missing-${key}`}>
                 {ENROLLMENT_FIELDS[key]}
                 {key === 'document_type' ? (
-                  <select disabled={saving} value={data[key] ?? ''} onChange={(event) => updateMissingField(key, event.target.value)} className="border-border bg-background mt-1 block w-full rounded border p-2">
+                  <select id={`missing-${key}`} disabled={saving} value={data[key] ?? ''} onChange={(event) => updateMissingField(key, event.target.value)} className="border-border bg-background mt-1 block w-full rounded border px-2 py-1.5">
                     <option value="">Seleccionar</option>
                     {['DNI', 'CARNE DE EXTRANJERIA', 'PASAPORTE', 'OTRO'].map((type) => <option key={type}>{type}</option>)}
                   </select>
                 ) : (
-                  <input disabled={saving} type={['birth_date', 'start_date', 'payment_date'].includes(key) ? 'date' : key === 'email' ? 'email' : 'text'} value={data[key] ?? ''} onChange={(event) => updateMissingField(key, event.target.value)} className="border-border bg-background mt-1 block w-full rounded border p-2" />
+                  <input id={`missing-${key}`} disabled={saving} type={['birth_date', 'start_date', 'payment_date'].includes(key) ? 'date' : key === 'email' ? 'email' : 'text'} value={data[key] ?? ''} onChange={(event) => updateMissingField(key, event.target.value)} className="border-border bg-background mt-1 block w-full rounded border px-2 py-1.5" />
                 )}
-                <span className="mt-2 flex items-center gap-2">
-                  <input type="checkbox" disabled={saving || !data[key]?.trim()} checked={confirmedMissing.includes(key)} onChange={(event) => setConfirmedMissing((current) => event.target.checked ? [...new Set([...current, key])] : current.filter((item) => item !== key))} />
+                </label>
+                <label htmlFor={`confirmed-${key}`} className="mt-1.5 flex min-h-7 cursor-pointer items-center gap-2">
+                  <input id={`confirmed-${key}`} type="checkbox" className="size-4 shrink-0 accent-primary" disabled={saving || !data[key]?.trim()} checked={confirmedMissing.includes(key)} onChange={(event) => setConfirmedMissing((current) => event.target.checked ? [...new Set([...current, key])] : current.filter((item) => item !== key))} />
                   Dato confirmado
-                </span>
-              </label>
+                </label>
+              </div>
             ))}
           </div>
-          <Button className="mt-3" disabled={saving || missingRequiredEnrollmentFields(data).some((key) => !confirmedMissing.includes(key) || !data[key]?.trim())} onClick={registerMissingData}>
+          <Button className="mt-2 h-8 px-3 text-xs" disabled={saving || missingFields.some((key) => !confirmedMissing.includes(key) || !data[key]?.trim())} onClick={registerMissingData}>
             {saving ? 'GUARDANDO…' : 'REGISTRAR DATOS FALTANTES'}
           </Button>
         </section>
@@ -312,7 +328,7 @@ function EnrollmentEditor({
           {error}
         </p>
       )}
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
         {(
           Object.entries(ENROLLMENT_FIELDS) as [
             keyof typeof ENROLLMENT_FIELDS,
@@ -325,8 +341,8 @@ function EnrollmentEditor({
               <select
                 disabled={locked || saving}
                 value={data[key] ?? ''}
-                onChange={(e) => setData({ ...data, [key]: e.target.value })}
-                className="border-border bg-background mt-1 block w-full rounded border p-2"
+                onChange={(e) => setData((current) => ({ ...current, [key]: e.target.value }))}
+                className="border-border bg-background mt-1 block w-full rounded border px-2 py-1.5"
               >
                 <option value="">SELECCIONAR</option>
                 {['DNI', 'CARNE DE EXTRANJERIA', 'PASAPORTE', 'OTRO'].map(
@@ -346,8 +362,8 @@ function EnrollmentEditor({
                       ? 'email'
                       : 'text'
                 }
-                onChange={(e) => setData({ ...data, [key]: e.target.value })}
-                className="border-border bg-background mt-1 block w-full rounded border p-2 text-sm"
+                onChange={(e) => setData((current) => ({ ...current, [key]: e.target.value }))}
+                className="border-border bg-background mt-1 block w-full rounded border px-2 py-1.5 text-sm"
               />
             )}
           </label>
@@ -372,11 +388,14 @@ function EnrollmentEditor({
                 step="0.01"
                 value={data.prices?.[i] ?? ''}
                 onChange={(e) => {
-                  const prices = [...(data.prices ?? Array(6).fill(0))];
-                  prices[i] = Number(e.target.value);
-                  setData({ ...data, prices });
+                  const value = e.target.value;
+                  setData((current) => {
+                  const prices = [...(current.prices ?? Array(6).fill(0))];
+                  prices[i] = Number(value);
+                  return { ...current, prices };
+                  });
                 }}
-                className="border-border bg-background mt-1 w-full rounded border p-2"
+                className="border-border bg-background mt-1 w-full rounded border px-2 py-1.5"
               />
             </label>
           ))}
@@ -384,7 +403,7 @@ function EnrollmentEditor({
       </fieldset>
       <fieldset className="space-y-2">
         <legend className="text-sm font-semibold">FOTOS DEL DOCUMENTO</legend>
-        {!!data.declaration_message_ids?.length && <p className="rounded border border-amber-500/40 p-3 text-sm text-amber-600">FOTO DEL DOCUMENTO PENDIENTE. Se archivaran imagenes de los datos escritos por el estudiante como respaldo del chat.</p>}
+        {!!data.declaration_message_ids?.length && <p className="rounded border border-amber-500/40 p-2.5 text-xs text-amber-600">No hay foto del documento. Se está usando como respaldo el nombre, documento y correo escritos por el estudiante en este chat.</p>}
         <p className="text-muted-foreground text-xs">
           Selecciona las fotos del documento de identidad. La lectura completa
           solamente campos vacíos; compara siempre con los datos escritos.
@@ -415,15 +434,15 @@ function EnrollmentEditor({
                       data.identity_message_ids?.includes(image.id) ?? false
                     }
                     onChange={(e) =>
-                      setData({
-                        ...data,
+                      setData((current) => ({
+                        ...current,
                         identity_confirmed: false,
                         identity_message_ids: e.target.checked
-                          ? [...(data.identity_message_ids ?? []), image.id]
-                          : (data.identity_message_ids ?? []).filter(
+                          ? [...(current.identity_message_ids ?? []), image.id]
+                          : (current.identity_message_ids ?? []).filter(
                               (id) => id !== image.id
                             ),
-                      })
+                      }))
                     }
                   />
                   <span>
@@ -447,7 +466,7 @@ function EnrollmentEditor({
                     variant="outline"
                     disabled={locked || saving}
                     onClick={() =>
-                      setData(suggestIdentityData(data, image.image_analysis))
+                      setData((current) => suggestIdentityData(current, image.image_analysis))
                     }
                   >
                     Completar campos vacíos con la lectura
@@ -457,24 +476,33 @@ function EnrollmentEditor({
             ))
         )}
       </fieldset>
-      <label className="flex gap-2 text-sm">
-        <input
-          type="checkbox"
-          disabled={locked || saving}
-          checked={data.identity_confirmed ?? false}
-          onChange={(e) =>
-            setData({ ...data, identity_confirmed: e.target.checked })
-          }
-        />
-        Comparé nombre y número de documento con las fotos y los datos escritos
-      </label>
+      <div className="rounded-md border border-border p-2.5 text-xs sm:p-3">
+        <label htmlFor={identityCheckId} className="flex min-h-8 cursor-pointer items-center gap-2">
+          <input
+            id={identityCheckId}
+            type="checkbox"
+            className="size-4 shrink-0 accent-primary"
+            disabled={locked || saving || (!hasIdentityPhotos && !hasWrittenEvidence)}
+            checked={data.identity_confirmed ?? false}
+            onChange={(e) => setData((current) => ({ ...current, identity_confirmed: e.target.checked }))}
+          />
+          {hasIdentityPhotos
+            ? 'Revisé que el nombre y número coincidan con la foto seleccionada.'
+            : hasWrittenEvidence
+              ? 'Revisé que el nombre y número coincidan con los datos escritos que dejó el estudiante.'
+              : 'Confirmar identidad (requiere seleccionar una foto del documento arriba).'}
+        </label>
+        {!hasIdentityPhotos && !hasWrittenEvidence && (
+          <p className="mt-1 text-muted-foreground">Este control no compara por sí solo. Si no hay foto, solo se acepta el respaldo escrito completo que el sistema detecte en el chat.</p>
+        )}
+      </div>
       <label className="flex gap-2 text-sm">
         <input
           type="checkbox"
           disabled={locked || saving}
           checked={data.offer_confirmed ?? false}
           onChange={(e) =>
-            setData({ ...data, offer_confirmed: e.target.checked })
+            setData((current) => ({ ...current, offer_confirmed: e.target.checked }))
           }
         />
         Confirmé en la conversación la promoción y sus seis cuotas
@@ -584,7 +612,7 @@ function EnrollmentsPageContent() {
         <p className="py-6 text-center text-sm text-muted-foreground">{search?'No hay matrículas que coincidan con la búsqueda.':showHistory?'Todavía no hay matrículas registradas.':'No hay matrículas pendientes.'}</p>
       )}
       </div>
-      <Dialog open={!!selected} onOpenChange={value=>{if(!value)setSelectedId(null);}}><DialogContent className="sm:max-w-5xl"><DialogHeader className="pr-10"><DialogTitle>Ficha de matrícula</DialogTitle><DialogDescription>Revisa los datos y documentos del estudiante seleccionado.</DialogDescription></DialogHeader>{selected&&<EnrollmentEditor key={`${selected.id}:${selected.version}`} initial={selected} canEdit={canEdit}/>}</DialogContent></Dialog>
+      <Dialog open={!!selected} onOpenChange={value=>{if(!value)setSelectedId(null);}}><DialogContent className="max-h-[92dvh] overflow-y-auto p-3 sm:max-w-5xl sm:p-5"><DialogHeader className="pr-10"><DialogTitle>Ficha de matrícula</DialogTitle><DialogDescription>Revisa los datos y documentos del estudiante seleccionado.</DialogDescription></DialogHeader>{selected&&<EnrollmentEditor key={selected.id} initial={selected} canEdit={canEdit}/>}</DialogContent></Dialog>
     </section>
   );
 }

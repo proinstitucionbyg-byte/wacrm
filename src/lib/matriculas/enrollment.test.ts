@@ -61,7 +61,7 @@ describe('matricula posterior a pago humano', () => {
   });
   it('requires identity match, files and the specific offered promotion', () => {
     const issues = enrollmentIssues({});
-    expect(issues).toContain('COMPARAR NOMBRE Y DOCUMENTO CON SUS FOTOS');
+    expect(issues).toContain('VERIFICAR IDENTIDAD: SELECCIONAR FOTO O RESPALDO ESCRITO COMPLETO');
     expect(issues).toContain(
       'CONFIRMAR LA OFERTA DE SEIS CUOTAS QUE RECIBIO EL ESTUDIANTE'
     );

@@ -170,7 +170,7 @@ export function enrollmentIssues(data: EnrollmentData): string[] {
       issues.push(`REVISAR ${ENROLLMENT_FIELDS[key]}`);
   }
   if ((!data.identity_confirmed || !data.identity_message_ids?.length) && !data.declaration_message_ids?.length)
-    issues.push('COMPARAR NOMBRE Y DOCUMENTO CON SUS FOTOS');
+    issues.push('VERIFICAR IDENTIDAD: SELECCIONAR FOTO O RESPALDO ESCRITO COMPLETO');
   if (isMinor(data.birth_date) && !data.guardian_message_ids?.length)
     issues.push('SOLICITAR DNI DEL TUTOR O PADRES');
   if (!data.offer_confirmed || data.prices?.length !== 6)
