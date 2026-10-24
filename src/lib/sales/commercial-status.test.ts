@@ -4,6 +4,7 @@ import { normalizeSalesCommercialStatus, SALES_COMMERCIAL_STATUSES } from './com
 describe('normalizeSalesCommercialStatus', () => {
   it('accepts the supported status labels case-insensitively', () => {
     expect(normalizeSalesCommercialStatus('interesado')).toBe('INTERESADO');
+    expect(normalizeSalesCommercialStatus('seguimiento de ventas')).toBe('SEGUIMIENTO DE VENTAS');
     expect(SALES_COMMERCIAL_STATUSES).toContain('NO INTERESADO-R');
   });
 

@@ -128,6 +128,7 @@ function SYNC_VENTAS_CRM() {
     });
 
     const newRows = [];
+    const refreshes = [];
     let updated = 0;
     const nextSequence = Math.max(
       Number(props.getProperty('SALES_SYNC_NEXT_SEQUENCE')) || 0,
@@ -173,24 +174,16 @@ function SYNC_VENTAS_CRM() {
         return;
       }
       // Reconcile status without losing a pending edit or overwriting a newer UI change.
-      const localStatus = String(sheet.getRange(existing, 8).getDisplayValue() || '').trim();
+      const localStatus = String(existingRows[existing - SALES_SYNC.firstDataRow][7] || '').trim();
       const status = reconcileSalesMainStatus_(lead.id, row[7], localStatus, props, base, startedAt);
-      if (String(sheet.getRange(existing, 8).getDisplayValue() || '').trim() === localStatus &&
+      if (status !== localStatus && String(sheet.getRange(existing, 8).getDisplayValue() || '').trim() === localStatus &&
           Number(props.getProperty('SALES_MAIN_EDIT_AT:' + lead.id) || 0) <= startedAt) sheet.getRange(existing, 8).setValue(status);
       // Keep sequence, payment operation, and notes.
-      sheet.getRange(existing, 2, 1, 6).setValues([row.slice(1, 7)]);
-      sheet.getRange(existing, 9).setValue(row[8]);
-      sheet.getRange(existing, 10, 1, 4).setValues([row.slice(9, 13)]);
-      sheet.getRange(existing, 16, 1, 2).setValues([[row[15], row[16]]]);
-      sheet.getRange(existing, SALES_SYNC.courseDetailsColumn).setValue(row[17]);
-      if (!sheet.getRange(existing, 14).getDisplayValue() && row[13]) sheet.getRange(existing, 14).setValue(row[13]);
-      sheet.getRange(existing, 19, 1, 5).setValues([row.slice(18, 23)]);
-      sheet.getRange(existing, 26).setValue(lead.commercial_status_at ? new Date(lead.commercial_status_at) : '').setNumberFormat('dd/mm/yyyy hh:mm');
-      sheet.getRange(existing, 21).setNumberFormat('dd/mm/yyyy hh:mm');
-      sheet.getRange(existing, 5).setNumberFormat('dd/mm/yyyy');
-      sheet.getRange(existing, 6).setNumberFormat('hh:mm');
+      if (!existingRows[existing - SALES_SYNC.firstDataRow][13] && row[13]) sheet.getRange(existing, 14).setValue(row[13]);
+      refreshes.push({ number: existing, row, statusAt: lead.commercial_status_at ? new Date(lead.commercial_status_at) : '' });
       updated++;
     });
+    refreshSalesRows_(sheet, refreshes);
 
     if (newRows.length) {
       const start = Math.max(lastRow + 1, SALES_SYNC.firstDataRow);
@@ -212,6 +205,25 @@ function SYNC_VENTAS_CRM() {
     return { received: leads.length, added: newRows.length, updated: updated };
   } finally {
     lock.releaseLock();
+  }
+}
+
+// One write per contiguous block and owned range, rather than per contact/cell.
+// H, N and O are deliberately excluded so human edits are never batch-overwritten.
+function refreshSalesRows_(sheet, updates) {
+  const sorted = updates.slice().sort((a, b) => a.number - b.number);
+  for (let offset = 0; offset < sorted.length;) {
+    let end = offset + 1;
+    while (end < sorted.length && sorted[end].number === sorted[end - 1].number + 1) end++;
+    const group = sorted.slice(offset, end), start = group[0].number, count = group.length;
+    sheet.getRange(start, 2, count, 6).setValues(group.map(item => item.row.slice(1, 7)));
+    sheet.getRange(start, 9, count, 5).setValues(group.map(item => item.row.slice(8, 13)));
+    sheet.getRange(start, 16, count, 8).setValues(group.map(item => item.row.slice(15, 23)));
+    sheet.getRange(start, 26, count, 1).setValues(group.map(item => [item.statusAt])).setNumberFormat('dd/mm/yyyy hh:mm');
+    sheet.getRange(start, 21, count, 1).setNumberFormat('dd/mm/yyyy hh:mm');
+    sheet.getRange(start, 5, count, 1).setNumberFormat('dd/mm/yyyy');
+    sheet.getRange(start, 6, count, 1).setNumberFormat('hh:mm');
+    offset = end;
   }
 }
 
