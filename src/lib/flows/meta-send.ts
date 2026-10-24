@@ -15,6 +15,10 @@ import {
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
 import { sendSocialMessage } from '@/lib/social/send'
+import {
+  assertAutomaticWhatsAppSendIsFree,
+  markWhatsAppServiceMessageSent,
+} from '@/lib/whatsapp/billing-runtime'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -47,6 +51,7 @@ interface SendTextEngineArgs {
    *  badges it as an AI reply. Only the auto-reply bot sets this;
    *  deterministic Flow/automation sends leave it false. */
   aiGenerated?: boolean
+  keywordOpeningFallback?: boolean
 }
 
 /**
@@ -79,6 +84,7 @@ export async function engineSendText(
   if (contact.channel && contact.channel !== 'whatsapp') {
     return sendSocialMessage(db, { ...args, channel: contact.channel, externalId: contact.external_id, messageType: 'text' })
   }
+  const billingPermit = await assertAutomaticWhatsAppSendIsFree(db, { accountId: args.accountId, conversationId: args.conversationId, contactId: args.contactId, keywordOpeningFallback: args.keywordOpeningFallback, messageCategory: 'service' })
   const recipient = resolveWhatsAppRecipient(contact)
   const sanitized = recipient.address
 
@@ -121,6 +127,8 @@ export async function engineSendText(
   }
   if (lastError) throw lastError
 
+  await markWhatsAppServiceMessageSent(db, billingPermit.reservationId, waMessageId)
+
   if (recipient.isPhone && workingPhone !== sanitized) {
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
@@ -132,7 +140,11 @@ export async function engineSendText(
     content_text: args.text,
     message_id: waMessageId,
     status: 'sent',
+    billing_status: 'unknown',
+    billing_phone_number_id: config.phone_number_id,
+    billing_recipient_id: sanitized,
     ai_generated: args.aiGenerated ?? false,
+    billing_sender: args.aiGenerated ? 'ai' : 'flow',
   })
   if (msgErr) {
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
@@ -160,6 +172,7 @@ interface SendMediaEngineArgs {
   caption?: string
   /** Document-only; ignored by Meta for image/video. */
   filename?: string
+  keywordOpeningFallback?: boolean
 }
 
 /**
@@ -189,6 +202,7 @@ export async function engineSendMedia(
   if (contact.channel && contact.channel !== 'whatsapp') {
     return sendSocialMessage(db, { ...args, channel: contact.channel, externalId: contact.external_id, messageType: args.kind, mediaUrl: args.link, text: args.caption })
   }
+  const billingPermit = await assertAutomaticWhatsAppSendIsFree(db, { accountId: args.accountId, conversationId: args.conversationId, contactId: args.contactId, keywordOpeningFallback: args.keywordOpeningFallback, messageCategory: 'service' })
   const recipient = resolveWhatsAppRecipient(contact)
   const sanitized = recipient.address
 
@@ -234,6 +248,8 @@ export async function engineSendMedia(
   }
   if (lastError) throw lastError
 
+  await markWhatsAppServiceMessageSent(db, billingPermit.reservationId, waMessageId)
+
   if (recipient.isPhone && workingPhone !== sanitized) {
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
@@ -250,6 +266,10 @@ export async function engineSendMedia(
     content_text: args.caption ?? null,
     message_id: waMessageId,
     status: 'sent',
+    billing_status: 'unknown',
+    billing_phone_number_id: config.phone_number_id,
+    billing_recipient_id: sanitized,
+    billing_sender: 'flow',
   })
   if (msgErr) {
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
@@ -275,6 +295,7 @@ interface SendInteractiveButtonsEngineArgs {
   buttons: InteractiveButton[]
   headerText?: string
   footerText?: string
+  keywordOpeningFallback?: boolean
 }
 
 interface SendInteractiveListEngineArgs {
@@ -287,6 +308,7 @@ interface SendInteractiveListEngineArgs {
   sections: InteractiveListSection[]
   headerText?: string
   footerText?: string
+  keywordOpeningFallback?: boolean
 }
 
 /**
@@ -344,6 +366,7 @@ async function sendInteractiveViaMeta(
       : { kind: 'list', body: input.bodyText, header: input.headerText, footer: input.footerText, button_label: input.buttonLabel, sections: input.sections }
     return sendSocialMessage(db, { ...input, channel: contact.channel, externalId: contact.external_id, messageType: 'interactive', interactivePayload })
   }
+  const billingPermit = await assertAutomaticWhatsAppSendIsFree(db, { accountId: input.accountId, conversationId: input.conversationId, contactId: input.contactId, keywordOpeningFallback: input.keywordOpeningFallback, messageCategory: 'service' })
   const recipient = resolveWhatsAppRecipient(contact)
   const sanitized = recipient.address
 
@@ -405,6 +428,8 @@ async function sendInteractiveViaMeta(
   }
   if (lastError) throw lastError
 
+  await markWhatsAppServiceMessageSent(db, billingPermit.reservationId, waMessageId)
+
   if (recipient.isPhone && workingPhone !== sanitized) {
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
@@ -446,6 +471,10 @@ async function sendInteractiveViaMeta(
     interactive_payload: interactivePayload,
     message_id: waMessageId,
     status: 'sent',
+    billing_status: 'unknown',
+    billing_phone_number_id: config.phone_number_id,
+    billing_recipient_id: sanitized,
+    billing_sender: 'flow',
   })
   if (msgErr) {
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)

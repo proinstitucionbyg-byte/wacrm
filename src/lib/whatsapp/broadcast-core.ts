@@ -218,6 +218,7 @@ export async function createBroadcast(
         broadcast_id: broadcast.id,
         contact_id: r.contactId,
         status: 'pending' as const,
+        billing_phone_number_id: config.phone_number_id,
       }))
     )
     .select('id, contact_id');

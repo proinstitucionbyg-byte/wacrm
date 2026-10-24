@@ -366,6 +366,7 @@ async function sendButtonsAndSuspend(
     bodyText: cfg.text,
     headerText: cfg.header_text,
     footerText: cfg.footer_text,
+    keywordOpeningFallback: run.billing_keyword_fallback === true,
     buttons: cfg.buttons.map((b) => ({ id: b.reply_id, title: b.title })),
   });
   await logEvent(db, run.id, "message_sent", node.node_key, {
@@ -403,6 +404,7 @@ async function sendListAndSuspend(
     buttonLabel: cfg.button_label,
     headerText: cfg.header_text,
     footerText: cfg.footer_text,
+    keywordOpeningFallback: run.billing_keyword_fallback === true,
     sections: cfg.sections.map((s) => ({
       title: s.title,
       rows: s.rows.map((r) => ({
@@ -586,6 +588,7 @@ async function advanceFromNodeKey(
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.text, run.vars),
+          keywordOpeningFallback: run.billing_keyword_fallback === true,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_message",
@@ -616,6 +619,7 @@ async function advanceFromNodeKey(
             ? interpolateVars(cfg.caption, run.vars)
             : undefined,
           filename: cfg.filename,
+          keywordOpeningFallback: run.billing_keyword_fallback === true,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_media",
@@ -644,6 +648,7 @@ async function advanceFromNodeKey(
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
+          keywordOpeningFallback: run.billing_keyword_fallback === true,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "collect_input",
@@ -1034,6 +1039,7 @@ async function handleReplyForActiveRun(
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
+          keywordOpeningFallback: run.billing_keyword_fallback === true,
         });
       } catch (err) {
         await logEvent(db, run.id, "error", currentNode.node_key, {
@@ -1085,6 +1091,7 @@ async function startNewRun(
       user_id: flow.user_id,
       contact_id: input.contactId,
       conversation_id: input.conversationId,
+      billing_keyword_fallback: input.billingKeywordFallback === true,
       status: "active",
       current_node_key: flow.entry_node_id,
     })

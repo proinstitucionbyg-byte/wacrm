@@ -76,6 +76,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import type { WhatsAppBillingPreflight } from '@/lib/whatsapp/billing';
 
 interface ReplyDraft {
   id: string;
@@ -231,12 +232,38 @@ export function MessageThread({
   const lastTailRef = useRef<string | null>(null);
   const nearBottomRef = useRef(true);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [billingPreflight, setBillingPreflight] = useState<WhatsAppBillingPreflight | null>(null);
+  const [billingPreflightError, setBillingPreflightError] = useState('');
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [profiles, setProfiles] = useState<
     (Profile & { area?: string | null })[]
   >([]);
   const canAssign = useCan('inbox.assign');
   const canHideMessages = useCan('inbox_management.messages');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!conversation || contact?.channel !== 'whatsapp') {
+      setBillingPreflight(null);
+      setBillingPreflightError('');
+      return;
+    }
+    const params = new URLSearchParams({ conversation_id: conversation.id });
+    void fetch(`/api/whatsapp/billing/preflight?${params}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'No se pudo verificar el costo.');
+        if (!cancelled) { setBillingPreflight(data as WhatsAppBillingPreflight); setBillingPreflightError(''); }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setBillingPreflight(null);
+          setBillingPreflightError(error instanceof Error ? error.message : 'Costo por confirmar');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [conversation?.id, contact?.channel, messages.at(-1)?.created_at]);
+
   const [transferPicker, setTransferPicker] = useState(false);
   const [transferArea, setTransferArea] = useState('');
   const [transfer, setTransfer] = useState<{
@@ -1596,6 +1623,27 @@ export function MessageThread({
           }
         }}
       />
+
+      {contact?.channel === 'whatsapp' && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-[11px] text-muted-foreground" aria-live="polite">
+        <span className={billingPreflight?.state === 'free' ? 'font-semibold text-emerald-600' : billingPreflight?.state === 'paid' ? 'font-semibold text-rose-600' : 'font-semibold text-amber-600'}>
+          SIGUIENTE MENSAJE: {billingPreflight?.free_entry_window_open
+            ? 'GRATIS PREVISTO · ANUNCIO META CONFIRMADO'
+            : billingPreflight?.service_window_open && (billingPreflight.service_message_quota_remaining ?? 0) > 0
+              ? 'GRATIS PREVISTO · CUPO MENSUAL DE SERVICIO DISPONIBLE'
+              : billingPreflightError
+                ? 'POR CONFIRMAR · NO ENVIAR AUTOMÁTICAMENTE'
+              : billingPreflight?.state === 'paid'
+                ? 'DE PAGO PREVISTO · CUPO MENSUAL AGOTADO'
+                  : billingPreflight
+                    ? 'POR CONFIRMAR · PODRÍA GENERAR CARGO'
+                    : 'VERIFICANDO…'}
+        </span>
+        <span>24 h de atención: {billingPreflight?.service_window_until ? new Date(billingPreflight.service_window_until).toLocaleString('es-PE', { timeZone: 'America/Lima', dateStyle: 'short', timeStyle: 'short' }) : 'sin ventana vigente'}</span>
+        <span>72 h gratuitas de anuncio: {billingPreflight?.free_entry_window_until ? new Date(billingPreflight.free_entry_window_until).toLocaleString('es-PE', { timeZone: 'America/Lima', dateStyle: 'short', timeStyle: 'short' }) : 'sin origen publicitario confirmado'}</span>
+        {billingPreflight && <span>Cupo mensual Meta: {billingPreflight.service_message_quota_used === null ? 'sin confirmar' : `${billingPreflight.service_message_quota_used}/${billingPreflight.service_message_quota_limit} usado; ${billingPreflight.service_message_quota_remaining ?? 0} disponible`}</span>}
+        <span>Estimación: {billingPreflight?.estimated_cost == null ? billingPreflight?.state === 'paid' ? 'importe exacto pendiente de tarifa oficial' : 'tarifa oficial no configurada' : `${billingPreflight.estimated_cost} ${billingPreflight.currency ?? ''}`}</span>
+        {billingPreflightError && <span className="text-destructive">{billingPreflightError}</span>}
+      </div>}
 
       {/* Composer */}
       <EnrollmentWelcomeCheck conversationId={conversation.id} />

@@ -48,6 +48,9 @@ export interface AutomationContext {
   previous_inbound_at?: string
   /** Provider timestamp of this inbound, used only for greeting continuity. */
   inbound_at?: string
+  /** Set only by the one-minute server queue for a configured opening keyword;
+   * sends remain billing_status=unknown until Meta confirms pricing. */
+  billing_unknown_keyword_fallback?: boolean
   /** Conversation the event belongs to, if any. */
   conversation_id?: string
   /** Arbitrary variables accumulated during execution. */
@@ -1107,6 +1110,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string 
         conversationId,
         contactId: args.contactId,
         text,
+        keywordOpeningFallback: args.context.billing_unknown_keyword_fallback === true,
       })
       rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId)
       args.writtenOfferText = [args.writtenOfferText, text].filter(Boolean).join('\n')
@@ -1129,6 +1133,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string 
         conversationId,
         contactId: args.contactId,
         payload,
+        keywordOpeningFallback: args.context.billing_unknown_keyword_fallback === true,
       })
       rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId)
       return `interactive sent via Meta (${whatsapp_message_id})`
@@ -1165,6 +1170,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string 
         templateName: cfg.template_name,
         language: cfg.language,
         params,
+        keywordOpeningFallback: args.context.billing_unknown_keyword_fallback === true,
       })
       rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId)
       return `template sent via Meta (${whatsapp_message_id})`
@@ -1209,6 +1215,7 @@ case 'send_media': {
     caption: rawCfg.caption,
     filename: rawCfg.filename,
     transcript,
+    keywordOpeningFallback: args.context.billing_unknown_keyword_fallback === true,
   })
   rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId, 90_000)
 

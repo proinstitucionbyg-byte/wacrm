@@ -40,6 +40,12 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
+  readConversationBillingPreflight,
+  reserveWhatsAppServiceMessage,
+  markWhatsAppServiceMessageSent,
+  releaseWhatsAppServiceMessageReservation,
+} from '@/lib/whatsapp/billing-runtime';
+import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
@@ -307,6 +313,25 @@ export async function sendMessageToConversation(
     );
   }
 
+  let serviceQuotaReservationId: string | null = null
+  if (messageType !== 'template') {
+    const preflight = await readConversationBillingPreflight(supabaseAdmin(), accountId, conversationId).catch(() => null)
+    if (preflight?.service_window_open && !preflight.free_entry_window_open) {
+      try {
+        const reservation = await reserveWhatsAppServiceMessage(supabaseAdmin(), {
+          accountId,
+          phoneNumberId: config.phone_number_id,
+          // Manual sends remain the adviser's choice after the UI warns
+          // that the 1,000-message free allowance may be exhausted.
+          allowOverQuota: true,
+        })
+        serviceQuotaReservationId = reservation.reservationId
+      } catch (error) {
+        console.error('[send-message] manual service quota was not recorded:', error instanceof Error ? error.message : error)
+      }
+    }
+  }
+
   const accessToken = decrypt(config.access_token);
 
   // Self-heal legacy CBC ciphertexts. Fire-and-forget; idempotent.
@@ -476,11 +501,14 @@ export async function sendMessageToConversation(
 
     if (lastError) throw lastError;
   } catch (err) {
+    await releaseWhatsAppServiceMessageReservation(supabaseAdmin(), serviceQuotaReservationId)
     const message =
       err instanceof Error ? err.message : 'Unknown Meta API error';
     console.error('[send-message] Meta send failed for all variants:', message);
     throw new SendMessageError('meta_error', `Meta API error: ${message}`, 502);
   }
+
+  await markWhatsAppServiceMessageSent(supabaseAdmin(), serviceQuotaReservationId, waMessageId)
 
   if (recipient.isPhone && workingPhone !== sanitizedPhone) {
     console.log(
@@ -514,6 +542,10 @@ export async function sendMessageToConversation(
         messageType === 'interactive' ? interactivePayload : null,
       message_id: waMessageId,
       status: 'sent',
+      billing_status: 'unknown',
+      billing_sender: 'adviser',
+      billing_phone_number_id: config.phone_number_id,
+      billing_recipient_id: sanitizedPhone,
       reply_to_message_id: replyToMessageId || null,
     })
     .select()

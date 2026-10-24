@@ -25,6 +25,14 @@ import { startEnrollmentSequence } from '@/lib/matriculas/sequence'
 import { collectConversationEnrollments } from '@/lib/matriculas/collect'
 import { logAiUsage } from '@/lib/ai/usage'
 import { parseReferral } from '@/lib/inbox/referral'
+import { isConfirmedClickToWhatsAppReferral } from '@/lib/whatsapp/billing'
+import { gateAutomaticWhatsAppConversation } from '@/lib/whatsapp/billing-runtime'
+import { enqueueDeferredKeywordOpening, hasPendingDeferredKeywordOpening } from '@/lib/whatsapp/deferred-keyword-openings'
+import {
+  decideFirstInboundKeywordRouting,
+  hasConfiguredOpeningKeyword,
+  type OpeningKeywordConfig,
+} from '@/lib/whatsapp/opening-keywords'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
@@ -51,29 +59,13 @@ function supabaseAdmin() {
   return _adminClient
 }
 
-const HUMAN_ASSISTANCE_TAG = 'ASISTENCIA ASESOR HUMANO'
+const HUMAN_ASSISTANCE_TAG = 'ASESOR URGENTE'
 
-type KeywordConfig = {
-  keywords?: unknown
-  match_type?: unknown
-  case_sensitive?: unknown
-  internal_only?: unknown
-}
+type FirstInboundDisposition = 'continue' | 'deferred' | 'human'
 
-function configuredKeywordMatches(text: string, config: KeywordConfig | null | undefined): boolean {
-  if (!text || !Array.isArray(config?.keywords) || config.keywords.length === 0) return false
-  const caseSensitive = config.case_sensitive === true
-  const haystack = caseSensitive ? text : text.toLowerCase()
-  const matchType = config.match_type === 'exact' ? 'exact' : 'contains'
-  return config.keywords.some((raw) => {
-    if (typeof raw !== 'string' || !raw.trim()) return false
-    const keyword = caseSensitive ? raw : raw.toLowerCase()
-    return matchType === 'exact' ? haystack === keyword : haystack.includes(keyword)
-  })
-}
-
-/** A first text from a new conversation must match a real configured route;
- * unknown openings are paused and sent to a human queue instead of the AI. */
+/** Match a first inbound against real, active configurations. A matched
+ * keyword with missing ad evidence waits one durable minute; no keyword
+ * match goes straight to the human queue. */
 async function pauseUnknownFirstInboundForHuman(args: {
   accountId: string
   conversationId: string
@@ -81,9 +73,13 @@ async function pauseUnknownFirstInboundForHuman(args: {
   userId: string
   isFirstInboundMessage: boolean
   text: string
-}): Promise<boolean> {
+  hasConfirmedAdOrigin: boolean
+  metaMessageId: string
+  receivedAt: string
+  contactCreated: boolean
+}): Promise<FirstInboundDisposition> {
   const text = args.text.trim()
-  if (!args.isFirstInboundMessage || !text) return false
+  if (!args.isFirstInboundMessage) return 'continue'
 
   const db = supabaseAdmin()
   const [automationsResult, flowsResult] = await Promise.all([
@@ -102,14 +98,37 @@ async function pauseUnknownFirstInboundForHuman(args: {
   const lookupFailed = !!automationsResult.error || !!flowsResult.error
   if (automationsResult.error) console.error('[webhook] initial keyword automation lookup failed:', automationsResult.error)
   if (flowsResult.error) console.error('[webhook] initial keyword flow lookup failed:', flowsResult.error)
-  const keywordMatch = !lookupFailed && (
-    (automationsResult.data ?? []).some((row: { trigger_config: KeywordConfig | null }) => {
-      const config = (row.trigger_config ?? {}) as KeywordConfig
-      return config.internal_only !== true && configuredKeywordMatches(text, config)
-    }) ||
-    (flowsResult.data ?? []).some((row: { trigger_config: KeywordConfig | null }) => configuredKeywordMatches(text, row.trigger_config))
+  const keywordMatch = !lookupFailed && hasConfiguredOpeningKeyword(
+    text,
+    (automationsResult.data ?? []).map((row: { trigger_config: OpeningKeywordConfig | null }) => row.trigger_config),
+    (flowsResult.data ?? []).map((row: { trigger_config: OpeningKeywordConfig | null }) => row.trigger_config),
   )
-  if (keywordMatch) return false
+  const decision = decideFirstInboundKeywordRouting({
+    firstInbound: args.isFirstInboundMessage,
+    keywordMatch,
+    lookupSucceeded: !lookupFailed,
+    adOriginConfirmed: args.hasConfirmedAdOrigin,
+  })
+  if (decision === 'continue') return 'continue'
+  if (decision === 'human') {
+    // Fall through to the immediate pause + human assistance label below.
+  } else {
+    try {
+      await enqueueDeferredKeywordOpening(supabaseAdmin(), {
+        account_id: args.accountId,
+        user_id: args.userId,
+        contact_id: args.contactId,
+        conversation_id: args.conversationId,
+        meta_message_id: args.metaMessageId,
+        message_text: text,
+        received_at: args.receivedAt,
+        contact_created: args.contactCreated,
+      })
+      return 'deferred'
+    } catch (error) {
+      console.error('[webhook] could not schedule the one-minute keyword wait:', error)
+    }
+  }
 
   const disabledAt = new Date().toISOString()
   const { error: pauseError } = await db.from('conversations')
@@ -153,7 +172,7 @@ async function pauseUnknownFirstInboundForHuman(args: {
 
   // If reading the configured routes failed, fail closed: leave this chat
   // paused for a person rather than guess which automation should answer.
-  return true
+  return 'human'
 }
 
 interface WhatsAppMessage {
@@ -356,17 +375,10 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const value = change.value
 
-      // Handle status updates
-      if (value.statuses) {
-        for (const status of value.statuses) {
-          await handleStatusUpdate(status)
-        }
-      }
-
-      // Handle incoming messages
-      if (!value.messages || !value.contacts) continue
-
       const phoneNumberId = value.metadata.phone_number_id
+      // Status-only webhook deliveries also need the phone/account lookup so
+      // billing evidence can never be applied across WhatsApp numbers.
+      if (!value.statuses?.length && !value.messages?.length) continue
 
       // Find user's config by phone_number_id. `.single()` returns
       // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
@@ -405,6 +417,15 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const config = configRows[0]
 
+      if (value.statuses) {
+        for (const status of value.statuses) {
+          await handleStatusUpdate(status, config.account_id, phoneNumberId)
+        }
+      }
+
+      // Handle incoming messages after processing any delivery statuses.
+      if (!value.messages || !value.contacts) continue
+
       const decryptedAccessToken = decrypt(config.access_token)
 
       for (let i = 0; i < value.messages.length; i++) {
@@ -417,6 +438,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // Tenancy — drives every contact / conversation lookup
           // and the engines' active-row dispatch.
           config.account_id,
+          config.phone_number_id,
           // Audit / sender-of-record — used as the user_id on row
           // inserts that need it for NOT NULL FK compliance. Always
           // the admin who saved the WhatsApp config.
@@ -470,19 +492,43 @@ function isValidStatusTransition(current: string, incoming: string): boolean {
   return ii > ci
 }
 
-async function handleStatusUpdate(status: WhatsAppDeliveryStatus) {
-  // 1) Mirror onto messages (legacy behavior) — Meta's status values
-  //    already match the CHECK constraint on messages.status. No
-  //    `.select()`: message_id is NOT unique (migration 009 — Meta ids
-  //    repeat across numbers), so this updates 0..N rows and must not
-  //    assume a single row.
-  const { error: msgErr } = await supabaseAdmin()
+async function handleStatusUpdate(status: WhatsAppDeliveryStatus, accountId: string, phoneNumberId: string) {
+  const db = supabaseAdmin()
+  // Resolve only this account's matching message IDs before updating: Meta
+  // message IDs can repeat across phone numbers/accounts.
+  const { data: matchedMessages, error: matchedError } = await db
     .from('messages')
-    .update(deliveryStatusPatch(status))
+    .select('id,conversation_id,conversations!inner(account_id)')
     .eq('message_id', status.id)
+    .eq('conversations.account_id', accountId)
+  if (matchedError) console.error('[webhook] account-scoped message status lookup failed:', matchedError)
+  const messageIds = (matchedMessages ?? []).map((row: { id: string }) => row.id)
+  if (messageIds.length) {
+    const billingPatch = { ...deliveryStatusPatch(status), billing_phone_number_id: phoneNumberId }
+    const { error: msgErr } = await db.from('messages')
+      .update(billingPatch)
+      .in('id', messageIds)
+    if (msgErr) console.error('Error updating message billing/status evidence:', msgErr)
+  }
 
-  if (msgErr) {
-    console.error('Error updating message status:', msgErr)
+  // Settle the monthly service-message reservation using Meta's signed
+  // delivery event. A failed message releases its slot; delivered/read
+  // messages keep it consumed. Never let a late failure undo delivery.
+  const quotaStatus = status.status === 'failed'
+    ? 'failed'
+    : status.status === 'delivered' || status.status === 'read'
+      ? 'delivered'
+      : null
+  if (quotaStatus) {
+    const allowedPriorStatuses = quotaStatus === 'failed'
+      ? ['reserved', 'sent']
+      : ['reserved', 'sent', 'delivered']
+    const { error: quotaError } = await db.from('whatsapp_service_message_reservations')
+      .update({ status: quotaStatus, updated_at: new Date(parseInt(status.timestamp) * 1000).toISOString() })
+      .eq('phone_number_id', phoneNumberId)
+      .eq('message_id', status.id)
+      .in('status', allowedPriorStatuses)
+    if (quotaError) console.error('[whatsapp-billing] could not settle service quota from Meta status:', quotaError)
   }
 
   // Webhook fan-out for this status change happens at the END of this
@@ -497,23 +543,32 @@ async function handleStatusUpdate(status: WhatsAppDeliveryStatus) {
 
   const { data: recipient, error: recFetchErr } = await supabaseAdmin()
     .from('broadcast_recipients')
-    .select('id, status')
+    .select('id, status, broadcasts!inner(account_id)')
     .eq('whatsapp_message_id', status.id)
+    .eq('broadcasts.account_id', accountId)
     .maybeSingle()
 
   if (recFetchErr) {
     console.error('Error fetching broadcast recipient:', recFetchErr)
-  } else if (
-    recipient &&
-    // Guard transitions — forward-only on the success ladder, and
-    // `failed` only from pre-delivered states.
-    isValidStatusTransition(recipient.status, status.status)
-  ) {
-    const update: Record<string, unknown> = { status: status.status }
-    if (status.status === 'sent' && !('sent_at' in update)) update.sent_at = tsIso
-    if (status.status === 'delivered') update.delivered_at = tsIso
-    if (status.status === 'read') update.read_at = tsIso
-
+  } else if (recipient) {
+    const update: Record<string, unknown> = {}
+    // Guard recipient state transitions, but still store signed billing
+    // evidence when a replayed event doesn't advance the status ladder.
+    if (isValidStatusTransition(recipient.status, status.status)) {
+      update.status = status.status
+      if (status.status === 'sent') update.sent_at = tsIso
+      if (status.status === 'delivered') update.delivered_at = tsIso
+      if (status.status === 'read') update.read_at = tsIso
+    }
+    const patch = deliveryStatusPatch(status)
+    for (const key of [
+      'billing_status', 'billing_billable', 'billing_type', 'billing_category',
+      'billing_model', 'billing_confirmed_at', 'billing_delivered_at', 'billing_recipient_id',
+    ]) {
+      if (key in patch) update[key] = patch[key as keyof typeof patch]
+    }
+    update.billing_phone_number_id = phoneNumberId
+    if (Object.keys(update).length === 0) return
     const { error: recUpdateErr } = await supabaseAdmin()
       .from('broadcast_recipients')
       .update(update)
@@ -532,19 +587,20 @@ async function handleStatusUpdate(status: WhatsAppDeliveryStatus) {
     .from('messages')
     .select('conversation_id, conversations(account_id)')
     .eq('message_id', status.id)
+    .eq('conversations.account_id', accountId)
     .limit(1)
     .maybeSingle()
 
   if (msgRow) {
     const conv = msgRow.conversations as { account_id: string } | null
-    const accountId = conv?.account_id
-    if (accountId) {
+      const messageAccountId = conv?.account_id
+    if (messageAccountId === accountId) {
       if (status.status === 'delivered' || status.status === 'read') {
-        await resumeDeliveredMessage(status.id, msgRow.conversation_id, accountId)
+        await resumeDeliveredMessage(status.id, msgRow.conversation_id, messageAccountId)
       }
       await dispatchWebhookEvent(
         supabaseAdmin(),
-        accountId,
+        messageAccountId,
         'message.status_updated',
         {
           whatsapp_message_id: status.id,
@@ -683,6 +739,7 @@ async function processMessage(
   // contact / conversation / message row created downstream is
   // stamped with this so any member of the account can see it.
   accountId: string,
+  phoneNumberId: string,
   // Sender-of-record for inserts that need a NOT NULL user_id FK
   // (contacts, conversations). Always the admin who saved the
   // WhatsApp config; the choice is arbitrary post-017 but stable.
@@ -853,6 +910,10 @@ async function processMessage(
   if (previousInboundError) console.error('[webhook] previous inbound lookup failed:', previousInboundError)
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
   const previousInboundAt = previousInboundRows?.[0]?.created_at ?? undefined
+  const providerTimestamp = Number.parseInt(message.timestamp, 10) * 1000
+  const inboundAt = Number.isFinite(providerTimestamp) && providerTimestamp > 0
+    ? new Date(providerTimestamp).toISOString()
+    : new Date().toISOString()
 
   const { error: msgError } = await supabaseAdmin().from('messages').insert({
     conversation_id: conversation.id,
@@ -862,7 +923,7 @@ async function processMessage(
     media_url: mediaUrl,
     message_id: message.id,
     status: 'delivered',
-    created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+    created_at: inboundAt,
     reply_to_message_id: replyToInternalId,
     // Only populated for content_type='interactive'. Migration 010 added
     // the column; null for every other content_type so existing inserts
@@ -870,6 +931,8 @@ async function processMessage(
     interactive_reply_id: interactiveReplyId,
     image_analysis: imageAnalysis,
     source_referral: parseReferral(message.referral),
+    billing_phone_number_id: phoneNumberId,
+    billing_recipient_id: message.from,
   })
 
   if (msgError) {
@@ -944,23 +1007,33 @@ const lastHuman = conversation.last_human_message_at
   : 0
 const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
 const inboundText = inboundRoutingText(contentText ?? message.text?.body ?? null, audioTranscript)
+const confirmedAdReferral = isConfirmedClickToWhatsAppReferral(parseReferral(message.referral))
 await tagCommercialInquiry(supabaseAdmin(), {
   accountId,
   contactId: contactRecord.id,
   userId: configOwnerUserId,
   text: inboundText,
   firstInbound: isFirstInboundMessage,
-  hasAdReferral: !!message.referral,
+  hasAdReferral: confirmedAdReferral,
 })
 const automatedInbound = isLikelyAutomatedInbound(inboundText)
-const unknownFirstInboundNeedsHuman = await pauseUnknownFirstInboundForHuman({
+const firstInboundDisposition = await pauseUnknownFirstInboundForHuman({
   accountId,
   conversationId: conversation.id,
   contactId: contactRecord.id,
   userId: configOwnerUserId,
   isFirstInboundMessage,
   text: inboundText,
+  hasConfirmedAdOrigin: confirmedAdReferral,
+  metaMessageId: message.id,
+  receivedAt: inboundAt,
+  contactCreated: contactOutcome.wasCreated,
 })
+const unknownFirstInboundNeedsHuman = firstInboundDisposition === 'human'
+const keywordOpeningDeferred = firstInboundDisposition === 'deferred'
+  || (!isFirstInboundMessage && await hasPendingDeferredKeywordOpening(
+    supabaseAdmin(), accountId, conversation.id,
+  ))
 const salesDeclined = !automatedInbound && isExplicitSalesDecline(inboundText)
 if (salesDeclined) {
   const db = supabaseAdmin()
@@ -978,7 +1051,16 @@ if (salesDeclined) {
     .is('context->>manual_agent_id', null)
   if (cancelError) throw cancelError
 }
-const allAutomaticRepliesDisabled = unknownFirstInboundNeedsHuman || salesDeclined || (conversation.ai_enabled === false && conversation.automation_enabled === false)
+let billingBlockedForThisInbound = false
+if (!unknownFirstInboundNeedsHuman && !keywordOpeningDeferred && !salesDeclined && (conversation.ai_enabled !== false || conversation.automation_enabled !== false)) {
+  const billingGate = await gateAutomaticWhatsAppConversation(supabaseAdmin(), {
+    accountId,
+    conversationId: conversation.id,
+    contactId: contactRecord.id,
+  })
+  billingBlockedForThisInbound = !billingGate.allowed
+}
+const allAutomaticRepliesDisabled = unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || (conversation.ai_enabled === false && conversation.automation_enabled === false)
 
 const followupReplyHandled = !allAutomaticRepliesDisabled && interactiveReplyId
   ? await handleIdleFollowupReply({
@@ -1001,9 +1083,9 @@ if (!allAutomaticRepliesDisabled && !automatedInbound && !teacherHandled && !hum
   await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
 }
 const automationPaused =
-  unknownFirstInboundNeedsHuman || salesDeclined || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
+  unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
   let automationMatched = false
-  let flowConsumed = unknownFirstInboundNeedsHuman || automatedInbound || followupReplyHandled || teacherHandled
+  let flowConsumed = unknownFirstInboundNeedsHuman || keywordOpeningDeferred || automatedInbound || followupReplyHandled || teacherHandled
 
 if (!automationPaused) {
   const flowResult = await dispatchInboundToFlows({
@@ -1068,7 +1150,7 @@ for (const triggerType of automationTriggers) {
       conversation_id: conversation.id,
       interactive_reply_id: interactiveReplyId ?? undefined,
       previous_inbound_at: previousInboundAt,
-      inbound_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+      inbound_at: inboundAt,
     },
 })
 

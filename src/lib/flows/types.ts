@@ -279,6 +279,8 @@ export interface FlowRunRow {
   last_advanced_at: string;
   ended_at: string | null;
   end_reason: string | null;
+  /** Server-owned fallback after a one-minute wait for Meta referral evidence. */
+  billing_keyword_fallback?: boolean;
 }
 
 // ============================================================
@@ -339,6 +341,8 @@ export interface DispatchInboundInput {
   contactId: string;
   conversationId: string;
   message: ParsedInbound;
+  /** Only the durable first-keyword queue may set this flag. */
+  billingKeywordFallback?: boolean;
 }
 
 export interface DispatchInboundResult {

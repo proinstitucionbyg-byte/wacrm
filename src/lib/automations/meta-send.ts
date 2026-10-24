@@ -16,6 +16,10 @@ import {
 import { supabaseAdmin } from './admin-client'
 import { sendSocialMessage } from '@/lib/social/send'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
+import {
+  assertAutomaticWhatsAppSendIsFree,
+  markWhatsAppServiceMessageSent,
+} from '@/lib/whatsapp/billing-runtime'
 
 // ------------------------------------------------------------
 // Automation-side Meta sender.
@@ -41,6 +45,7 @@ interface SendTextArgs {
   contactId: string
   text: string
   aiGenerated?: boolean
+  keywordOpeningFallback?: boolean
 }
 
 interface SendTemplateArgs {
@@ -51,6 +56,7 @@ interface SendTemplateArgs {
   templateName: string
   language?: string
   params?: string[]
+  keywordOpeningFallback?: boolean
 }
 
 export async function engineSendText(
@@ -72,6 +78,7 @@ interface SendInteractiveArgs {
   conversationId: string
   contactId: string
   payload: InteractiveMessagePayload
+  keywordOpeningFallback?: boolean
 }
 
 /**
@@ -96,6 +103,7 @@ interface SendMediaArgs {
   transcript?: string
   caption?: string
   filename?: string
+  keywordOpeningFallback?: boolean
 }
 
 export async function engineSendMedia(
@@ -107,7 +115,7 @@ export async function engineSendInteractive(
   args: SendInteractiveArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const { payload, accountId, userId, conversationId, contactId } = args
-  const common = { accountId, userId, conversationId, contactId }
+  const common = { accountId, userId, conversationId, contactId, keywordOpeningFallback: args.keywordOpeningFallback }
   if (payload.kind === 'buttons') {
     return engineSendInteractiveButtons({
       ...common,
@@ -173,6 +181,13 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
       ...(input.kind === 'media' ? { text: input.caption, mediaUrl: input.mediaUrl, filename: input.filename, transcript: input.transcript } : {}),
     })
   }
+  const billingPermit = await assertAutomaticWhatsAppSendIsFree(db, {
+    accountId: input.accountId,
+    conversationId: input.conversationId,
+    contactId: input.contactId,
+    keywordOpeningFallback: input.keywordOpeningFallback,
+    messageCategory: input.kind === 'template' ? 'template' : 'service',
+  })
   const recipient = resolveWhatsAppRecipient(contact)
   const sanitized = recipient.address
 
@@ -241,6 +256,10 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   }
   if (lastError) throw lastError
 
+  // Meta has accepted the message. Keep the reserved monthly service slot
+  // linked to its real WAMID even if local inbox persistence fails below.
+  await markWhatsAppServiceMessageSent(db, billingPermit.reservationId, waMessageId)
+
   if (recipient.isPhone && workingPhone !== sanitized) {
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
@@ -276,7 +295,11 @@ const template_name =
     message_id: waMessageId,
     media_url: input.kind === 'media' ? (/^\d+$/.test(input.mediaUrl) ? `/api/whatsapp/media/${input.mediaUrl}` : input.mediaUrl) : null,
     status: 'sent',
+    billing_status: 'unknown',
+    billing_phone_number_id: config.phone_number_id,
+    billing_recipient_id: sanitized,
     ai_generated: input.kind === 'text' && input.aiGenerated === true,
+    billing_sender: input.kind === 'text' && input.aiGenerated === true ? 'ai' : 'automation',
   })
   if (msgErr) {
     // Meta already has the message; record the DB error but don't pretend

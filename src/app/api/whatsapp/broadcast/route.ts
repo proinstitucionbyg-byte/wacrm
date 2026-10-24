@@ -4,6 +4,7 @@ import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
+import { findOrCreateContact } from '@/lib/api/v1/contacts'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -103,6 +104,7 @@ export async function POST(request: Request) {
       template_name,
       template_language,
       template_params,
+      name,
     } = body
 
     // Normalize to a list of {phone, params} regardless of shape.
@@ -175,11 +177,58 @@ export async function POST(request: Request) {
     }
     const templateRow = rawTemplateRow ?? null
 
+    // This legacy endpoint previously sent templates without creating the
+    // broadcast ledger rows used by delivery webhooks. Create the ledger
+    // first and fail closed if any valid recipient cannot be recorded.
+    const validRecipients = recipients
+      .map((recipient, index) => ({ recipient, index, phone: sanitizePhoneForMeta(recipient.phone) }))
+      .filter((entry) => isValidE164(entry.phone))
+    const { data: broadcast, error: broadcastError } = await supabase
+      .from('broadcasts')
+      .insert({
+        account_id: accountId,
+        user_id: user.id,
+        name: typeof name === 'string' && name.trim() ? name.trim().slice(0, 160) : `Difusión: ${template_name}`,
+        template_name,
+        template_language: template_language || 'en_US',
+        status: 'sending',
+        total_recipients: validRecipients.length,
+      })
+      .select('id')
+      .single()
+    if (broadcastError || !broadcast) {
+      console.error('[whatsapp-broadcast] could not create billing ledger:', broadcastError)
+      return NextResponse.json({ error: 'No se inició la difusión porque no se pudo preparar su registro de entrega y costos.' }, { status: 500 })
+    }
+
+    const recipientRowByIndex = new Map<number, string>()
+    for (const entry of validRecipients) {
+      try {
+        const { id: contactId } = await findOrCreateContact(supabase, accountId, user.id, { phone: entry.phone })
+        const { data: row, error: recipientError } = await supabase
+          .from('broadcast_recipients')
+          .insert({
+            broadcast_id: broadcast.id,
+            contact_id: contactId,
+            status: 'pending',
+          })
+          .select('id')
+          .single()
+        if (recipientError || !row) throw recipientError ?? new Error('No se devolvió la fila del destinatario')
+        recipientRowByIndex.set(entry.index, row.id)
+      } catch (error) {
+        console.error('[whatsapp-broadcast] recipient ledger preparation failed:', error)
+        await supabase.from('broadcasts').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('id', broadcast.id)
+        return NextResponse.json({ error: 'No se inició la difusión: no se pudo registrar cada destinatario para verificar su entrega y costo.' }, { status: 500 })
+      }
+    }
+
     const results: BroadcastResult[] = []
     let sentCount = 0
     let failedCount = 0
 
-    for (const recipient of recipients) {
+    for (let recipientIndex = 0; recipientIndex < recipients.length; recipientIndex++) {
+      const recipient = recipients[recipientIndex]
       const sanitized = sanitizePhoneForMeta(recipient.phone)
 
       if (!isValidE164(sanitized)) {
@@ -232,6 +281,16 @@ export async function POST(request: Request) {
           whatsapp_message_id: sentMessageId,
         })
         sentCount++
+        const recipientRowId = recipientRowByIndex.get(recipientIndex)
+        if (recipientRowId) {
+          const { error: ledgerError } = await supabase.from('broadcast_recipients').update({
+            status: 'sent',
+            sent_at: new Date().toISOString(),
+            whatsapp_message_id: sentMessageId,
+            error_message: null,
+          }).eq('id', recipientRowId)
+          if (ledgerError) console.error('[whatsapp-broadcast] could not link delivered message to billing ledger:', ledgerError)
+        }
       } else {
         console.error(
           `Failed to send broadcast to ${recipient.phone}:`,
@@ -243,8 +302,22 @@ export async function POST(request: Request) {
           error: lastError || 'Unknown error',
         })
         failedCount++
+        const recipientRowId = recipientRowByIndex.get(recipientIndex)
+        if (recipientRowId) {
+          const { error: ledgerError } = await supabase.from('broadcast_recipients').update({
+            status: 'failed',
+            error_message: (lastError || 'Unknown error').slice(0, 1000),
+          }).eq('id', recipientRowId)
+          if (ledgerError) console.error('[whatsapp-broadcast] could not store failed send:', ledgerError)
+        }
       }
     }
+
+    const { error: finalizeError } = await supabase.from('broadcasts').update({
+      status: sentCount > 0 ? 'sent' : 'failed',
+      updated_at: new Date().toISOString(),
+    }).eq('id', broadcast.id)
+    if (finalizeError) console.error('[whatsapp-broadcast] could not finalize broadcast ledger:', finalizeError)
 
     return NextResponse.json({
       success: true,

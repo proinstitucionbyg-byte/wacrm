@@ -4,6 +4,7 @@ import { runSalesWindowFollowups } from '@/lib/ai/sales-window-followup';
 import { dispatchDueReminderMessages } from '@/lib/reminders/dispatch';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
 import { resumePendingExecution } from '@/lib/automations/engine';
+import { drainDeferredKeywordOpenings } from '@/lib/whatsapp/deferred-keyword-openings';
 import type { AutomationContext } from '@/lib/automations/engine';
 import {
   expireSalesAssignments,
@@ -52,6 +53,10 @@ export async function GET(request: Request) {
       'No se pudieron recuperar ejecuciones bloqueadas',
       staleNullClaimError ?? staleTimedClaimError,
     );
+  // First-message keyword openings use a separate durable queue because
+  // they must wait one minute for late Meta referral evidence before any
+  // flow/automation is allowed to send.
+  const processedKeywordOpenings = await drainDeferredKeywordOpenings(admin);
   // Resume promised automation steps before the slower routing and followup
   // jobs. A slow job must never delay a student's already-due block.
   const { data: due, error } = await admin
@@ -116,5 +121,5 @@ export async function GET(request: Request) {
   if (casesError) return NextResponse.json({ error: 'No se pudieron actualizar los reportes de quejas y soluciones' }, { status: 500 });
   const { error: birthdaysError } = await admin.rpc('publish_birthday_notices');
   if (birthdaysError) return NextResponse.json({ error: 'No se pudieron actualizar los avisos de cumpleanos' }, { status: 500 });
-  return NextResponse.json({ processed });
+  return NextResponse.json({ processed, processedKeywordOpenings });
 }

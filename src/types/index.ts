@@ -106,6 +106,7 @@ export interface Contact {
    *  and unique per account. Read-only. */
   phone_normalized?: string;
   name?: string;
+  channel?: string | null;
   email?: string;
   company?: string;
   avatar_url?: string;
@@ -267,6 +268,19 @@ export interface Message {
    * badge in the inbox. Migration 033.
    */
   ai_generated?: boolean;
+  /** Meta billing evidence, populated only from the signed delivery webhook. */
+  billing_status?: 'free' | 'paid' | 'unknown' | null;
+  billing_billable?: boolean | null;
+  billing_type?: string | null;
+  billing_category?: string | null;
+  billing_model?: string | null;
+  billing_confirmed_at?: string | null;
+  billing_delivered_at?: string | null;
+  billing_estimated_cost?: number | null;
+  billing_currency?: string | null;
+  billing_phone_number_id?: string | null;
+  billing_recipient_id?: string | null;
+  billing_sender?: 'adviser' | 'ai' | 'automation' | 'flow' | 'broadcast' | 'system' | null;
   /**
    * Private extraction of visible details from an inbound image. Always
    * marked pending human review; it is not a payment or identity approval.
