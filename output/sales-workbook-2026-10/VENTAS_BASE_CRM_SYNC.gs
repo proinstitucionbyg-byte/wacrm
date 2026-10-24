@@ -111,23 +111,15 @@ function SYNC_VENTAS_CRM() {
     const activeAdviserByName = new Map(advisersSheet.getRange('I3:I102').getDisplayValues().flat().filter(Boolean).map((name) => [normalizeNameKey_(name), name]));
 
     const leads = fetchAllSalesLeads_(base, key);
-    const lastRow = Math.max(sheet.getLastRow(), SALES_SYNC.firstDataRow - 1);
+    const lastRow = salesLastDataRow_(sheet);
     const existingRows = lastRow >= SALES_SYNC.firstDataRow
       ? sheet.getRange(SALES_SYNC.firstDataRow, 1, lastRow - SALES_SYNC.firstDataRow + 1, SALES_SYNC.crmIdColumn).getDisplayValues()
       : [];
     const rowById = new Map();
-    const rowByIdentity = new Map();
-    const rowByIdentifier = new Map();
     existingRows.forEach((existingRow, index) => {
       const rowNumber = SALES_SYNC.firstDataRow + index;
       const crmId = existingRow[SALES_SYNC.crmIdColumn - 1];
-      const identifier = existingRow[2];
-      const channel = existingRow[9];
       if (crmId) rowById.set(crmId, rowNumber);
-      const identityKey = contactIdentityKey_(identifier, channel);
-      if (identityKey && !rowByIdentity.has(identityKey)) rowByIdentity.set(identityKey, rowNumber);
-      const identifierKey = normalizeIdentifier_(identifier);
-      if (identifierKey && !rowByIdentifier.has(identifierKey)) rowByIdentifier.set(identifierKey, rowNumber);
     });
 
     const newRows = [];
@@ -146,7 +138,7 @@ function SYNC_VENTAS_CRM() {
         lead.name || 'Sin nombre',
         lead.phone_or_user_id || '',
         normalizeCourse_(lead.course_interest),
-        createdAt,
+        salesDay_(createdAt, ss.getSpreadsheetTimeZone()),
         createdAt,
         lead.institute || 'INSTICRECE',
         lead.commercial_status || '', // the initial CRM status; later edits sync back through sales:write
@@ -155,15 +147,20 @@ function SYNC_VENTAS_CRM() {
         (lead.crm_tags || []).join(', '),
         lead.assigned_at ? new Date(lead.assigned_at) : '',
         lead.last_interaction_at ? new Date(lead.last_interaction_at) : '',
-        '', // payment operation reference is not overwritten by contact sync
+        lead.operation_reference || '',
         '', // adviser notes are not overwritten
         lead.campaign_or_ad || '',
         lead.id,
         lead.course_details || (String(lead.course_interest || '').startsWith('Varios:') ? String(lead.course_interest).slice(8).trim() : ''),
+        lead.sale_validated ? 'SI' : '',
+        institutionalName_(lead.sales_adviser),
+        lead.sale_validated_at ? new Date(lead.sale_validated_at) : '',
+        lead.student_folder_url || '',
+        lead.sale_monthly_price == null ? '' : lead.sale_monthly_price,
       ];
-      const identityKey = contactIdentityKey_(lead.phone_or_user_id, lead.channel);
-      const identifierKey = normalizeIdentifier_(lead.phone_or_user_id);
-      const existing = rowById.get(lead.id) || (identityKey ? rowByIdentity.get(identityKey) : null) || (identifierKey ? rowByIdentifier.get(identifierKey) : null);
+      // The CRM ID is the only safe deduplication key. Phone numbers and external
+      // usernames can be shared or change, so matching by them can merge students.
+      const existing = rowById.get(String(lead.id || '')) || null;
       if (!existing) {
         row[0] = ++sequence;
         newRows.push(row);
@@ -175,21 +172,27 @@ function SYNC_VENTAS_CRM() {
       sheet.getRange(existing, 10, 1, 4).setValues([row.slice(9, 13)]);
       sheet.getRange(existing, 16, 1, 2).setValues([[row[15], row[16]]]);
       sheet.getRange(existing, SALES_SYNC.courseDetailsColumn).setValue(row[17]);
+      if (!sheet.getRange(existing, 14).getDisplayValue() && row[13]) sheet.getRange(existing, 14).setValue(row[13]);
+      sheet.getRange(existing, 19, 1, 5).setValues([row.slice(18, 23)]);
+      sheet.getRange(existing, 21).setNumberFormat('dd/mm/yyyy hh:mm');
       sheet.getRange(existing, 5).setNumberFormat('dd/mm/yyyy');
       sheet.getRange(existing, 6).setNumberFormat('hh:mm');
       updated++;
     });
 
     if (newRows.length) {
-      const start = Math.max(sheet.getLastRow() + 1, SALES_SYNC.firstDataRow);
-      sheet.getRange(start, 1, newRows.length, 18).setValues(newRows);
+      const start = Math.max(lastRow + 1, SALES_SYNC.firstDataRow);
+      sheet.getRange(start, 1, newRows.length, 23).setValues(newRows);
       sheet.getRange(start, 5, newRows.length, 1).setNumberFormat('dd/mm/yyyy');
       sheet.getRange(start, 6, newRows.length, 1).setNumberFormat('hh:mm');
       sheet.getRange(start, 12, newRows.length, 2).setNumberFormat('dd/mm/yyyy hh:mm');
+      sheet.getRange(start, 21, newRows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
       props.setProperty('SALES_SYNC_NEXT_SEQUENCE', String(sequence));
     }
     props.setProperty('SALES_SYNC_LAST_OK', new Date().toISOString());
     props.setProperty('SALES_SYNC_LAST_COUNT', String(leads.length));
+    SpreadsheetApp.flush();
+    if (advisers) syncSalesPersonalBases_(ss, advisersSheet, advisers, leads, props);
     SpreadsheetApp.flush();
     if (!advisers) ss.toast('Los contactos sí se sincronizaron. Para actualizar asesoras, agrega sales:read a CRM_API_KEY.', 'CRM', 10);
     return { received: leads.length, added: newRows.length, updated: updated };
@@ -198,12 +201,118 @@ function SYNC_VENTAS_CRM() {
   }
 }
 
+// Formula-only commission rows are not contacts. Keep appends beside real data.
+function salesLastDataRow_(sheet) {
+  const end = sheet.getLastRow();
+  if (end < SALES_SYNC.firstDataRow) return SALES_SYNC.firstDataRow - 1;
+  const rows = sheet.getRange(SALES_SYNC.firstDataRow, 1, end - SALES_SYNC.firstDataRow + 1, SALES_SYNC.crmIdColumn).getDisplayValues();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].some((value) => String(value || '').trim())) return SALES_SYNC.firstDataRow + i;
+  }
+  return SALES_SYNC.firstDataRow - 1;
+}
+
 function normalizeNameKey_(value) {
   return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+function salesDay_(value, timeZone) {
+  if (!value) return '';
+  const date = Utilities.formatDate(value, timeZone || 'America/Lima', 'yyyy-MM-dd');
+  // Sheets receives midnight in Lima, not the time fraction of the message.
+  return new Date(date + 'T00:00:00-05:00');
+}
+function institutionalName_(name) {
+  return /^(INSTITUCION|ASESOR INSTITUTO)$/i.test(String(name || '').trim()) ? SALES_SYNC.institutionalAdviser : String(name || '').trim();
+}
+
+/** Stable CRM IDs prevent namesakes or roster reordering from mixing personal bases. */
+function salesLeadsForAdviser_(adviser, leads) {
+  if (!adviser.active_for_sales) return [];
+  return leads.filter(lead => lead.assigned_adviser_id === adviser.user_id);
+}
+
+function sendSalesPersonalStatus_(base, key, contactId, status) {
+  if (!key) throw new Error('Falta CRM_WRITE_API_KEY para guardar el estado de una base personal.');
+  const response = UrlFetchApp.fetch(base + '/api/v1/sales/leads/' + encodeURIComponent(contactId), {
+    method: 'patch', contentType: 'application/json', headers: { Authorization: 'Bearer ' + key },
+    payload: JSON.stringify({ commercial_status: status || null }), muteHttpExceptions: true,
+  });
+  if (response.getResponseCode() !== 200) throw new Error('No se guardó el estado personal en CRM (' + response.getResponseCode() + '). Se conserva la edición para reintentar.');
+}
+
+/** No personal data is shared automatically: the owner chooses Drive access. */
+function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
+  const main = ss.getSheetByName(SALES_SYNC.sheet);
+  const count = Math.max(0, salesLastDataRow_(main) - 2);
+  const masterRows = count ? main.getRange(3, 1, count, 25).getValues() : [];
+  const masterById = new Map(masterRows.map((row, index) => [String(row[16] || ''), { row, number: index + 3 }]).filter(pair => pair[0]));
+  const headers = main.getRange(2, 1, 1, 25).getValues();
+  const directoryRows = directory.getRange(3, 1, SALES_SYNC.adviserDirectorySize, 8).getDisplayValues();
+  const base = String(props.getProperty('CRM_BASE_URL') || '').replace(/\/$/, '');
+  advisers.filter(adviser => adviser.active_for_sales).forEach(adviser => {
+    const directoryIndex = directoryRows.findIndex(row => row[0] === adviser.user_id);
+    if (directoryIndex < 0) throw new Error('Asesora activa sin ID en el directorio.');
+    const property = 'SALES_PERSONAL_BOOK:' + adviser.user_id;
+    const link = directoryRows[directoryIndex][7];
+    const linkedId = /\/spreadsheets\/d\/([\w-]+)/.exec(link);
+    let bookId = props.getProperty(property) || (linkedId && linkedId[1]);
+    let book;
+    if (bookId) book = SpreadsheetApp.openById(bookId);
+    else {
+      book = SpreadsheetApp.create('BASE COMERCIAL · ' + String(adviser.name).slice(0, 70));
+      bookId = book.getId();
+      // Save the ID before any later setup can fail, preventing duplicate files.
+      props.setProperty(property, bookId);
+      book.getSheets()[0].setName(SALES_SYNC.sheet);
+    }
+    props.setProperty(property, bookId);
+    if (bookId === ss.getId()) throw new Error('Una base personal no puede ser la base general.');
+    directory.getRange(directoryIndex + 3, 8).setValue(book.getUrl());
+    const sheet = book.getSheetByName(SALES_SYNC.sheet);
+    if (!sheet) throw new Error('La base personal no contiene BASE GENERAL; revisar sin reemplazarla.');
+    const ownerMarker = sheet.getRange(1, 17).getDisplayValue();
+    if (ownerMarker !== 'ASESORA CRM:' + adviser.user_id && (ownerMarker || sheet.getLastRow() > 1)) throw new Error('El archivo no está identificado como base de esta asesora. No se sobrescribió.');
+    sheet.getRange(1, 17).setValue('ASESORA CRM:' + adviser.user_id);
+    const oldCount = Math.max(0, sheet.getLastRow() - 2);
+    const previous = oldCount ? sheet.getRange(3, 1, oldCount, 25).getValues() : [];
+    const previousById = new Map(previous.filter(row => row[16]).map(row => [String(row[16]), row]));
+    const rows = salesLeadsForAdviser_(adviser, leads).map(lead => {
+      const master = masterById.get(String(lead.id));
+      if (!master) throw new Error('Contacto asignado sin fila en BASE GENERAL.');
+      const row = master.row.slice();
+      const old = previousById.get(String(lead.id));
+      const marker = 'SALES_PERSONAL_STATUS:' + adviser.user_id + ':' + lead.id;
+      const lastPublished = props.getProperty(marker);
+      if (old && lastPublished !== null && String(old[7] || '') !== lastPublished) {
+        sendSalesPersonalStatus_(base, props.getProperty('CRM_WRITE_API_KEY'), lead.id, String(old[7] || '').trim());
+        row[7] = old[7] || '';
+        main.getRange(master.number, 8).setValue(row[7]);
+      }
+      if (old && old[14]) row[14] = old[14]; // Preserve the adviser's notes.
+      props.setProperty(marker, String(row[7] || ''));
+      return row;
+    });
+    sheet.getRange(1, 1).setValue('BASE DE ' + adviser.name + ' · Edita estado H y observaciones O. Sincronización cada 10 min. Acceso: compartir desde Drive solo con esta asesora.');
+    sheet.getRange(2, 1, 1, 25).setValues(headers).setFontWeight('bold').setBackground('#14283f').setFontColor('#ffffff');
+    if (rows.length) {
+      sheet.getRange(3, 1, rows.length, 25).setValues(rows);
+      sheet.getRange(3, 8, rows.length, 1).setDataValidation(main.getRange(3, 8).getDataValidation());
+      sheet.getRange(3, 5, rows.length, 1).setNumberFormat('dd/mm/yyyy');
+      sheet.getRange(3, 6, rows.length, 1).setNumberFormat('hh:mm');
+      sheet.getRange(3, 12, rows.length, 2).setNumberFormat('dd/mm/yyyy hh:mm');
+      sheet.getRange(3, 21, rows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
+    }
+    if (oldCount > rows.length) sheet.getRange(rows.length + 3, 1, oldCount - rows.length, 25).clearContent();
+    sheet.setFrozenRows(2); sheet.hideColumns(17); sheet.setHiddenGridlines(true);
+    sheet.setColumnWidth(2, 210); sheet.setColumnWidth(3, 160); sheet.setColumnWidth(8, 190);
+  });
+}
+
 /** Replaces only CRM-owned adviser directory fields; keeps sheet links and rotation notes. */
 function syncSalesAdviserDirectory_(sheet, advisers) {
+  const previous = sheet.getRange(3, 1, SALES_SYNC.adviserDirectorySize, 8).getDisplayValues();
+  const settingsById = new Map(previous.filter(row => row[0]).map(row => [row[0], row.slice(6, 8)]));
   const rows = advisers.map((adviser) => [
     adviser.user_id,
     adviser.name || 'Sin nombre',
@@ -211,34 +320,22 @@ function syncSalesAdviserDirectory_(sheet, advisers) {
     'Ventas',
     adviser.cargo || 'Agente',
     adviser.active_for_sales ? 'Activo' : 'Inactivo',
+    ...(settingsById.get(adviser.user_id) || ['', '']),
   ]);
-  while (rows.length < SALES_SYNC.adviserDirectorySize) rows.push(['', '', '', '', '', '']);
-  sheet.getRange(3, 1, SALES_SYNC.adviserDirectorySize, 6).setValues(rows);
-}
-
-function normalizeIdentifier_(value) {
-  return normalizeNameKey_(value).replace(/\s+/g, '');
-}
-
-function contactIdentityKey_(identifier, channel) {
-  const normalizedIdentifier = normalizeIdentifier_(identifier);
-  return normalizedIdentifier ? normalizeChannel_(channel) + '|' + normalizedIdentifier : '';
+  while (rows.length < SALES_SYNC.adviserDirectorySize) rows.push(['', '', '', '', '', '', '', '']);
+  sheet.getRange(3, 1, SALES_SYNC.adviserDirectorySize, 8).setValues(rows);
 }
 
 function normalizeAdviser_(lead, activeAdviserByName) {
   const assignedName = String(lead && lead.assigned_adviser || '').trim();
-  // Keep attribution on existing leads after a person is deactivated.
-  // The ASESORAS active list controls new assignment choices; it must not
-  // erase who handled a historical/current lead from BASE GENERAL.
-  if (lead && lead.assigned_adviser_id && assignedName) return assignedName;
   const activeAdviser = activeAdviserByName.get(normalizeNameKey_(assignedName));
   if (activeAdviser) return activeAdviser;
 
-  // Keep attribution with the institution while AI/automation is enabled and
-  // there is no human assignee. A real assigned adviser always takes priority.
-  const hasHumanAssignee = !!(lead && lead.assigned_adviser_id);
+  // The sheet's adviser dropdown contains only sales-active advisers. If the
+  // CRM still has a historical assignment to a deactivated/non-sales profile,
+  // do not write a value the sheet rejects or show that person as currently active.
   const systemIsHandling = !!(lead && (lead.ai_enabled === true || lead.automation_enabled === true));
-  return !hasHumanAssignee && systemIsHandling ? SALES_SYNC.institutionalAdviser : '';
+  return systemIsHandling ? SALES_SYNC.institutionalAdviser : '';
 }
 
 function normalizeChannel_(value) {

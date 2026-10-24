@@ -67,7 +67,7 @@ function newestRoute(routes: RawConversation['conversation_sales_routes']) {
 
 export async function GET(request: Request) {
   try {
-    const ctx = await requireApiKey(request, 'contacts:read');
+    const ctx = await requireApiKey(request, 'sales:read');
     const { limit, cursor } = parseListParams(request);
     let query = ctx.supabase
       .from('contacts')
@@ -97,6 +97,21 @@ export async function GET(request: Request) {
     if (error) throw error;
 
     const page = buildPage((data ?? []) as unknown as RawContact[], limit);
+    // A completed enrollment leaves Sales for Fidelización. Keep that sale in
+    // the commercial ledger using the human-validated payment, not its area tag.
+    const { data: paidReviews, error: paidError } = page.items.length
+      ? await ctx.supabase.from('payment_reviews')
+          .select('contact_id,status,payment_purpose,reviewed_at,operation_reference,sales_adviser,enrollments:enrollment_drafts(status,data,student_folder_url)')
+          .eq('account_id', ctx.accountId)
+          .eq('status', 'validated')
+          .in('contact_id', page.items.map((contact) => contact.id))
+          .order('reviewed_at', { ascending: true })
+      : { data: [], error: null };
+    if (paidError) throw paidError;
+    const saleByContact = new Map((paidReviews ?? [])
+      .filter((review) => review.payment_purpose === 'enrollment' ||
+        (review.payment_purpose === 'unclassified' && review.enrollments?.some((draft) => draft.status === 'registered')))
+      .map((review) => [review.contact_id, review]));
     const possibleAgentIds = [...new Set(page.items.flatMap((contact) => {
       const conversation = contact.conversations[0];
       const route = conversation ? newestRoute(conversation.conversation_sales_routes) : null;
@@ -113,6 +128,7 @@ export async function GET(request: Request) {
     const profileById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
 
     const salesContacts = page.items.flatMap((contact) => {
+      if ((contact.phone_normalized || contact.phone || '').replace(/\D/g, '').replace(/^51(?=\d{9}$)/, '') === '987020644') return [];
       const tags = contact.contact_tags
         .map((item) => item.tag?.name ?? '')
         .filter(Boolean);
@@ -123,7 +139,9 @@ export async function GET(request: Request) {
       const assignedAgentId = conversation?.assigned_agent_id ?? route?.agent_id ?? null;
       const assignedProfile = assignedAgentId ? profileById.get(assignedAgentId) : null;
       const isSalesProfile = assignedProfile?.area?.toLowerCase() === 'ventas';
-      if (!tags.some((tag) => SALES_TAGS.has(tag)) && !isSalesProfile) return [];
+      const sale = saleByContact.get(contact.id);
+      const salePrices = (sale?.enrollments?.[0]?.data as { prices?: unknown } | null)?.prices;
+      if (!sale && !tags.some((tag) => SALES_TAGS.has(tag)) && !isSalesProfile) return [];
       const firstReferral = [...messages]
         .filter((message) => message.sender_type === 'customer' && message.source_referral)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))[0]?.source_referral ?? null;
@@ -144,6 +162,12 @@ export async function GET(request: Request) {
         institute: 'INSTICRECE',
         crm_tags: tags,
         commercial_status: tags.find((tag) => SALES_COMMERCIAL_STATUSES.includes(tag as typeof SALES_COMMERCIAL_STATUSES[number])) ?? '',
+        sale_validated: !!sale,
+        sale_validated_at: sale?.reviewed_at ?? null,
+        sale_monthly_price: Array.isArray(salePrices) && typeof salePrices[1] === 'number' ? salePrices[1] : null,
+        sales_adviser: sale?.sales_adviser ?? null,
+        operation_reference: sale?.operation_reference ?? null,
+        student_folder_url: sale?.enrollments?.find((draft) => draft.student_folder_url)?.student_folder_url ?? null,
         assigned_adviser_id: assignedAgentId,
         assigned_adviser: assignedProfile?.nickname?.trim() || assignedProfile?.full_name?.trim() || '',
         assigned_at: route?.created_at ?? null,
