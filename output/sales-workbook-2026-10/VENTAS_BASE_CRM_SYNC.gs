@@ -196,11 +196,18 @@ function SYNC_VENTAS_CRM() {
       sheet.getRange(start, 26, newRows.length, 1).setValues(newRows.map(row => [leadById.get(row[16]).commercial_status_at ? new Date(leadById.get(row[16]).commercial_status_at) : ''])).setNumberFormat('dd/mm/yyyy hh:mm');
       props.setProperty('SALES_SYNC_NEXT_SEQUENCE', String(sequence));
     }
-    props.setProperty('SALES_SYNC_LAST_OK', new Date().toISOString());
-    props.setProperty('SALES_SYNC_LAST_COUNT', String(leads.length));
     SpreadsheetApp.flush();
     if (advisers) syncSalesPersonalBases_(ss, advisersSheet, advisers, leads, props);
+    const completedAt = new Date();
+    const panel = ss.getSheetByName('PANEL');
+    if (panel) {
+      panel.getRange('A2').setValue('Última actualización CRM');
+      panel.getRange('B2').setValue(completedAt).setNumberFormat('dd/mm/yyyy hh:mm:ss');
+      panel.getRange('D2').setValue('Automática cada 10 min · Hora de Lima');
+    }
     SpreadsheetApp.flush();
+    props.setProperty('SALES_SYNC_LAST_OK', completedAt.toISOString());
+    props.setProperty('SALES_SYNC_LAST_COUNT', String(leads.length));
     if (!advisers) ss.toast('Los contactos sí se sincronizaron. Para actualizar asesoras, agrega sales:read a CRM_API_KEY.', 'CRM', 10);
     return { received: leads.length, added: newRows.length, updated: updated };
   } finally {

@@ -142,6 +142,9 @@ export async function GET(request: Request) {
       const tags = contact.contact_tags
         .map((item) => item.tag?.name ?? '')
         .filter(Boolean);
+      const commercialTag = [...contact.contact_tags]
+        .filter((item) => SALES_COMMERCIAL_STATUSES.includes(item.tag?.name as typeof SALES_COMMERCIAL_STATUSES[number]))
+        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
 
       const conversation = contact.conversations[0] ?? null;
       const messages = conversation?.messages ?? [];
@@ -171,8 +174,8 @@ export async function GET(request: Request) {
         created_at: contact.created_at,
         institute: 'INSTICRECE',
         crm_tags: tags,
-        commercial_status: tags.find((tag) => SALES_COMMERCIAL_STATUSES.includes(tag as typeof SALES_COMMERCIAL_STATUSES[number])) ?? '',
-        commercial_status_at: contact.contact_tags.find((item) => SALES_COMMERCIAL_STATUSES.includes(item.tag?.name as typeof SALES_COMMERCIAL_STATUSES[number]))?.created_at ?? null,
+        commercial_status: commercialTag?.tag?.name ?? '',
+        commercial_status_at: commercialTag?.created_at ?? null,
         sale_validated: !!sale,
         sale_validated_at: sale?.reviewed_at ?? null,
         sale_monthly_price: Array.isArray(salePrices) && typeof salePrices[1] === 'number' ? salePrices[1] : null,

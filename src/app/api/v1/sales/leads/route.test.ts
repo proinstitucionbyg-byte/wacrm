@@ -22,6 +22,15 @@ beforeEach(() => {
   h.key.mockResolvedValue({ accountId: 'account-a', supabase: { from } });
 });
 describe('commercial base export', () => {
+  it('uses the newest CRM commercial tag instead of an older followup tag', async () => {
+    const row=contact('latest');
+    h.rows.contacts=[{...row,contact_tags:[
+      {tag:{name:'SEGUIMIENTO DE VENTAS'},created_at:'2026-10-23T10:00:00Z'},
+      {tag:{name:'VENTA'},created_at:'2026-10-24T10:00:00Z'},
+    ]}];
+    const result=await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({commercial_status:'VENTA',commercial_status_at:'2026-10-24T10:00:00Z'});
+  });
   it('accepts object, array and absent enrollment relations returned by PostgREST', async () => {
     h.rows.contacts = [contact('object', []),contact('array', []),contact('none', [])];
     const object = payment('object');

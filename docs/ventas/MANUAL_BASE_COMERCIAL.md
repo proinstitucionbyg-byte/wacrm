@@ -18,6 +18,8 @@ Abre la [Base Comercial](https://docs.google.com/spreadsheets/d/1qtO6wN-jbbZppcM
 
 La sincronización consulta el CRM cada diez minutos. Incluye los contactos comerciales y conserva las matrículas con pago validado aunque el estudiante ya haya pasado a Fidelización. No vuelve a crear la misma fila: usa un identificador fijo del CRM, guardado en la columna Q.
 
+En PANEL, la segunda fila muestra la hora de la última actualización completada, en hora de Lima. Si necesitas actualizar antes, usa el menú CRM → Sincronizar contactos de ventas. Los errores de una pasada no deben interpretarse como una actualización terminada.
+
 No cambies ese identificador ni el consecutivo A. Un teléfono repetido no es suficiente para fusionar personas. Las filas antiguas sin identificador se conservan para revisión.
 
 El sistema figura como **ASESOR INSTITUTO** cuando la IA o la automatización atienden y no existe una asesora de Ventas habilitada a cargo. Si ambas están desactivadas y no hay una asesora activa, el responsable puede quedar vacío: esto no significa que deba reactivarse la atención automática.
@@ -98,6 +100,8 @@ Mientras no haya asesoras, deja apagado el reparto. No necesitas crear personas 
 ## 8. Matrículas, carpetas y documentos
 
 En BASE GENERAL, S identifica una matrícula con pago validado; T muestra quién cerró esa venta, U su fecha y V el enlace de la carpeta del estudiante. Abrir una carpeta no envía documentos por WhatsApp.
+
+En el archivo **Matrículas y Control de Ingresos**, pestaña **MATRICULAS**, la columna **W · ESTADO** registra si la asesora ya contactó al estudiante y dio la bienvenida. Un registro nuevo empieza con **NO REALIZADO**. Al terminar el contacto, elige **REALIZADO**. Las actualizaciones del CRM conservan esa elección; cambiar **AGREGADOS AL WHATSAPP** no la reemplaza. Esta marca de seguimiento es distinta del estado comercial VENTA.
 
 La emisión de boleta, cronograma y ficha se gestiona en el expediente del CRM y debe quedar registrada también en **Matrículas y Control de Ingresos**, incluso cuando el envío se haga manualmente. Un pago de una cuota u otro concepto no debe contarse como una matrícula nueva.
 
