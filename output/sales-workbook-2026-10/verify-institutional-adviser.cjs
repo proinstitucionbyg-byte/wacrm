@@ -39,7 +39,7 @@ context.PropertiesService = {
   getScriptProperties() {
     return { getProperty(name) {
       return { CRM_BASE_URL: 'https://crm.example', CRM_WRITE_API_KEY: 'test-key' }[name] || '';
-    } };
+    }, setProperty() {}, deleteProperty() {} };
   },
 };
 context.UrlFetchApp = {

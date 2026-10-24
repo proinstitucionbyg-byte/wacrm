@@ -4,6 +4,28 @@ import { describe, expect, it, vi } from 'vitest';
 const source = readFileSync('output/sales-workbook-2026-10/VENTAS_BASE_CRM_SYNC.gs','utf8');
 const context = () => { const c = createContext({console,Map,Date}); runInContext(source,c); return c; };
 describe('commercial workbook synchronization', () => {
+  function properties(seed: Record<string,string> = {}) {
+    const values = new Map(Object.entries(seed));
+    return {getProperty: (key:string) => values.get(key) ?? null, setProperty:(key:string,value:string) => values.set(key,value),deleteProperty:(key:string)=>values.delete(key)};
+  }
+  it('imports a CRM status change after the previous sheet status was synchronized', () => {
+    const c=context(); const props=properties({'SALES_MAIN_STATUS:id':'INTERESADO'});
+    expect(c.reconcileSalesMainStatus_('id','VENTA','INTERESADO',props,'https://crm.example',100)).toBe('VENTA');
+    expect(props.getProperty('SALES_MAIN_STATUS:id')).toBe('VENTA');
+  });
+  it('keeps unsent local changes and retries rather than replacing them with old CRM data', () => {
+    const c=context(); const props=properties({'CRM_WRITE_API_KEY':'test-key','SALES_MAIN_STATUS:id':'','SALES_PENDING_STATE:id':'INTERESADO'});
+    c.UrlFetchApp={fetch:()=>({getResponseCode:()=>403})};
+    expect(c.reconcileSalesMainStatus_('id','','INTERESADO',props,'https://crm.example',100)).toBe('INTERESADO');
+    expect(props.getProperty('SALES_PENDING_STATE:id')).toBe('INTERESADO');
+    c.UrlFetchApp={fetch:()=>({getResponseCode:()=>200})};
+    expect(c.reconcileSalesMainStatus_('id','','INTERESADO',props,'https://crm.example',100)).toBe('INTERESADO');
+    expect(props.getProperty('SALES_PENDING_STATE:id')).toBeNull();
+  });
+  it('does not overwrite a sheet edit made after the CRM snapshot started', () => {
+    const c=context(); const props=properties({'SALES_MAIN_STATUS:id':'VENTA','SALES_MAIN_EDIT_AT:id':'101'});
+    expect(c.reconcileSalesMainStatus_('id','INTERESADO','VENTA',props,'https://crm.example',100)).toBe('VENTA');
+  });
   it('ignores commission formulas below the last real contact and preserves manual rows', () => {
     const c = context();
     const rows = Array.from({length: 4999}, () => Array(17).fill(''));

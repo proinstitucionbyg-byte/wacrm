@@ -55,7 +55,7 @@ type RawContact = {
   external_id: string | null;
   channel: string | null;
   created_at: string;
-  contact_tags: Array<{ tag: { name: string } | null }>;
+  contact_tags: Array<{ created_at?: string; tag: { name: string } | null }>;
   conversations: RawConversation[];
 };
 
@@ -63,6 +63,15 @@ function newestRoute(routes: RawConversation['conversation_sales_routes']) {
   if (!routes) return null;
   if (!Array.isArray(routes)) return routes;
   return [...routes].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
+}
+
+type EnrollmentSnapshot = { status: string; data: { prices?: unknown } | null; student_folder_url: string | null };
+
+// review_id is unique: PostgREST returns an object for this relation in production.
+// Accept arrays too, so exports remain compatible with older schema metadata.
+function enrollmentSnapshots(value: unknown): EnrollmentSnapshot[] {
+  if (!value) return [];
+  return (Array.isArray(value) ? value : [value]) as EnrollmentSnapshot[];
 }
 
 export async function GET(request: Request) {
@@ -73,7 +82,7 @@ export async function GET(request: Request) {
       .from('contacts')
       .select(`
         id, phone, phone_normalized, name, external_id, channel, created_at,
-        contact_tags(tag:tags(name)),
+        contact_tags(created_at,tag:tags(name)),
         conversations(
           id, status, assigned_agent_id, created_at, last_message_at, last_message_text,
           unread_count, automation_enabled, ai_enabled,
@@ -109,6 +118,7 @@ export async function GET(request: Request) {
       : { data: [], error: null };
     if (paidError) throw paidError;
     const saleByContact = new Map((paidReviews ?? [])
+      .map((review) => ({ ...review, enrollments: enrollmentSnapshots(review.enrollments) }))
       .filter((review) => review.payment_purpose === 'enrollment' ||
         (review.payment_purpose === 'unclassified' && review.enrollments?.some((draft) => draft.status === 'registered')))
       .map((review) => [review.contact_id, review]));
@@ -162,6 +172,7 @@ export async function GET(request: Request) {
         institute: 'INSTICRECE',
         crm_tags: tags,
         commercial_status: tags.find((tag) => SALES_COMMERCIAL_STATUSES.includes(tag as typeof SALES_COMMERCIAL_STATUSES[number])) ?? '',
+        commercial_status_at: contact.contact_tags.find((item) => SALES_COMMERCIAL_STATUSES.includes(item.tag?.name as typeof SALES_COMMERCIAL_STATUSES[number]))?.created_at ?? null,
         sale_validated: !!sale,
         sale_validated_at: sale?.reviewed_at ?? null,
         sale_monthly_price: Array.isArray(salePrices) && typeof salePrices[1] === 'number' ? salePrices[1] : null,

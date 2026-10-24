@@ -8,7 +8,7 @@ const contact = (id: string, tags: string[] = ['AREA VENTAS'], phone = '51911111
 });
 const payment = (contact_id: string, purpose = 'enrollment', status = 'registered') => ({
   contact_id, status: 'validated', payment_purpose: purpose, reviewed_at: '2026-10-23T13:00:00Z',
-  operation_reference: '00123', sales_adviser: 'INSTITUCION', enrollments: [{ status, data: { prices: [19.9,49.9,49.9,49.9,49.9,49.9] }, student_folder_url: 'https://drive.google.com/drive/folders/student' }],
+  operation_reference: '00123', sales_adviser: 'INSTITUCION', enrollments: { status, data: { prices: [19.9,49.9,49.9,49.9,49.9,49.9] }, student_folder_url: 'https://drive.google.com/drive/folders/student' },
 });
 beforeEach(() => {
   vi.resetAllMocks(); h.rows = {}; h.calls = [];
@@ -22,6 +22,17 @@ beforeEach(() => {
   h.key.mockResolvedValue({ accountId: 'account-a', supabase: { from } });
 });
 describe('commercial base export', () => {
+  it('accepts object, array and absent enrollment relations returned by PostgREST', async () => {
+    h.rows.contacts = [contact('object', []),contact('array', []),contact('none', [])];
+    const object = payment('object');
+    const array = payment('array');
+    h.rows.payment_reviews = [object,{...array,enrollments:[array.enrollments]},{...payment('none','unclassified'),enrollments:null}];
+    const response = await GET(new Request('https://crm.example/api/v1/sales/leads'));
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.data.map((row: {id: string}) => row.id)).toEqual(['object','array']);
+    expect(result.data.every((row: {student_folder_url: string}) => row.student_folder_url.endsWith('/student'))).toBe(true);
+  });
   it('keeps human-validated enrollment sales after moving to Fidelización without changing tags', async () => {
     h.rows.contacts = [contact('paid', ['PAGO VALIDADO', 'AREA FIDELIZACION']), contact('prospect')];
     h.rows.payment_reviews = [payment('paid')];

@@ -1,7 +1,7 @@
 /**
  * Synchronizes CRM-owned columns from WACRM into BASE GENERAL.
- * It is deliberately read-only toward WACRM: statuses, notes, operation
- * references, and adviser selection remain under the team's control.
+ * Commercial status is synchronized both ways through a restricted key.
+ * Notes and manually entered operation references stay under the team's control.
  * Configure CRM_BASE_URL and CRM_API_KEY in Script Properties first.
  */
 const SALES_SYNC = {
@@ -74,6 +74,8 @@ function SYNC_ESTADO_VENTA_EDITADO_CRM(e) {
   }
 
   const status = String(e.range.getDisplayValue() || '').trim();
+  props.setProperty('SALES_MAIN_EDIT_AT:' + contactId, String(Date.now()));
+  props.setProperty('SALES_PENDING_STATE:' + contactId, status);
   const response = UrlFetchApp.fetch(base + '/api/v1/sales/leads/' + encodeURIComponent(contactId), {
     method: 'patch',
     contentType: 'application/json',
@@ -86,12 +88,15 @@ function SYNC_ESTADO_VENTA_EDITADO_CRM(e) {
     sheet.getParent().toast('No se sincronizó con el CRM (' + response.getResponseCode() + '): ' + (body.error && body.error.message || 'revisa la llave o el registro.'), 'CRM', 10);
     return;
   }
+  props.setProperty('SALES_MAIN_STATUS:' + contactId, status);
+  if (props.getProperty('SALES_PENDING_STATE:' + contactId) === status) props.deleteProperty('SALES_PENDING_STATE:' + contactId);
   sheet.getParent().toast('Estado comercial actualizado en las etiquetas del CRM.', 'CRM', 5);
 }
 
 function SYNC_VENTAS_CRM() {
+  const startedAt = Date.now();
   const lock = LockService.getDocumentLock();
-  lock.waitLock(20000);
+  if (!lock.tryLock(1000)) return { skipped: 'Otra sincronización sigue en curso' };
   try {
     const props = PropertiesService.getScriptProperties();
     const base = String(props.getProperty('CRM_BASE_URL') || '').replace(/\/$/, '');
@@ -164,9 +169,15 @@ function SYNC_VENTAS_CRM() {
       if (!existing) {
         row[0] = ++sequence;
         newRows.push(row);
+        props.setProperty('SALES_MAIN_STATUS:' + lead.id, String(row[7] || ''));
         return;
       }
-      // Refresh CRM-owned fields only. Keep sequence, status, payment operation, and notes.
+      // Reconcile status without losing a pending edit or overwriting a newer UI change.
+      const localStatus = String(sheet.getRange(existing, 8).getDisplayValue() || '').trim();
+      const status = reconcileSalesMainStatus_(lead.id, row[7], localStatus, props, base, startedAt);
+      if (String(sheet.getRange(existing, 8).getDisplayValue() || '').trim() === localStatus &&
+          Number(props.getProperty('SALES_MAIN_EDIT_AT:' + lead.id) || 0) <= startedAt) sheet.getRange(existing, 8).setValue(status);
+      // Keep sequence, payment operation, and notes.
       sheet.getRange(existing, 2, 1, 6).setValues([row.slice(1, 7)]);
       sheet.getRange(existing, 9).setValue(row[8]);
       sheet.getRange(existing, 10, 1, 4).setValues([row.slice(9, 13)]);
@@ -174,6 +185,7 @@ function SYNC_VENTAS_CRM() {
       sheet.getRange(existing, SALES_SYNC.courseDetailsColumn).setValue(row[17]);
       if (!sheet.getRange(existing, 14).getDisplayValue() && row[13]) sheet.getRange(existing, 14).setValue(row[13]);
       sheet.getRange(existing, 19, 1, 5).setValues([row.slice(18, 23)]);
+      sheet.getRange(existing, 26).setValue(lead.commercial_status_at ? new Date(lead.commercial_status_at) : '').setNumberFormat('dd/mm/yyyy hh:mm');
       sheet.getRange(existing, 21).setNumberFormat('dd/mm/yyyy hh:mm');
       sheet.getRange(existing, 5).setNumberFormat('dd/mm/yyyy');
       sheet.getRange(existing, 6).setNumberFormat('hh:mm');
@@ -187,6 +199,8 @@ function SYNC_VENTAS_CRM() {
       sheet.getRange(start, 6, newRows.length, 1).setNumberFormat('hh:mm');
       sheet.getRange(start, 12, newRows.length, 2).setNumberFormat('dd/mm/yyyy hh:mm');
       sheet.getRange(start, 21, newRows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
+      const leadById = new Map(leads.map(lead => [lead.id, lead]));
+      sheet.getRange(start, 26, newRows.length, 1).setValues(newRows.map(row => [leadById.get(row[16]).commercial_status_at ? new Date(leadById.get(row[16]).commercial_status_at) : ''])).setNumberFormat('dd/mm/yyyy hh:mm');
       props.setProperty('SALES_SYNC_NEXT_SEQUENCE', String(sequence));
     }
     props.setProperty('SALES_SYNC_LAST_OK', new Date().toISOString());
@@ -199,6 +213,26 @@ function SYNC_VENTAS_CRM() {
   } finally {
     lock.releaseLock();
   }
+}
+
+function reconcileSalesMainStatus_(id, remote, local, props, base, startedAt) {
+  if (Number(props.getProperty('SALES_MAIN_EDIT_AT:' + id) || 0) > startedAt) return local;
+  const last = props.getProperty('SALES_MAIN_STATUS:' + id);
+  const pending = props.getProperty('SALES_PENDING_STATE:' + id);
+  if (pending !== null || (last !== null && local !== last) || (last === null && local)) {
+    try {
+      sendSalesPersonalStatus_(base, props.getProperty('CRM_WRITE_API_KEY'), id, local);
+      props.deleteProperty('SALES_PENDING_STATE:' + id);
+      props.setProperty('SALES_MAIN_STATUS:' + id, local);
+      return local;
+    } catch (error) {
+      props.setProperty('SALES_PENDING_STATE:' + id, local);
+      console.warn('Estado pendiente de sincronizar para ' + id + ': ' + error.message);
+      return local;
+    }
+  }
+  props.setProperty('SALES_MAIN_STATUS:' + id, String(remote || ''));
+  return String(remote || '');
 }
 
 // Formula-only commission rows are not contacts. Keep appends beside real data.
@@ -288,6 +322,7 @@ function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
         sendSalesPersonalStatus_(base, props.getProperty('CRM_WRITE_API_KEY'), lead.id, String(old[7] || '').trim());
         row[7] = old[7] || '';
         main.getRange(master.number, 8).setValue(row[7]);
+        props.setProperty('SALES_MAIN_STATUS:' + lead.id, String(row[7] || ''));
       }
       if (old && old[14]) row[14] = old[14]; // Preserve the adviser's notes.
       props.setProperty(marker, String(row[7] || ''));
@@ -306,7 +341,19 @@ function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
     if (oldCount > rows.length) sheet.getRange(rows.length + 3, 1, oldCount - rows.length, 25).clearContent();
     sheet.setFrozenRows(2); sheet.hideColumns(17); sheet.setHiddenGridlines(true);
     sheet.setColumnWidth(2, 210); sheet.setColumnWidth(3, 160); sheet.setColumnWidth(8, 190);
+    syncSalesSharedRanking_(ss, book);
   });
+}
+
+/** Share aggregate performance only; never copy the general contact ledger. */
+function syncSalesSharedRanking_(ss, book) {
+  const source = ss.getSheetByName('RANKING');
+  if (!source) return;
+  let target = book.getSheetByName('RANKING');
+  if (!target) target = source.copyTo(book).setName('RANKING');
+  target.getRange(1, 1, 160, 26).setValues(source.getRange(1, 1, 160, 26).getValues());
+  target.getRange(5, 1).setFormula('=HYPERLINK("#gid=' + target.getSheetId() + '&range=A111","VER GRÁFICOS DE BARRAS Y TORTA ↓")');
+  target.hideColumns(14, 11);
 }
 
 /** Replaces only CRM-owned adviser directory fields; keeps sheet links and rotation notes. */
