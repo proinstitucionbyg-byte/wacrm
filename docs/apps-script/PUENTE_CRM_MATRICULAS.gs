@@ -41,6 +41,89 @@ function C_OPERACION_DUPLICADA_(refs, ids, reference, jobId) {
   const normalized=C_NORMALIZAR_OPERACION_(reference);if(!normalized)return false;
   return refs.some(function(r,i){return C_NORMALIZAR_OPERACION_(r[0])===normalized&&CLAVE_(ids[i][0])!==CLAVE_(jobId);});
 }
+/** La plantilla tiene INSTICRECE precargado; eso no constituye una matricula. */
+function C_SIGUIENTE_FILA_CON_DATOS_(rows, formulas, notes, instituteIndex) {
+  let next=2;
+  rows.forEach(function(row,i){
+    const occupied=row.some(function(value,column){
+      if((formulas[i]||[])[column]||(notes[i]||[])[column])return true;
+      if(value===''||value==null)return false;
+      return column!==instituteIndex||CLAVE_(value)!=='INSTICRECE';
+    });
+    if(occupied)next=i+3;
+  });
+  return next;
+}
+function C_NUEVA_FILA_MATRICULA_(sheet,map) {
+  if(!map.INSTITUTO)throw new Error('FALTA COLUMNA INSTITUTO');
+  if(sheet.getLastRow()<2)return 2;
+  const range=sheet.getRange(2,1,sheet.getLastRow()-1,sheet.getLastColumn());
+  return C_SIGUIENTE_FILA_CON_DATOS_(range.getValues(),range.getFormulas(),range.getNotes(),map.INSTITUTO-1);
+}
+/** Comprobacion de solo lectura para la hoja y el activador instalados. */
+function VERIFICAR_FILAS_CRM() {
+  const s=HOJA_('MATRICULAS'),m=MAPA_(s),rows=s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,s.getLastColumn()).getValues();
+  const count=rows.filter(function(r){return String(r[m['NOMBRE COMPLETO']-1]||'').trim();}).length;
+  const next=C_NUEVA_FILA_MATRICULA_(s,m);
+  console.log('MATRICULAS CON NOMBRE: '+count+' · PROXIMA FILA REAL: '+next+' · SIN CAMBIAR DATOS NI ENVIAR MENSAJES');
+  return {count:count,next_row:next};
+}
+/** Registro previo: conserva W, asesora de ingreso, notas y formulas. No genera documentos. */
+function C_PLAN_FILA_HOJA_(job,map,existing,nextNumber,now) {
+  const d=job.data||{},phone=String(d.phone1||'').replace(/\D/g,'').replace(/^51(?=\d{9}$)/,'');
+  if(job.payment_status!=='validated'||phone==='987020644'||(job.payment_purpose!=='enrollment'&&!(job.payment_purpose==='unclassified'&&job.status==='registered')))throw new Error('PAGO NO ELEGIBLE PARA MATRICULAS');
+  const row=existing.slice();while(row.length<30)row.push('');
+  const completed=job.status==='registered'&&Boolean(existing[map['N°']-1]);
+  const put=function(key,value){const c=map[key];if(!c||value==null||value==='')return;if(completed&&row[c-1]!==''&&row[c-1]!=null)return;if(typeof row[c-1]==='string'&&row[c-1].charAt(0)==='=')return;row[c-1]=value;};
+  const date=function(value){return /^\d{4}-\d{2}-\d{2}$/.test(value||'')&&!isNaN(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value?new Date(value+'T12:00:00-05:00'):'';};
+  if(!row[map['N°']-1])put('N°',/^\d+$/.test(String(job.registered_number||''))?Number(job.registered_number):nextNumber);
+  if(!row[map['FECHA DE HOY']-1]){put('FECHA DE HOY',now);put('HORA',now);}
+  put('INSTITUTO','INSTICRECE');
+  if(!row[map['ASESORA DE VTAS.']-1])put('ASESORA DE VTAS.',job.sales_adviser);
+  const fields={'NOMBRE COMPLETO':'full_name','TIPO DE DOCUMENTO':'document_type','NUMERO DE DOCUMENTO':'document_number','CELULAR 1':'phone1','CELULAR 2':'phone2','DIRECCION':'address','DEPARTAMENTO':'department','DISTRITO':'district','CORREO ELECTRONICO':'email','PROMO':'promotion_id'};
+  Object.keys(fields).forEach(function(k){put(k,d[fields[k]]);});
+  put('F. NACIMIENTO',date(d.birth_date));put('FECHA DE INICIO',date(d.start_date));
+  const course=typeof O_CURSO_==='function'?O_CURSO_(d.course):null;
+  put('CURSO',course?course[1].replace(/^WA /,''):d.course);
+  if(job.student_folder_url)put('LINK DE CARPETA DEL ESTUDIANTE',job.student_folder_url);
+  const noteColumn=map.OBSERVACIONES;
+  if(noteColumn){const manual=String(row[noteColumn-1]||'').split('\n').filter(function(line){return line.indexOf('REGISTRO PREVIO CRM:')!==0;});if(job.status!=='registered')manual.push('REGISTRO PREVIO CRM: PAGO VALIDADO. DATOS O REVISION PENDIENTES EN EL CHAT. DOCUMENTOS NO CONFIRMADOS.');row[noteColumn-1]=manual.filter(Boolean).join('\n');}
+  row[map['ID MATRICULA CRM']-1]=CLAVE_(job.id);
+  if(job.operation_reference)row[map['NUMERO DE OPERACION']-1]=String(job.operation_reference).trim();
+  return row;
+}
+function C_SINCRONIZAR_FILA_HOJA_(job) {
+  const s=HOJA_('MATRICULAS'),m=MAPA_(s),n=s.getLastColumn();
+  if(!m['ID MATRICULA CRM']||!m['NUMERO DE OPERACION'])throw new Error('FALTAN IDENTIFICADORES DEL PUENTE');
+  const rows=s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,n).getValues(),matches=[];
+  rows.forEach(function(r,i){if(CLAVE_(r[m['ID MATRICULA CRM']-1])===CLAVE_(job.id))matches.push(i+2);});
+  if(matches.length>1)throw new Error('ID CRM DUPLICADO');
+  if(C_OPERACION_DUPLICADA_(rows.map(function(r){return [r[m['NUMERO DE OPERACION']-1]];}),rows.map(function(r){return [r[m['ID MATRICULA CRM']-1]];}),job.operation_reference,job.id))throw new Error('OPERACION YA REGISTRADA; REVISAR SIN DUPLICAR');
+  const fila=matches[0]||C_NUEVA_FILA_MATRICULA_(s,m),range=s.getRange(fila,1,1,n),existing=range.getValues()[0],formulas=range.getFormulas()[0];
+  formulas.forEach(function(f,i){if(f)existing[i]=f;});
+  const next=rows.reduce(function(max,r){const value=Number(r[m['N°']-1]);return Number.isSafeInteger(value)&&value>max?value:max;},0)+1;
+  const plan=C_PLAN_FILA_HOJA_(job,m,existing,next,new Date());
+  if(JSON.stringify(existing)===JSON.stringify(plan))return;
+  ['ASESORA DE VTAS.','CURSO'].forEach(function(k){if(plan[m[k]-1])C_ASESORA_VALIDACION_(s.getRange(fila,m[k]),plan[m[k]-1]);});
+  ['NUMERO DE DOCUMENTO','CELULAR 1','CELULAR 2','NUMERO DE OPERACION'].forEach(function(k){s.getRange(fila,m[k]).setNumberFormat('@');});
+  s.getRange(fila,m['ID MATRICULA CRM']).setValue(CLAVE_(job.id));SpreadsheetApp.flush();
+  range.setValues([plan]);
+  ['FECHA DE HOY','F. NACIMIENTO','FECHA DE INICIO'].forEach(function(k){s.getRange(fila,m[k]).setNumberFormat('dd/MM/yyyy');});s.getRange(fila,m.HORA).setNumberFormat('HH:mm:ss');
+}
+function C_RECONCILIAR_HOJA_CRM_() {
+  const c=C_CONFIG_(),props=PropertiesService.getScriptProperties();
+  let cursor=props.getProperty('CRM HOJA CURSOR')||'';
+  for(let page=0;page<2;page++){
+    const response=UrlFetchApp.fetch(c.base+'/api/v1/enrollments/sheet?limit=50'+(cursor?'&cursor='+encodeURIComponent(cursor):''),{headers:{Authorization:'Bearer '+c.key},muteHttpExceptions:true});
+    if(response.getResponseCode()!==200)throw new Error('NO SE PUDO CONCILIAR LA HOJA ('+response.getResponseCode()+')');
+    const result=JSON.parse(response.getContentText());if(!Array.isArray(result.data)||!result.meta)throw new Error('RESPUESTA DE CONCILIACION INVALIDA');
+    result.data.forEach(C_SINCRONIZAR_FILA_HOJA_);SpreadsheetApp.flush();
+    cursor=result.meta.next_cursor||'';if(cursor)props.setProperty('CRM HOJA CURSOR',cursor);else{props.deleteProperty('CRM HOJA CURSOR');return;}
+  }
+}
+function CONCILIAR_HOJA_CRM() {
+  return BLOQUEO_(function(){C_RECONCILIAR_HOJA_CRM_();return VERIFICAR_FILAS_CRM();});
+}
 function C_REGISTRAR_(job) {
   const d=job.data, s=HOJA_('MATRICULAS'), admin=SpreadsheetApp.openById(V2.admin), m=MAPA_(s);
   const cursos=['NUTRICION Y DIETETICA M-J 20-22','AUXILIAR DE FARMACIA M-V 18-20','RECURSOS HUMANOS L-M 20-22','ASISTENTE ADMINISTRATIVO M-V 20-22','EDUCACION INICIAL L-M 18-20'];
@@ -70,7 +153,7 @@ function C_REGISTRAR_(job) {
   if(matches.length>1)throw new Error('ID CRM DUPLICADO');
   let fila=matches[0];
   {
-    const nueva=!fila;fila=fila||Math.max(2,s.getLastRow()+1);
+    const nueva=!fila;fila=fila||C_NUEVA_FILA_MATRICULA_(s,m);
     const row=nueva?Array(markerColumn).fill(''):s.getRange(fila,1,1,markerColumn).getValues()[0];
     if(!job.sales_adviser||!String(job.sales_adviser).trim())throw new Error('FALTA CONFIRMAR ATRIBUCION DE VENTA EN CRM');
     const values={'NOMBRE COMPLETO':d.full_name,'TIPO DE DOCUMENTO':d.document_type,'NUMERO DE DOCUMENTO':d.document_number,'F. NACIMIENTO':d.birth_date?new Date(d.birth_date+'T12:00:00-05:00'):'','CELULAR 1':d.phone1,'CELULAR 2':d.phone2||'','DIRECCION':d.address||'','DEPARTAMENTO':d.department||'','DISTRITO':d.district||'','CORREO ELECTRONICO':d.email,'CURSO':curso,'FECHA DE INICIO':new Date(d.start_date+'T12:00:00-05:00'),'PROMO':d.promotion_id,'ID DE INICIO':inicios[0][0]};
@@ -114,6 +197,7 @@ function C_REGISTRAR_(job) {
 function SINCRONIZAR_CRM_MATRICULAS() {
   return BLOQUEO_(function(){
     C_SINCRONIZAR_CUADRO_();
+    try{C_RECONCILIAR_HOJA_CRM_();}catch(error){console.warn('CONCILIACION DE MATRICULAS: '+String(error.message||error));}
     C_ENVIAR_DOCUMENTOS_PENDIENTES_();
     const job=C_API_('/claim',{}).job;if(!job)return;
     let result;

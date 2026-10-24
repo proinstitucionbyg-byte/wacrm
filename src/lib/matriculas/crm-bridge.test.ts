@@ -12,9 +12,36 @@ function setup() {
     context
   );
   runInContext("C_SINCRONIZAR_CUADRO_=function(){};", context);
+  runInContext("C_RECONCILIAR_HOJA_CRM_=function(){};", context);
   return (code: string) => runInContext(code, context);
 }
 describe('puente Google CRM', () => {
+  it('records a paid incomplete intake without changing adviser-owned state or requiring documents', () => {
+    const run = setup();
+    run("headers=['N°','FECHA DE HOY','HORA','INSTITUTO','ASESORA DE INGRESO','ASESORA DE VTAS.','NOMBRE COMPLETO','TIPO DE DOCUMENTO','NUMERO DE DOCUMENTO','F. NACIMIENTO','EDAD','CELULAR 1','CELULAR 2','DIRECCION','DEPARTAMENTO','DISTRITO','CORREO ELECTRONICO','LINK DE CARPETA DEL ESTUDIANTE','CURSO','FECHA DE INICIO','AGREGADOS AL WHATSAPP','PRIORIDAD','ESTADO','PROMO','OBSERVACIONES','OBSERVACION PARA FIDELIZACION','OBSERVACION PARA VENTAS','ID DE INICIO','ID MATRICULA CRM','NUMERO DE OPERACION'];map={};headers.forEach(function(x,i){map[x]=i+1;});existing=Array(30).fill('');existing[4]='ANTONELLA';existing[22]='REALIZADO';existing[24]='NOTA MANUAL';job={id:'case',payment_status:'validated',payment_purpose:'enrollment',status:'collecting',operation_reference:'000123',sales_adviser:'INSTITUCION',data:{full_name:'ESTUDIANTE',phone1:'51912345678'}};planned=C_PLAN_FILA_HOJA_(job,map,existing,14,new Date('2026-10-23T20:00:00Z'));again=C_PLAN_FILA_HOJA_(job,map,planned,15,new Date('2026-10-24T20:00:00Z'));");
+    expect(run('planned[0]')).toBe(14);
+    expect(run('planned[4]')).toBe('ANTONELLA');
+    expect(run('planned[22]')).toBe('REALIZADO');
+    expect(run('planned[24]')).toContain('NOTA MANUAL');
+    expect(run('planned[24]')).toContain('DOCUMENTOS NO CONFIRMADOS');
+    expect(run('planned[29]')).toBe('000123');
+    expect(run('JSON.stringify(planned)===JSON.stringify(again)')).toBe(true);
+    expect(() => run("C_PLAN_FILA_HOJA_(Object.assign({},job,{payment_status:'pending'}),map,existing,14,new Date())")).toThrow('NO ELEGIBLE');
+    expect(() => run("C_PLAN_FILA_HOJA_(Object.assign({},job,{payment_purpose:'other'}),map,existing,14,new Date())")).toThrow('NO ELEGIBLE');
+    expect(() => run("C_PLAN_FILA_HOJA_(Object.assign({},job,{data:{phone1:'+51 987 020 644'}}),map,existing,14,new Date())")).toThrow('NO ELEGIBLE');
+  });
+  it('appends after the last student rather than after the prefilled institute rows', () => {
+    const run = setup();
+    run("rows=Array.from({length:184},function(_,i){const row=Array(30).fill('');row[3]='INSTICRECE';if(i<5)row[6]='ESTUDIANTE '+i;return row;});");
+    expect(run('C_SIGUIENTE_FILA_CON_DATOS_(rows,[],[],3)')).toBe(7);
+  });
+  it('preserves a reserved CRM row and any later manual value, formula or note', () => {
+    const run = setup();
+    expect(run("C_SIGUIENTE_FILA_CON_DATOS_([['','','','INSTICRECE'],['','','','','CRM RESERVADO']],[],[],3)")).toBe(4);
+    expect(run("C_SIGUIENTE_FILA_CON_DATOS_([['','','','INSTICRECE']],[['=IF(TRUE,\"\",\"\")']],[],3)")).toBe(3);
+    expect(run("C_SIGUIENTE_FILA_CON_DATOS_([['','','','INSTICRECE']],[],[['NOTA MANUAL']],3)")).toBe(3);
+    expect(run('C_SIGUIENTE_FILA_CON_DATOS_([],[],[],3)')).toBe(2);
+  });
   it('preserves adviser dropdown choices while allowing the verified institutional sale', () => {
     const run = setup();
     run("SpreadsheetApp.DataValidationCriteria={VALUE_IN_LIST:'LIST'}; choices=['ASHLY']; saved=null; rule={getCriteriaType:function(){return 'LIST';},getCriteriaValues:function(){return [choices,true];},copy:function(){return {requireValueInList:function(v,show){saved={values:v,show:show};return this;},build:function(){return saved;}};}}; cell={getDataValidation:function(){return rule;},setDataValidation:function(v){saved=v;}}; C_ASESORA_VALIDACION_(cell,'INSTITUCION');");

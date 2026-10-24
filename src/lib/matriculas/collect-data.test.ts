@@ -31,6 +31,11 @@ const back: IntakeMessage = {
   },
 };
 describe('deterministic chat intake', () => {
+  it('reads Correo electrónico without including the accented label in the address', () => {
+    const result = collectEnrollmentData({}, [{ id: 'written-email', content_text: 'Nombres: Ana Perez\nCorreo electrónico: ana@example.com\nDistrito: Desaguadero' }]);
+    expect(result.email).toBe('ana@example.com');
+    expect(result.district).toBe('DESAGUADERO');
+  });
   it('reads WhatsApp labels without a colon and ignores an invalid DNI code from the reverse', () => {
     const value = collectEnrollmentData({}, [
       { id: 'written', content_text: 'Nombre Milena Mileth Pezo Espinoza\nCorreo milena@example.com' },

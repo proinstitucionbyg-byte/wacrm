@@ -104,6 +104,7 @@ export function collectEnrollmentData(
     // must never become a name, course or document by inference.
     const currentIdentityBatch = belongsToLatestIdentityBatch(message);
     const addEmail = (raw: string) => {
+      if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(raw.trim())) return;
       add('email', raw);
       if (currentIdentityBatch) {
         const parsed = parseEnrollmentData({ email: raw })?.email;
@@ -127,7 +128,7 @@ export function collectEnrollmentData(
         new RegExp(`^${pattern.source}$`, pattern.flags).test(key(lineValue)));
       if (currentIdentityBatch && !isExactCourse && isBarePersonName(lineValue)) add('full_name', lineValue, true);
       const labelled = line.match(
-        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electronico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|documento(?: de identidad)?|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*(?:(?::|-|\.)\s*|\s+)(.+)$/i
+        /^\s*(nombre(?: completo)?|nombres(?: y apellidos)?|correo(?: electr[oó]nico)?|email|celular(?:\s*[12])?|telefono(?:\s*[12])?|dni|documento(?: de identidad)?|carn[eé] de extranjer[ií]a|pasaporte|fecha de nacimiento|direccion|dirección|departamento|distrito|curso|promocion)\s*(?:(?::|-|\.)\s*|\s+)(.+)$/i
       );
       if (!labelled) continue;
       const label = key(labelled[1]);
