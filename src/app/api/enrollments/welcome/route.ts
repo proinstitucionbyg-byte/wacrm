@@ -31,6 +31,26 @@ export async function GET(request: Request) {
       .limit(1)
       .maybeSingle();
     if (draftError) throw draftError;
+    const { data: enrollment, error: enrollmentError } = await ctx.supabase
+      .from('enrollment_drafts')
+      .select('id,status,registered_number,student_folder_url')
+      .eq('account_id', ctx.accountId)
+      .eq('conversation_id', conversation)
+      .in('status', ['ready', 'processing', 'registered', 'error'])
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (enrollmentError) throw enrollmentError;
+    let documentDeliveries: Array<{ kind: string; status: string }> = [];
+    if (enrollment?.status === 'registered') {
+      const { data: deliveries, error: deliveriesError } = await ctx.supabase
+        .from('enrollment_document_deliveries')
+        .select('kind,status')
+        .eq('account_id', ctx.accountId)
+        .eq('enrollment_id', enrollment.id);
+      if (deliveriesError) throw deliveriesError;
+      documentDeliveries = deliveries ?? [];
+    }
     let intake = null;
     let identityCandidates: Array<{
       id: string;
@@ -94,7 +114,23 @@ export async function GET(request: Request) {
         };
       }
     }
-    return NextResponse.json({ tasks: data ?? [], intake });
+    return NextResponse.json({
+      tasks: data ?? [],
+      intake,
+      enrollment: enrollment
+        ? {
+            status: enrollment.status,
+            registered_number: enrollment.registered_number,
+            student_folder_url:
+              enrollment.student_folder_url?.startsWith(
+                'https://drive.google.com/drive/folders/'
+              )
+                ? enrollment.student_folder_url
+                : null,
+            documents: documentDeliveries,
+          }
+        : null,
+    });
   } catch (error) {
     return toErrorResponse(error);
   }

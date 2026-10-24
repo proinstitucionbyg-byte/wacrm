@@ -26,6 +26,12 @@ interface WelcomeTask {
   backup_sent_at: string | null;
   status: string;
 }
+interface EnrollmentProgress {
+  status: string;
+  registered_number: string | null;
+  student_folder_url: string | null;
+  documents: Array<{ kind: string; status: string }>;
+}
 function explainIntakeIssue(issue: string): string {
   if (issue.startsWith('VERIFICAR IDENTIDAD:'))
     return 'Identidad pendiente: selecciona las fotos del documento y confirma que las revisaste, o selecciona mensajes escritos que juntos contengan nombre, documento y correo.';
@@ -49,6 +55,7 @@ export function EnrollmentWelcomeCheck({
   const [identityReviewed, setIdentityReviewed] = useState(false);
   const [offerReviewed, setOfferReviewed] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [enrollment, setEnrollment] = useState<EnrollmentProgress | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const load = useCallback(async () => {
     try {
@@ -58,6 +65,7 @@ export function EnrollmentWelcomeCheck({
       if (!res.ok) throw Error('No se pudo comprobar la bienvenida.');
       const data = await res.json();
       setTask(Array.isArray(data.tasks) ? (data.tasks[0] ?? null) : null);
+      setEnrollment(data.enrollment ?? null);
       const nextIntake = data.intake ?? null;
       setIntake(nextIntake);
       if (nextIntake) {
@@ -364,6 +372,37 @@ export function EnrollmentWelcomeCheck({
             <p className="text-destructive">
               REVISAR EL ENVIO INICIAL ANTES DE CONTINUAR.
             </p>
+          )}
+        </div>
+      )}
+      {enrollment && (
+        <div className="mx-2 my-1 flex max-w-2xl items-center gap-2 rounded border border-sky-500/40 bg-sky-500/5 px-2 py-1 text-[10px] leading-tight sm:mx-4">
+          <span className="min-w-0 flex-1">
+            <strong>
+              {enrollment.status === 'registered'
+                ? `MATRÍCULA ${enrollment.registered_number ?? 'REGISTRADA'}`
+                : enrollment.status === 'error'
+                  ? 'MATRÍCULA PENDIENTE DE REVISIÓN'
+                  : 'MATRÍCULA EN PROCESO'}
+            </strong>
+            {enrollment.status === 'registered' && enrollment.documents.length > 0 && (
+              <span className="ml-1 text-muted-foreground">
+                · {enrollment.documents.map((document) => `${document.kind}: ${document.status}`).join(' · ')}
+              </span>
+            )}
+          </span>
+          <Button type="button" size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[10px]" onClick={() => void load()} disabled={!!busy}>
+            Actualizar
+          </Button>
+          {enrollment.status === 'registered' && enrollment.student_folder_url && (
+            <a
+              className="shrink-0 font-semibold text-sky-600 underline"
+              href={enrollment.student_folder_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Descargar documentos
+            </a>
           )}
         </div>
       )}
