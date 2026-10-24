@@ -267,7 +267,10 @@ function PROCESAR_FILAS_V2_(s, desde, cantidad, c1, c2, ahora) {
       else if (k !== 'LINK DE CARPETA DEL ESTUDIANTE') put(k, TEXTO_(v).toUpperCase());
     });
     if (!TEXTO_(get('NOMBRE COMPLETO'))) continue;
-    if (get('N°') === '') put('N°', siguiente++);
+    if (get('N°') === '') {
+      put('N°', siguiente++);
+      if (m.ESTADO && get('ESTADO') === '') put('ESTADO', 'NO REALIZADO');
+    }
     if (get('FECHA DE HOY') === '' && !formulas[m['FECHA DE HOY'] - 1]) { put('FECHA DE HOY', ahora); if (get('HORA') === '') put('HORA', ahora); }
     if (!get('INSTITUTO')) put('INSTITUTO', 'INSTICRECE');
     s.getRange(fila, m['FECHA DE HOY']).setNumberFormat('dd/MM/yyyy'); s.getRange(fila, m.HORA).setNumberFormat('HH:mm:ss');

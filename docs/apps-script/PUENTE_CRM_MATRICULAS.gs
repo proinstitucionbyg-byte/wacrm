@@ -69,6 +69,14 @@ function VERIFICAR_FILAS_CRM() {
   return {count:count,next_row:next};
 }
 /** Registro previo: conserva W, asesora de ingreso, notas y formulas. No genera documentos. */
+/** W belongs to the adviser. Never rewrite it from an old row snapshot. */
+function C_ESCRIBIR_FILA_SIN_ESTADO_(sheet,fila,values,estadoColumn,nueva) {
+  if(!Number.isInteger(estadoColumn)||estadoColumn<1||estadoColumn>values.length)throw new Error('FALTA COLUMNA ESTADO');
+  if(estadoColumn>1)sheet.getRange(fila,1,1,estadoColumn-1).setValues([values.slice(0,estadoColumn-1)]);
+  if(estadoColumn<values.length)sheet.getRange(fila,estadoColumn+1,1,values.length-estadoColumn).setValues([values.slice(estadoColumn)]);
+  if(nueva){const cell=sheet.getRange(fila,estadoColumn);if(cell.getValue()===''&&!cell.getFormula())cell.setValue('NO REALIZADO');}
+}
+
 function C_PLAN_FILA_HOJA_(job,map,existing,nextNumber,now) {
   const d=job.data||{},phone=String(d.phone1||'').replace(/\D/g,'').replace(/^51(?=\d{9}$)/,'');
   if(job.payment_status!=='validated'||phone==='987020644'||(job.payment_purpose!=='enrollment'&&!(job.payment_purpose==='unclassified'&&job.status==='registered')))throw new Error('PAGO NO ELEGIBLE PARA MATRICULAS');
@@ -107,7 +115,7 @@ function C_SINCRONIZAR_FILA_HOJA_(job) {
   ['ASESORA DE VTAS.','CURSO'].forEach(function(k){if(plan[m[k]-1])C_ASESORA_VALIDACION_(s.getRange(fila,m[k]),plan[m[k]-1]);});
   ['NUMERO DE DOCUMENTO','CELULAR 1','CELULAR 2','NUMERO DE OPERACION'].forEach(function(k){s.getRange(fila,m[k]).setNumberFormat('@');});
   s.getRange(fila,m['ID MATRICULA CRM']).setValue(CLAVE_(job.id));SpreadsheetApp.flush();
-  range.setValues([plan]);
+  C_ESCRIBIR_FILA_SIN_ESTADO_(s,fila,plan,m.ESTADO,!matches.length);
   ['FECHA DE HOY','F. NACIMIENTO','FECHA DE INICIO'].forEach(function(k){s.getRange(fila,m[k]).setNumberFormat('dd/MM/yyyy');});s.getRange(fila,m.HORA).setNumberFormat('HH:mm:ss');
 }
 function C_RECONCILIAR_HOJA_CRM_() {
@@ -165,7 +173,7 @@ function C_REGISTRAR_(job) {
     ['NUMERO DE DOCUMENTO','CELULAR 1','CELULAR 2'].forEach(function(k){s.getRange(fila,m[k]).setNumberFormat('@');});
     // Reserva la misma fila antes de escribir: una validacion no debe duplicar el registro al reintentar.
     s.getRange(fila,markerColumn).setValue(CLAVE_(job.id));SpreadsheetApp.flush();
-    s.getRange(fila,1,1,row.length).setValues([row]);SpreadsheetApp.flush();
+    C_ESCRIBIR_FILA_SIN_ESTADO_(s,fila,row,m.ESTADO,nueva);SpreadsheetApp.flush();
     if(operationReference)s.getRange(fila,operationColumn).setValue(operationReference);
   }
   PROCESAR_FILAS_V2_(s,fila,1,1,markerColumn-1,new Date());SpreadsheetApp.flush();

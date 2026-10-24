@@ -15,6 +15,25 @@ function setup() {
   runInContext("C_RECONCILIAR_HOJA_CRM_=function(){};", context);
   return (code: string) => runInContext(code, context);
 }
+
+describe('manual enrollment welcome status', () => {
+  it('does not restore an old NO REALIZADO snapshot over a concurrent human REALIZADO edit', () => {
+    const run=setup();
+    run("actual=Array(30).fill('');actual[22]='REALIZADO';snapshot=Array(30).fill('');snapshot[22]='NO REALIZADO';snapshot[6]='ESTUDIANTE';writes=[];sheet={getRange:function(row,col,n,w){return {setValues:function(values){writes.push([col,w]);values[0].forEach(function(v,i){actual[col-1+i]=v;});},getValue:function(){return actual[col-1];},getFormula:function(){return '';},setValue:function(v){actual[col-1]=v;}};}};C_ESCRIBIR_FILA_SIN_ESTADO_(sheet,3,snapshot,23,false);");
+    expect(run('actual[22]')).toBe('REALIZADO');
+    expect(run('actual[6]')).toBe('ESTUDIANTE');
+    expect(JSON.parse(JSON.stringify(run('writes')))).toEqual([[1,22],[24,7]]);
+  });
+  it('initializes only a new blank state, preserving existing and concurrently selected states', () => {
+    const run=setup();
+    run("state='';sheet={getRange:function(){return {setValues:function(){},getValue:function(){return state;},getFormula:function(){return '';},setValue:function(v){state=v;}};}};C_ESCRIBIR_FILA_SIN_ESTADO_(sheet,3,Array(30).fill(''),23,true);");
+    expect(run('state')).toBe('NO REALIZADO');
+    run("state='REALIZADO';C_ESCRIBIR_FILA_SIN_ESTADO_(sheet,3,Array(30).fill(''),23,true);");
+    expect(run('state')).toBe('REALIZADO');
+    run("state='';C_ESCRIBIR_FILA_SIN_ESTADO_(sheet,3,Array(30).fill(''),23,false);");
+    expect(run('state')).toBe('');
+  });
+});
 describe('puente Google CRM', () => {
   it('records a paid incomplete intake without changing adviser-owned state or requiring documents', () => {
     const run = setup();

@@ -166,6 +166,14 @@ describe('Automatizacion de matriculas V2', () => {
     const h = setup(); h.rows[1][6] = 'maria'; h.rows[1][20] = true; h.rows[1][22] = 'EN PROCESO'; h.process(); expect(h.rows[1][22]).toBe('EN PROCESO');
     h.rows[1][20] = false; h.process(); expect(h.rows[1][22]).toBe('EN PROCESO');
   });
+  it('inicia el registro manual en NO REALIZADO y conserva REALIZADO al actualizar', () => {
+    const h=setup();h.rows[1][6]='maria';h.process();
+    expect(h.rows[1][22]).toBe('NO REALIZADO');
+    h.rows[1][22]='REALIZADO';h.rows[1][20]=false;h.process();
+    expect(h.rows[1][22]).toBe('REALIZADO');
+    h.rows[1][20]=true;h.process();
+    expect(h.rows[1][22]).toBe('REALIZADO');
+  });
   it('no mezcla cursos que tienen varios inicios ni pisa una fecha sin ID', () => {
     const h = setup(); h.rows[1][6] = 'maria'; h.rows[1][18] = 'NUTRICION'; h.rows[1][19] = new Date('2026-10-12T12:00:00Z');
     h.process(); expect(h.rows[1][19]).toEqual(new Date('2026-10-12T12:00:00Z'));
