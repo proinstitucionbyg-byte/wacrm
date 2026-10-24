@@ -36,6 +36,7 @@ import { usePendingPaymentCount } from '@/hooks/use-pending-payment-count';
 import { toast } from 'sonner';
 import { isVisibleInInbox } from '@/lib/inbox/cleanup';
 import { InboxRecovery } from './inbox-recovery';
+import { GroupedTags } from './grouped-tags';
 
 interface ConversationListProps {
   activeConversationId: string | null;
@@ -408,13 +409,14 @@ export function ConversationList({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="start"
-                className="border-border bg-popover max-h-64 w-56"
+                className="border-border bg-popover max-h-80 w-72 overflow-y-auto"
               >
-                {tags.map((t) => (
+                <GroupedTags tags={tags} selectedIds={selectedTagIds} renderTag={(t) => (
                   <DropdownMenuCheckboxItem
                     key={t.id}
                     checked={selectedTagIds.includes(t.id)}
                     onCheckedChange={() => toggleTag(t.id)}
+                    onSelect={(event) => event.preventDefault()}
                     className="text-popover-foreground text-sm"
                   >
                     <span className="flex items-center gap-2">
@@ -425,7 +427,7 @@ export function ConversationList({
                       <span className="truncate">{t.name}</span>
                     </span>
                   </DropdownMenuCheckboxItem>
-                ))}
+                )} />
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -606,15 +608,14 @@ export function ConversationList({
           </DialogHeader>
             <p className="text-sm text-muted-foreground">Marca para aplicar; desmarca para retirar. El número indica cuántos chats seleccionados tienen la etiqueta.</p>
             <div className="max-h-80 space-y-2 overflow-y-auto">
-              {tags
-              .filter((t) => canManageTags || !t.kind || t.kind === 'process')
-              .map((t) => (
+              <GroupedTags tags={tags.filter((t) => canManageTags || !t.kind || t.kind === 'process')}
+                selectedIds={tags.filter(t => (checkedTagCounts.get(t.id) ?? 0) > 0).map(t => t.id)} renderTag={(t) => (
                   <label key={t.id} className="flex items-center gap-2 rounded-md border p-3 text-sm">
                     <input type="checkbox" disabled={tagBusy} checked={checkedTagCounts.get(t.id) === checkedChats.length && checkedChats.length > 0} onChange={(event) => void applyLabel(!event.target.checked, t.id)} />
                     <span style={{ color: t.color }}>{t.name}</span>
                     <span className="ml-auto text-muted-foreground">{checkedTagCounts.get(t.id) ?? 0}/{checkedChats.length}</span>
                   </label>
-              ))}
+              )} />
             </div>
             <Button variant="outline" onClick={() => setLabelOpen(false)}>LISTO</Button>
         </DialogContent>

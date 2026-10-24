@@ -4,6 +4,8 @@
 
 Abre la [Base Comercial](https://docs.google.com/spreadsheets/d/1qtO6wN-jbbZppcM7qWjoJ2Bv9HVYCrX-jIEH5nGRZGs/edit). Es la hoja de seguimiento de ventas. El archivo **Matrículas y Control de Ingresos** conserva el registro académico; son dos registros con funciones distintas.
 
+**Acceso del CEO:** este archivo general y su matriz completa de ratios son privados. No compartas el archivo general con asesoras. Cada asesora usa un archivo independiente; su ranking incluye únicamente nombres, ventas y metas del equipo.
+
 | Pestaña | Qué verás | Qué haces tú |
 |---|---|---|
 | PANEL | Contactos, seguimiento, responsables y entradas por día | Revisar el resumen |
@@ -22,6 +24,8 @@ En PANEL, la segunda fila muestra la hora de la última actualización completad
 
 No cambies ese identificador ni el consecutivo A. Un teléfono repetido no es suficiente para fusionar personas. Las filas antiguas sin identificador se conservan para revisión.
 
+BASE GENERAL se ordena automáticamente de la fecha de ingreso al CRM más antigua a la más reciente, con la hora para desempatar. Se mueve la fila completa con sus notas, estado e identificador. El consecutivo conserva su valor: no se vuelve a numerar al ordenar. Las bases personales siguen el mismo orden.
+
 El sistema figura como **ASESOR INSTITUTO** cuando la IA o la automatización atienden y no existe una asesora de Ventas habilitada a cargo. Si ambas están desactivadas y no hay una asesora activa, el responsable puede quedar vacío: esto no significa que deba reactivarse la atención automática.
 
 ## 3. Cómo cambiar el estado
@@ -38,9 +42,11 @@ En una base personal, la asesora edita H y O. El resto se actualiza desde el CRM
 
 ## 4. Cómo se cuenta una venta en el ranking
 
-El ranking cuenta una vez cada contacto que tenga **VENTA**, **VENTA SOLO** o una matrícula con pago validado. Si tiene ambas cosas, no suma dos ventas.
+El ranking cuenta una vez cada contacto que tenga **VENTA** o **VENTA SOLO** en su historial comercial. Un pago de matrícula pendiente de validación puede marcar una venta comercial, pero sigue pendiente en Finanzas: no se aprueba automáticamente. Los pagos de cuotas u otros conceptos no se convierten en matrículas nuevas.
 
-Para una matrícula validada usa la fecha de validación y el responsable comercial guardado con el pago. Para una venta comercial sin matrícula validada usa la fecha de la etiqueta y el responsable que refleja el CRM. La última columna del ranking distingue cuántas ventas tienen pago validado.
+La fecha comercial y el responsable del cierre se conservan en el historial. Un traspaso a Fidelización elimina las etiquetas operativas de Ventas; conserva la venta en la base general y en la base de quien la cerró. Quitar la etiqueta VENTA para ese traspaso no cancela la venta.
+
+Si la asesora corrige **H en su base**, retirando VENTA o eligiendo un estado que no sea venta, se actualiza el estado comercial en la base general y el CRM. Deja de contarse como venta y de generar comisión comercial; el pago validado, la matrícula y los documentos permanecen intactos. No borres la fila completa para corregir una venta. Las columnas AA:AD muestran si cuenta, responsable histórico, fecha comercial e ID del responsable; no las edites.
 
 El orden se recalcula automáticamente: más ventas primero; si empatan, se ordenan por nombre. Aparece **ASESOR INSTITUTO** junto con las asesoras activas y los responsables de ventas del mes. Un cambio de responsable posterior no debe reasignar una matrícula cuyo pago ya tiene la atribución guardada.
 
@@ -91,11 +97,21 @@ Entra al [CRM](https://personal-wacrm.exjald.easypanel.host/settings) y abre **S
 4. Para repartir automáticamente, los porcentajes deben sumar 100% y debes activar el reparto y guardar.
 5. La persona necesita permiso de chat y conexión activa para recibir una nueva asignación.
 
-La hoja admite hasta cien asesoras. El directorio refleja la configuración del CRM. La sincronización prepara una base individual para cada asesora activa y guarda su enlace en **ASESORAS, columna H**. Cada base contiene únicamente sus contactos asignados y una copia del ranking agregado. La copia del ranking no incluye los teléfonos ni los expedientes de las otras personas.
+La hoja admite hasta cien asesoras. El directorio refleja la configuración del CRM. La sincronización prepara una base individual para cada asesora activa y guarda su enlace en **ASESORAS, columna H**. Cada base contiene sus contactos asignados y las ventas que cerró, aunque el estudiante pase a otra área. El ranking compartido contiene solo nombres, ventas, metas, avance y faltantes; no copia los contactos, ratios, validaciones ni comisiones de otras personas.
 
 Las bases nuevas quedan privadas para el propietario. Abre el enlace y comparte desde Drive únicamente con la asesora correspondiente. Desactivar a una asesora detiene nuevas asignaciones y actualizaciones de su base; conserva el archivo y el historial. Si también debe perder acceso al archivo, el propietario debe retirarlo en Compartir de Drive.
 
 Mientras no haya asesoras, deja apagado el reparto. No necesitas crear personas ficticias: el seguimiento del sistema aparece como ASESOR INSTITUTO.
+
+### Prueba temporal de acceso
+
+Se preparó una [base temporal con datos ficticios](https://docs.google.com/spreadsheets/d/1sAyhbpMVyyIlrBAtLfwcCGYlY5EdIf3UIbVZ4EcVNq8/edit) para **representante.insticrece.bg8@gmail.com**. Aparece en **Drive → Compartido conmigo**; eso no transfiere la propiedad del archivo. No se habilita a esa cuenta para repartir clientes reales.
+
+En **MI BASE**, cambia H4 y H5 a VENTA. En RANKING aparecerán tres ventas de la asesora de prueba y el primer puesto. Restáuralos a INTERESADO y SEGUIMIENTO DE VENTAS. La pestaña PRUEBA contiene las instrucciones. Esta demostración verifica acceso, fórmulas y presentación; no está conectada al CRM. Al finalizar, retira el acceso desde Compartir y envía únicamente este archivo temporal a la papelera.
+
+### Etiquetas por área
+
+En el Inbox, el filtro y el catálogo agrupan las etiquetas en Ventas, Fidelización, Pagos y matrículas y responsables. Abrir otro grupo cierra el anterior sin perder las selecciones. Solo aparecen las etiquetas permitidas para la cuenta. Los estados comerciales se sustituyen entre sí; área, pago, urgencia y responsable son datos separados.
 
 ## 8. Matrículas, carpetas y documentos
 

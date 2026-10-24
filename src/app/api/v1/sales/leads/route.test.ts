@@ -22,6 +22,20 @@ beforeEach(() => {
   h.key.mockResolvedValue({ accountId: 'account-a', supabase: { from } });
 });
 describe('commercial base export', () => {
+  it('keeps a historical sale and its owner after all sales labels and the current assignment disappear', async () => {
+    h.rows.contacts=[contact('history',['AREA FIDELIZACION'])];
+    h.rows.contact_sales_states=[{contact_id:'history',commercial_status:'VENTA',status_changed_at:'2026-10-23T13:00:00Z',sale_at:'2026-10-23T13:00:00Z',sales_owner_id:'staff-a',sales_owner_name:'ANA',explicitly_cleared:false}];
+    const result=await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({id:'history',commercial_status:'VENTA',sale_owner_id:'staff-a',commercial_sale_countable:true,sale_validated:false});
+    expect(h.calls).toContainEqual(['contact_sales_states','eq',['account_id','account-a']]);
+  });
+  it('preserves the validated payment but stops counting a sale explicitly removed in the adviser base', async () => {
+    h.rows.contacts=[contact('cleared',['AREA FIDELIZACION','PAGO VALIDADO'])];
+    h.rows.payment_reviews=[payment('cleared')];
+    h.rows.contact_sales_states=[{contact_id:'cleared',commercial_status:null,sale_at:'2026-10-23T13:00:00Z',sales_owner_id:'staff-a',sales_owner_name:'ANA',explicitly_cleared:true}];
+    const result=await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({commercial_status:'',commercial_sale_countable:false,sale_validated:true,sale_owner_id:'staff-a'});
+  });
   it('uses the newest CRM commercial tag instead of an older followup tag', async () => {
     const row=contact('latest');
     h.rows.contacts=[{...row,contact_tags:[

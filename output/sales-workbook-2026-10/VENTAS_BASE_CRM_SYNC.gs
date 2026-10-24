@@ -180,7 +180,7 @@ function SYNC_VENTAS_CRM() {
           Number(props.getProperty('SALES_MAIN_EDIT_AT:' + lead.id) || 0) <= startedAt) sheet.getRange(existing, 8).setValue(status);
       // Keep sequence, payment operation, and notes.
       if (!existingRows[existing - SALES_SYNC.firstDataRow][13] && row[13]) sheet.getRange(existing, 14).setValue(row[13]);
-      refreshes.push({ number: existing, row, statusAt: lead.commercial_status_at ? new Date(lead.commercial_status_at) : '' });
+      refreshes.push({ number: existing, row, statusAt: lead.commercial_status_at ? new Date(lead.commercial_status_at) : '', history: salesHistoryCells_(lead) });
       updated++;
     });
     refreshSalesRows_(sheet, refreshes);
@@ -194,8 +194,11 @@ function SYNC_VENTAS_CRM() {
       sheet.getRange(start, 21, newRows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
       const leadById = new Map(leads.map(lead => [lead.id, lead]));
       sheet.getRange(start, 26, newRows.length, 1).setValues(newRows.map(row => [leadById.get(row[16]).commercial_status_at ? new Date(leadById.get(row[16]).commercial_status_at) : ''])).setNumberFormat('dd/mm/yyyy hh:mm');
+      sheet.getRange(start, 27, newRows.length, 4).setValues(newRows.map(row => salesHistoryCells_(leadById.get(row[16]))));
+      sheet.getRange(start, 29, newRows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
       props.setProperty('SALES_SYNC_NEXT_SEQUENCE', String(sequence));
     }
+    sortSalesChronologically_(sheet);
     SpreadsheetApp.flush();
     if (advisers) syncSalesPersonalBases_(ss, advisersSheet, advisers, leads, props);
     const completedAt = new Date();
@@ -227,11 +230,29 @@ function refreshSalesRows_(sheet, updates) {
     sheet.getRange(start, 9, count, 5).setValues(group.map(item => item.row.slice(8, 13)));
     sheet.getRange(start, 16, count, 8).setValues(group.map(item => item.row.slice(15, 23)));
     sheet.getRange(start, 26, count, 1).setValues(group.map(item => [item.statusAt])).setNumberFormat('dd/mm/yyyy hh:mm');
+    sheet.getRange(start, 27, count, 4).setValues(group.map(item => item.history || ['', '', '', '']));
+    sheet.getRange(start, 29, count, 1).setNumberFormat('dd/mm/yyyy hh:mm');
     sheet.getRange(start, 21, count, 1).setNumberFormat('dd/mm/yyyy hh:mm');
     sheet.getRange(start, 5, count, 1).setNumberFormat('dd/mm/yyyy');
     sheet.getRange(start, 6, count, 1).setNumberFormat('hh:mm');
     offset = end;
   }
+}
+
+/** Sort complete records: the stable ID, human notes and status travel together. */
+function sortSalesChronologically_(sheet) {
+  const count = salesLastDataRow_(sheet) - SALES_SYNC.firstDataRow + 1;
+  if (count < 2) return;
+  sheet.getRange(SALES_SYNC.firstDataRow, 1, count, 30).sort([
+    { column: 5, ascending: true },
+    { column: 6, ascending: true },
+    { column: 17, ascending: true },
+  ]);
+}
+
+function salesHistoryCells_(lead) {
+  return [lead.commercial_sale_countable ? 'SI' : 'NO', institutionalName_(lead.sale_owner_name),
+    lead.sale_commercial_at ? new Date(lead.sale_commercial_at) : '', lead.sale_owner_id || ''];
 }
 
 function reconcileSalesMainStatus_(id, remote, local, props, base, startedAt) {
@@ -282,7 +303,7 @@ function institutionalName_(name) {
 /** Stable CRM IDs prevent namesakes or roster reordering from mixing personal bases. */
 function salesLeadsForAdviser_(adviser, leads) {
   if (!adviser.active_for_sales) return [];
-  return leads.filter(lead => lead.assigned_adviser_id === adviser.user_id);
+  return leads.filter(lead => lead.assigned_adviser_id === adviser.user_id || lead.sale_owner_id === adviser.user_id);
 }
 
 function sendSalesPersonalStatus_(base, key, contactId, status) {
@@ -298,9 +319,9 @@ function sendSalesPersonalStatus_(base, key, contactId, status) {
 function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
   const main = ss.getSheetByName(SALES_SYNC.sheet);
   const count = Math.max(0, salesLastDataRow_(main) - 2);
-  const masterRows = count ? main.getRange(3, 1, count, 25).getValues() : [];
+  const masterRows = count ? main.getRange(3, 1, count, 30).getValues() : [];
   const masterById = new Map(masterRows.map((row, index) => [String(row[16] || ''), { row, number: index + 3 }]).filter(pair => pair[0]));
-  const headers = main.getRange(2, 1, 1, 25).getValues();
+  const headers = main.getRange(2, 1, 1, 30).getValues();
   const directoryRows = directory.getRange(3, 1, SALES_SYNC.adviserDirectorySize, 8).getDisplayValues();
   const base = String(props.getProperty('CRM_BASE_URL') || '').replace(/\/$/, '');
   advisers.filter(adviser => adviser.active_for_sales).forEach(adviser => {
@@ -324,11 +345,12 @@ function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
     directory.getRange(directoryIndex + 3, 8).setValue(book.getUrl());
     const sheet = book.getSheetByName(SALES_SYNC.sheet);
     if (!sheet) throw new Error('La base personal no contiene BASE GENERAL; revisar sin reemplazarla.');
+    if (sheet.getMaxColumns() < 30) sheet.insertColumnsAfter(sheet.getMaxColumns(), 30 - sheet.getMaxColumns());
     const ownerMarker = sheet.getRange(1, 17).getDisplayValue();
     if (ownerMarker !== 'ASESORA CRM:' + adviser.user_id && (ownerMarker || sheet.getLastRow() > 1)) throw new Error('El archivo no está identificado como base de esta asesora. No se sobrescribió.');
     sheet.getRange(1, 17).setValue('ASESORA CRM:' + adviser.user_id);
     const oldCount = Math.max(0, sheet.getLastRow() - 2);
-    const previous = oldCount ? sheet.getRange(3, 1, oldCount, 25).getValues() : [];
+    const previous = oldCount ? sheet.getRange(3, 1, oldCount, 30).getValues() : [];
     const previousById = new Map(previous.filter(row => row[16]).map(row => [String(row[16]), row]));
     const rows = salesLeadsForAdviser_(adviser, leads).map(lead => {
       const master = masterById.get(String(lead.id));
@@ -348,17 +370,17 @@ function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
       return row;
     });
     sheet.getRange(1, 1).setValue('BASE DE ' + adviser.name + ' · Edita estado H y observaciones O. Sincronización cada 10 min. Acceso: compartir desde Drive solo con esta asesora.');
-    sheet.getRange(2, 1, 1, 25).setValues(headers).setFontWeight('bold').setBackground('#14283f').setFontColor('#ffffff');
+    sheet.getRange(2, 1, 1, 30).setValues(headers).setFontWeight('bold').setBackground('#14283f').setFontColor('#ffffff');
     if (rows.length) {
-      sheet.getRange(3, 1, rows.length, 25).setValues(rows);
+      sheet.getRange(3, 1, rows.length, 30).setValues(rows);
       sheet.getRange(3, 8, rows.length, 1).setDataValidation(main.getRange(3, 8).getDataValidation());
       sheet.getRange(3, 5, rows.length, 1).setNumberFormat('dd/mm/yyyy');
       sheet.getRange(3, 6, rows.length, 1).setNumberFormat('hh:mm');
       sheet.getRange(3, 12, rows.length, 2).setNumberFormat('dd/mm/yyyy hh:mm');
       sheet.getRange(3, 21, rows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
     }
-    if (oldCount > rows.length) sheet.getRange(rows.length + 3, 1, oldCount - rows.length, 25).clearContent();
-    sheet.setFrozenRows(2); sheet.hideColumns(17); sheet.setHiddenGridlines(true);
+    if (oldCount > rows.length) sheet.getRange(rows.length + 3, 1, oldCount - rows.length, 30).clearContent();
+    sheet.setFrozenRows(2); sheet.hideColumns(17); sheet.hideColumns(30); sheet.setHiddenGridlines(true);
     sheet.setColumnWidth(2, 210); sheet.setColumnWidth(3, 160); sheet.setColumnWidth(8, 190);
     syncSalesSharedRanking_(ss, book);
   });
@@ -369,10 +391,29 @@ function syncSalesSharedRanking_(ss, book) {
   const source = ss.getSheetByName('RANKING');
   if (!source) return;
   let target = book.getSheetByName('RANKING');
-  if (!target) target = source.copyTo(book).setName('RANKING');
-  target.getRange(1, 1, 160, 26).setValues(source.getRange(1, 1, 160, 26).getValues());
-  target.getRange(5, 1).setFormula('=HYPERLINK("#gid=' + target.getSheetId() + '&range=A111","VER GRÁFICOS DE BARRAS Y TORTA ↓")');
-  target.hideColumns(14, 11);
+  // Never copy the CEO sheet: even hidden columns would disclose commissions,
+  // contact totals and conversion ratios to an editor of the personal file.
+  if (!target) target = book.insertSheet('RANKING');
+  if (target.getMaxRows() < 160) target.insertRowsAfter(target.getMaxRows(), 160 - target.getMaxRows());
+  target.getDataRange().breakApart().clearContent();
+  target.getRange(1, 1, 1, 6).merge().setValue('RANKING DEL EQUIPO · VENTAS Y METAS');
+  target.getRange(2, 1, 1, 6).merge().setValue('Solo resultados del equipo. Los contactos, ratios y comisiones de otras asesoras son privados.');
+  target.getRange(3, 1, 1, 6).setValues([['Mes', source.getRange('B3').getValue(), 'Ventas del grupo', source.getRange('B4').getValue(), 'Meta del grupo', source.getRange('E4').getValue()]]);
+  target.getRange(3, 2).setNumberFormat('mmmm yyyy');
+  target.getRange(6, 1, 103, 6).setValues(source.getRange(6, 1, 103, 6).getValues());
+  target.getRange(1, 1, 1, 6).setBackground('#14283f').setFontColor('#ffffff').setFontWeight('bold');
+  target.getRange(2, 1, 1, 6).setWrap(true);
+  target.getRange(6, 1, 1, 6).setBackground('#d9eaf7').setFontWeight('bold');
+  target.getRange(7, 5, 102, 1).setNumberFormat('0%');
+  target.setColumnWidth(2, 230);
+  target.setFrozenRows(6); target.setHiddenGridlines(true);
+  target.getCharts().forEach(chart => target.removeChart(chart));
+  target.insertChart(target.newChart().setChartType(Charts.ChartType.BAR)
+    .addRange(target.getRange('B6:D16')).setNumHeaders(1)
+    .setOption('title', 'Ventas y meta mensual').setPosition(111, 1, 0, 0).build());
+  target.insertChart(target.newChart().setChartType(Charts.ChartType.PIE)
+    .addRange(target.getRange('B6:C16')).setNumHeaders(1)
+    .setOption('title', 'Participación en ventas').setPosition(132, 1, 0, 0).build());
 }
 
 /** Replaces only CRM-owned adviser directory fields; keeps sheet links and rotation notes. */

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import type { Tag } from '@/types';
 import type { InboxTagInput } from '@/lib/inbox/controls';
+import { GroupedTags } from '@/components/inbox/grouped-tags';
 interface Person {
   user_id: string;
   full_name: string | null;
@@ -141,7 +142,7 @@ export function TagManager() {
             No hay etiquetas disponibles.
           </p>
         )}
-        {tags.map((tag) => (
+        <GroupedTags tags={tags} renderTag={(tag) => (
           <div
             key={tag.id}
             className="flex items-center justify-between gap-2 rounded-md border p-3"
@@ -190,7 +191,7 @@ export function TagManager() {
               </div>
             )}
           </div>
-        ))}
+        )} />
         <Dialog open={editing} onOpenChange={setEditing}>
           <DialogContent className="max-h-[85vh] overflow-y-auto">
             <DialogHeader>

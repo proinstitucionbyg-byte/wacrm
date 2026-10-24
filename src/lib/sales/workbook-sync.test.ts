@@ -4,14 +4,21 @@ import { describe, expect, it, vi } from 'vitest';
 const source = readFileSync('output/sales-workbook-2026-10/VENTAS_BASE_CRM_SYNC.gs','utf8');
 const context = () => { const c = createContext({console,Map,Date}); runInContext(source,c); return c; };
 describe('commercial workbook synchronization', () => {
-  it('refreshes 100 consecutive contacts in four writes without touching status, operations or notes', () => {
+  it('orders by CRM entry date and time while moving the complete row, including IDs and notes', () => {
+    const c=context();let sortArgs:unknown;let rangeArgs:unknown;
+    const sheet={getLastRow:()=>5001,getRange:(...args:number[])=>({getDisplayValues:()=>[['1'],['2'],['3']],sort:(sort:unknown)=>{sortArgs=sort;rangeArgs=args;}})};
+    c.sortSalesChronologically_(sheet);
+    expect(rangeArgs).toEqual([3,1,3,30]);
+    expect(JSON.parse(JSON.stringify(sortArgs))).toEqual([{column:5,ascending:true},{column:6,ascending:true},{column:17,ascending:true}]);
+  });
+  it('refreshes 100 consecutive contacts in five writes without touching status, operations or notes', () => {
     const c=context();const writes:{row:number,col:number,n:number,w:number,values:unknown}[]=[];
     const sheet={getRange:(row:number,col:number,n:number,w:number)=>{
       const range={setValues:(values:unknown)=>{writes.push({row,col,n,w,values});return range;},setNumberFormat:()=>range};return range;
     }};
     c.refreshSalesRows_(sheet,Array.from({length:100},(_,i)=>({number:i+3,row:Array.from({length:23},(_,j)=>`${i}:${j}`),statusAt:''})));
-    expect(writes).toHaveLength(4);
-    expect(writes.map(w=>[w.col,w.w])).toEqual([[2,6],[9,5],[16,8],[26,1]]);
+    expect(writes).toHaveLength(5);
+    expect(writes.map(w=>[w.col,w.w])).toEqual([[2,6],[9,5],[16,8],[26,1],[27,4]]);
     expect(writes.every(w=>![8,14,15].some(col=>col>=w.col&&col<w.col+w.w))).toBe(true);
   });
   function properties(seed: Record<string,string> = {}) {
@@ -67,25 +74,48 @@ describe('commercial workbook synchronization', () => {
     advisers.forEach((a,i)=>expect(JSON.parse(JSON.stringify(c.salesLeadsForAdviser_(a,leads)))).toEqual([leads[i]]));
     expect(c.salesLeadsForAdviser_({...advisers[0],active_for_sales:false},leads)).toHaveLength(0);
   });
+  it('retains the closing adviser history after the chat assignment changes, including a removed sale', () => {
+    const c=context();const adviser={user_id:'owner-a',active_for_sales:true};
+    const lead={id:'closed',assigned_adviser_id:'fidelity-person',sale_owner_id:'owner-a',commercial_sale_countable:false};
+    expect(JSON.parse(JSON.stringify(c.salesLeadsForAdviser_(adviser,[lead])))).toEqual([lead]);
+    expect(JSON.parse(JSON.stringify(c.salesHistoryCells_({...lead,sale_owner_name:'ANA'})))).toEqual(['NO','ANA','','owner-a']);
+  });
   it('does not create personal files or share data when no adviser is active', () => {
     const c=context(); const create=vi.fn(); c.SpreadsheetApp={create};
     const main={getLastRow:()=>2,getRange:()=>({getValues:()=>[[]]})};
     c.syncSalesPersonalBases_({getSheetByName:()=>main},{getRange:()=>({getDisplayValues:()=>[]})},[{user_id:'a',active_for_sales:false}],[],{getProperty:()=>null});
     expect(create).not.toHaveBeenCalled();
   });
+  it('publishes only names, sales and goals to the personal ranking, never CEO-only metrics', () => {
+    const c=context();const reads:unknown[][]=[];const writes:unknown[][]=[];let cleared=false;
+    const source={getRange:(...args:unknown[])=>{
+      reads.push(args);return {getValue:()=>1,getValues:()=>Array.from({length:103},()=>Array(6).fill('public'))};
+    },copyTo:()=>{throw new Error('Copying the private CEO sheet is forbidden');}};
+    const target:Record<string,unknown>={getMaxRows:()=>160,getDataRange:()=>({breakApart:()=>({clearContent:()=>{cleared=true;}})}),getCharts:()=>[]};
+    target.getRange=(...args:unknown[])=>{const range:Record<string,unknown>={setValues:(rows:unknown)=>{writes.push([args,rows]);return range;}};
+      for(const method of ['merge','setValue','setNumberFormat','setBackground','setFontColor','setFontWeight','setWrap'])range[method]=()=>range;return range;};
+    for(const method of ['setColumnWidth','setFrozenRows','setHiddenGridlines','insertChart'])target[method]=()=>target;
+    target.newChart=()=>{const chart:Record<string,unknown>={build:()=>({})};for(const method of ['setChartType','addRange','setNumHeaders','setOption','setPosition'])chart[method]=()=>chart;return chart;};
+    c.Charts={ChartType:{BAR:'BAR',PIE:'PIE'}};
+    c.syncSalesSharedRanking_({getSheetByName:()=>source},{getSheetByName:()=>target});
+    expect(cleared).toBe(true);
+    expect(reads).toEqual([['B3'],['B4'],['E4'],[6,1,103,6]]);
+    expect(writes).toHaveLength(2);
+    expect(writes.every((w)=>((w[0] as number[])[1]+(w[0] as number[])[3]-1)<=6)).toBe(true);
+  });
   it('creates and reuses 100 isolated personal bases without sharing permissions', () => {
     const c=context();
     const advisers=Array.from({length:100},(_,i)=>({user_id:`staff-${i}`,name:'ANA',active_for_sales:true}));
     const leads=advisers.map((a,i)=>({id:`contact-${i}`,assigned_adviser_id:a.user_id}));
-    const master=leads.map((lead,i)=>Array.from({length:25},(_,col)=>col===16?lead.id:col===1?`PERSON ${i}`:''));
+    const master=leads.map((lead,i)=>Array.from({length:30},(_,col)=>col===16?lead.id:col===1?`PERSON ${i}`:''));
     const directoryRows=advisers.map(a=>[a.user_id,a.name,'','','','Activo','','']);
     const directory={getRange:(r:number,col:number)=>({getDisplayValues:()=>directoryRows,setValue:(v:string)=>{directoryRows[r-3][col-1]=v;}})};
-    const main={getLastRow:()=>102,getRange:(r:number,col:number,n=1,w=1)=>({getDisplayValues:()=>master.map(row=>row.slice(0,17)),getValues:()=>r===2?[Array(25).fill('Header')]:master,getDataValidation:()=>({}),setValue:()=>{}})};
+    const main={getLastRow:()=>102,getRange:(r:number,col:number,n=1,w=1)=>({getDisplayValues:()=>master.map(row=>row.slice(0,17)),getValues:()=>r===2?[Array(30).fill('Header')]:master,getDataValidation:()=>({}),setValue:()=>{}})};
     const ss={getId:()=> 'general',getSheetByName:(name:string)=>name==='BASE GENERAL'?main:null};
     const books=new Map<string,unknown>();
     function createBook() {
       const cells=new Map<string,unknown>(); let last=0;
-      const sheet:Record<string,unknown>={getLastRow:()=>last,setName:()=>sheet};
+      const sheet:Record<string,unknown>={getLastRow:()=>last,getMaxColumns:()=>30,setName:()=>sheet};
       sheet.getRange=(r:number,col:number,n=1,w=1)=>{
         const range:Record<string,unknown>={
           getDisplayValue:()=>String(cells.get(`${r}:${col}`)||''),

@@ -117,6 +117,14 @@ export async function GET(request: Request) {
           .order('reviewed_at', { ascending: true })
       : { data: [], error: null };
     if (paidError) throw paidError;
+    const { data: commercialStates, error: stateError } = page.items.length
+      ? await ctx.supabase.from('contact_sales_states')
+          .select('contact_id,commercial_status,status_changed_at,sale_at,sales_owner_id,sales_owner_name,explicitly_cleared')
+          .eq('account_id', ctx.accountId)
+          .in('contact_id', page.items.map((contact) => contact.id))
+      : { data: [], error: null };
+    if (stateError) throw stateError;
+    const stateByContact = new Map((commercialStates ?? []).map((state) => [state.contact_id, state]));
     const saleByContact = new Map((paidReviews ?? [])
       .map((review) => ({ ...review, enrollments: enrollmentSnapshots(review.enrollments) }))
       .filter((review) => review.payment_purpose === 'enrollment' ||
@@ -153,8 +161,13 @@ export async function GET(request: Request) {
       const assignedProfile = assignedAgentId ? profileById.get(assignedAgentId) : null;
       const isSalesProfile = assignedProfile?.area?.toLowerCase() === 'ventas';
       const sale = saleByContact.get(contact.id);
+      const commercialState = stateByContact.get(contact.id);
+      const commercialStatus = commercialState ? commercialState.commercial_status ?? '' : commercialTag?.tag?.name ?? '';
+      const countableSale = commercialState
+        ? ['VENTA','VENTA SOLO'].includes(commercialStatus) && !commercialState.explicitly_cleared
+        : !!sale || ['VENTA','VENTA SOLO'].includes(commercialStatus);
       const salePrices = (sale?.enrollments?.[0]?.data as { prices?: unknown } | null)?.prices;
-      if (!sale && !tags.some((tag) => SALES_TAGS.has(tag)) && !isSalesProfile) return [];
+      if (!commercialState && !sale && !tags.some((tag) => SALES_TAGS.has(tag)) && !isSalesProfile) return [];
       const firstReferral = [...messages]
         .filter((message) => message.sender_type === 'customer' && message.source_referral)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))[0]?.source_referral ?? null;
@@ -174,8 +187,12 @@ export async function GET(request: Request) {
         created_at: contact.created_at,
         institute: 'INSTICRECE',
         crm_tags: tags,
-        commercial_status: commercialTag?.tag?.name ?? '',
-        commercial_status_at: commercialTag?.created_at ?? null,
+        commercial_status: commercialStatus,
+        commercial_status_at: commercialState?.status_changed_at ?? commercialTag?.created_at ?? null,
+        commercial_sale_countable: countableSale,
+        sale_owner_id: commercialState?.sales_owner_id ?? null,
+        sale_owner_name: commercialState?.sales_owner_name ?? sale?.sales_adviser ?? (assignedProfile?.nickname?.trim() || assignedProfile?.full_name?.trim() || null),
+        sale_commercial_at: commercialState?.sale_at ?? sale?.reviewed_at ?? (countableSale ? commercialTag?.created_at : null) ?? null,
         sale_validated: !!sale,
         sale_validated_at: sale?.reviewed_at ?? null,
         sale_monthly_price: Array.isArray(salePrices) && typeof salePrices[1] === 'number' ? salePrices[1] : null,
