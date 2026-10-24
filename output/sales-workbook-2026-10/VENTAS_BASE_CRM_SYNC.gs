@@ -200,13 +200,15 @@ function SYNC_VENTAS_CRM() {
     }
     sortSalesChronologically_(sheet);
     SpreadsheetApp.flush();
-    if (advisers) syncSalesPersonalBases_(ss, advisersSheet, advisers, leads, props);
+    const personal = advisers ? syncSalesPersonalBases_(ss, advisersSheet, advisers, leads, props) : { updated: 0, pending: 0 };
     const completedAt = new Date();
     const panel = ss.getSheetByName('PANEL');
     if (panel) {
       panel.getRange('A2').setValue('Última actualización CRM');
       panel.getRange('B2').setValue(completedAt).setNumberFormat('dd/mm/yyyy hh:mm:ss');
-      panel.getRange('D2').setValue('Automática cada 10 min · Hora de Lima');
+      panel.getRange('D2').setValue(personal.pending
+        ? 'Contactos cada 10 min · Bases personales: ' + personal.pending + ' pendientes del siguiente lote'
+        : 'Automática cada 10 min · Hora de Lima');
     }
     SpreadsheetApp.flush();
     props.setProperty('SALES_SYNC_LAST_OK', completedAt.toISOString());
@@ -316,7 +318,7 @@ function sendSalesPersonalStatus_(base, key, contactId, status) {
 }
 
 /** No personal data is shared automatically: the owner chooses Drive access. */
-function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
+function syncSalesPersonalBases_(ss, directory, advisers, leads, props, deadline = Date.now() + 180000) {
   const main = ss.getSheetByName(SALES_SYNC.sheet);
   const count = Math.max(0, salesLastDataRow_(main) - 2);
   const masterRows = count ? main.getRange(3, 1, count, 30).getValues() : [];
@@ -324,7 +326,15 @@ function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
   const headers = main.getRange(2, 1, 1, 30).getValues();
   const directoryRows = directory.getRange(3, 1, SALES_SYNC.adviserDirectorySize, 8).getDisplayValues();
   const base = String(props.getProperty('CRM_BASE_URL') || '').replace(/\/$/, '');
-  advisers.filter(adviser => adviser.active_for_sales).forEach(adviser => {
+  const active = advisers.filter(adviser => adviser.active_for_sales);
+  const saved = props.getProperty('SALES_PERSONAL_NEXT_USER');
+  const first = Math.max(0, active.findIndex(adviser => adviser.user_id === saved));
+  let updated = 0;
+  for (let offset = 0; offset < active.length; offset++) {
+    if (updated && Date.now() >= deadline) break;
+    const index = (first + offset) % active.length, adviser = active[index];
+    // Resume the same file if execution fails; IDs are saved before setup.
+    props.setProperty('SALES_PERSONAL_NEXT_USER', adviser.user_id);
     const directoryIndex = directoryRows.findIndex(row => row[0] === adviser.user_id);
     if (directoryIndex < 0) throw new Error('Asesora activa sin ID en el directorio.');
     const property = 'SALES_PERSONAL_BOOK:' + adviser.user_id;
@@ -383,7 +393,10 @@ function syncSalesPersonalBases_(ss, directory, advisers, leads, props) {
     sheet.setFrozenRows(2); sheet.hideColumns(17); sheet.hideColumns(30); sheet.setHiddenGridlines(true);
     sheet.setColumnWidth(2, 210); sheet.setColumnWidth(3, 160); sheet.setColumnWidth(8, 190);
     syncSalesSharedRanking_(ss, book);
-  });
+    updated++;
+    props.setProperty('SALES_PERSONAL_NEXT_USER', active[(index + 1) % active.length].user_id);
+  }
+  return { updated, pending: active.length - updated };
 }
 
 /** Share aggregate performance only; never copy the general contact ledger. */
@@ -394,12 +407,14 @@ function syncSalesSharedRanking_(ss, book) {
   // Never copy the CEO sheet: even hidden columns would disclose commissions,
   // contact totals and conversion ratios to an editor of the personal file.
   if (!target) target = book.insertSheet('RANKING');
+  const rebuildCharts = target.getRange('A4').getDisplayValue() !== 'RANKING COMPARTIDO V2';
   if (target.getMaxRows() < 160) target.insertRowsAfter(target.getMaxRows(), 160 - target.getMaxRows());
   target.getDataRange().breakApart().clearContent();
   target.getRange(1, 1, 1, 6).merge().setValue('RANKING DEL EQUIPO · VENTAS Y METAS');
   target.getRange(2, 1, 1, 6).merge().setValue('Solo resultados del equipo. Los contactos, ratios y comisiones de otras asesoras son privados.');
   target.getRange(3, 1, 1, 6).setValues([['Mes', source.getRange('B3').getValue(), 'Ventas del grupo', source.getRange('B4').getValue(), 'Meta del grupo', source.getRange('E4').getValue()]]);
   target.getRange(3, 2).setNumberFormat('mmmm yyyy');
+  target.getRange('A4').setValue('RANKING COMPARTIDO V2');
   target.getRange(6, 1, 103, 6).setValues(source.getRange(6, 1, 103, 6).getValues());
   target.getRange(1, 1, 1, 6).setBackground('#14283f').setFontColor('#ffffff').setFontWeight('bold');
   target.getRange(2, 1, 1, 6).setWrap(true);
@@ -407,13 +422,15 @@ function syncSalesSharedRanking_(ss, book) {
   target.getRange(7, 5, 102, 1).setNumberFormat('0%');
   target.setColumnWidth(2, 230);
   target.setFrozenRows(6); target.setHiddenGridlines(true);
-  target.getCharts().forEach(chart => target.removeChart(chart));
-  target.insertChart(target.newChart().setChartType(Charts.ChartType.BAR)
+  if (rebuildCharts) {
+    target.getCharts().forEach(chart => target.removeChart(chart));
+    target.insertChart(target.newChart().setChartType(Charts.ChartType.BAR)
     .addRange(target.getRange('B6:D16')).setNumHeaders(1)
     .setOption('title', 'Ventas y meta mensual').setPosition(111, 1, 0, 0).build());
-  target.insertChart(target.newChart().setChartType(Charts.ChartType.PIE)
+    target.insertChart(target.newChart().setChartType(Charts.ChartType.PIE)
     .addRange(target.getRange('B6:C16')).setNumHeaders(1)
     .setOption('title', 'Participación en ventas').setPosition(132, 1, 0, 0).build());
+  }
 }
 
 /** Replaces only CRM-owned adviser directory fields; keeps sheet links and rotation notes. */

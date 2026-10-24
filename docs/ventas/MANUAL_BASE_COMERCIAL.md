@@ -34,6 +34,8 @@ En **BASE GENERAL**, busca el contacto y abre el desplegable de H. Por ejemplo, 
 
 También puedes cambiar la etiqueta comercial en el CRM. En la siguiente sincronización se refleja en la base general y en la base personal correspondiente. La base personal se revisa cada diez minutos; su cambio no es instantáneo.
 
+Usa **NÚMERO DE COMPETENCIA** para identificar ese tipo de contacto. Es un estado de Ventas disponible en el desplegable y en sus etiquetas; no cuenta como venta ni valida pagos. Elegirlo no cambia por sí solo la configuración de IA o automatizaciones.
+
 Si una edición no puede enviarse, se conserva para reintentar. No la sustituyas repetidamente ni borres toda la fila. Si editas dos pantallas al mismo tiempo, espera la siguiente sincronización y revisa el estado final.
 
 **Marcar VENTA no valida un pago, no crea una matrícula ni emite documentos.** Es un estado comercial. La validación del pago y el registro académico siguen sus procesos propios.
@@ -100,6 +102,8 @@ Entra al [CRM](https://personal-wacrm.exjald.easypanel.host/settings) y abre **S
 La hoja admite hasta cien asesoras. El directorio refleja la configuración del CRM. La sincronización prepara una base individual para cada asesora activa y guarda su enlace en **ASESORAS, columna H**. Cada base contiene sus contactos asignados y las ventas que cerró, aunque el estudiante pase a otra área. El ranking compartido contiene solo nombres, ventas, metas, avance y faltantes; no copia los contactos, ratios, validaciones ni comisiones de otras personas.
 
 Las bases nuevas quedan privadas para el propietario. Abre el enlace y comparte desde Drive únicamente con la asesora correspondiente. Desactivar a una asesora detiene nuevas asignaciones y actualizaciones de su base; conserva el archivo y el historial. Si también debe perder acceso al archivo, el propietario debe retirarlo en Compartir de Drive.
+
+Con muchas asesoras, las bases personales se actualizan por lotes para no interrumpir la ejecución por el límite de tiempo de Google. En PANEL se muestran las bases pendientes del siguiente lote. Los contactos de la base general se consultan cada diez minutos; una base personal puede requerir una pasada posterior cuando hay varios lotes. No se promete actualización instantánea de cien archivos.
 
 Mientras no haya asesoras, deja apagado el reparto. No necesitas crear personas ficticias: el seguimiento del sistema aparece como ASESOR INSTITUTO.
 

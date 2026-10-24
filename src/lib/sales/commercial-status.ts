@@ -14,6 +14,7 @@ export const SALES_COMMERCIAL_STATUSES = [
   'VENTA SOLO',
   'SOLO QUIERE CURSO GRATIS',
   'NO INTERESADO-R',
+  'NÚMERO DE COMPETENCIA',
 ] as const;
 
 export type SalesCommercialStatus = (typeof SALES_COMMERCIAL_STATUSES)[number];

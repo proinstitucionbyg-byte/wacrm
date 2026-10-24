@@ -6,6 +6,7 @@ describe('normalizeSalesCommercialStatus', () => {
     expect(normalizeSalesCommercialStatus('interesado')).toBe('INTERESADO');
     expect(normalizeSalesCommercialStatus('seguimiento de ventas')).toBe('SEGUIMIENTO DE VENTAS');
     expect(SALES_COMMERCIAL_STATUSES).toContain('NO INTERESADO-R');
+    expect(normalizeSalesCommercialStatus('número de competencia')).toBe('NÚMERO DE COMPETENCIA');
   });
 
   it('allows clearing a status but rejects unsupported values and types', () => {

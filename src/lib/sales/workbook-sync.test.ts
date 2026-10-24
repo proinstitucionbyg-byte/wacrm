@@ -100,6 +100,7 @@ describe('commercial workbook synchronization', () => {
     },copyTo:()=>{throw new Error('Copying the private CEO sheet is forbidden');}};
     const target:Record<string,unknown>={getMaxRows:()=>160,getDataRange:()=>({breakApart:()=>({clearContent:()=>{cleared=true;}})}),getCharts:()=>[]};
     target.getRange=(...args:unknown[])=>{const range:Record<string,unknown>={setValues:(rows:unknown)=>{writes.push([args,rows]);return range;}};
+      range.getDisplayValue=()=>'';
       for(const method of ['merge','setValue','setNumberFormat','setBackground','setFontColor','setFontWeight','setWrap'])range[method]=()=>range;return range;};
     for(const method of ['setColumnWidth','setFrozenRows','setHiddenGridlines','insertChart'])target[method]=()=>target;
     target.newChart=()=>{const chart:Record<string,unknown>={build:()=>({})};for(const method of ['setChartType','addRange','setNumHeaders','setOption','setPosition'])chart[method]=()=>chart;return chart;};
@@ -142,6 +143,11 @@ describe('commercial workbook synchronization', () => {
     const props=properties();
     c.syncSalesPersonalBases_(ss,directory,advisers,leads,props);
     c.syncSalesPersonalBases_(ss,directory,advisers,leads,props);
+    const partial=c.syncSalesPersonalBases_(ss,directory,advisers,leads,props,0);
+    expect(partial.pending).toBe(99);
+    expect(props.getProperty('SALES_PERSONAL_NEXT_USER')).toBe('staff-1');
+    c.syncSalesPersonalBases_(ss,directory,advisers,leads,props,0);
+    expect(props.getProperty('SALES_PERSONAL_NEXT_USER')).toBe('staff-2');
     expect(create).toHaveBeenCalledTimes(100);
     [...books.values()].forEach((book,i)=>{
       const cells=(book as {cells:Map<string,unknown>}).cells;
