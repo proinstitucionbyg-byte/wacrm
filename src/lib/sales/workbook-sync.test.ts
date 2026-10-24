@@ -4,6 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 const source = readFileSync('output/sales-workbook-2026-10/VENTAS_BASE_CRM_SYNC.gs','utf8');
 const context = () => { const c = createContext({console,Map,Date}); runInContext(source,c); return c; };
 describe('commercial workbook synchronization', () => {
+  it('refuses an older API snapshot rather than erasing durable sales during deployment', () => {
+    const c=context();let data=[{id:'lead'}];
+    c.UrlFetchApp={fetch:()=>({getResponseCode:()=>200,getContentText:()=>JSON.stringify({data,meta:{}})})};
+    expect(()=>c.fetchAllSalesLeads_('https://crm.example','key')).toThrow('Se conserva la base');
+    data=[{id:'lead',commercial_sale_countable:false}] as typeof data;
+    expect(c.fetchAllSalesLeads_('https://crm.example','key')).toHaveLength(1);
+  });
   it('orders by CRM entry date and time while moving the complete row, including IDs and notes', () => {
     const c=context();let sortArgs:unknown;let rangeArgs:unknown;
     const sheet={getLastRow:()=>5001,getRange:(...args:number[])=>({getDisplayValues:()=>[['1'],['2'],['3']],sort:(sort:unknown)=>{sortArgs=sort;rangeArgs=args;}})};

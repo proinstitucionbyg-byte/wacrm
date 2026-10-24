@@ -480,6 +480,9 @@ function fetchAllSalesLeads_(base, key) {
     const body = JSON.parse(response.getContentText() || '{}');
     if (status !== 200) throw new Error('CRM respondió ' + status + ': ' + (body.error && body.error.message || 'error sin detalle'));
     if (!Array.isArray(body.data)) throw new Error('La respuesta del CRM no contiene la lista esperada.');
+    if (body.data.some(lead => typeof lead.commercial_sale_countable !== 'boolean')) {
+      throw new Error('La versión del CRM aún no entrega el historial comercial. Se conserva la base sin reemplazar sus ventas; reintentar cuando termine la publicación.');
+    }
     all.push.apply(all, body.data);
     cursor = body.meta && body.meta.next_cursor || '';
     if (!cursor) return all;
