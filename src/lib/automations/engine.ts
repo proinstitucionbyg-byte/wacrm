@@ -220,8 +220,8 @@ export async function runAutomationsForTrigger(
 
     for (const automation of selectedAutomations) {
       matched = true;
-      // A repeated tap on the same option must not restart a sequence that is
-      // only waiting for Meta to confirm the previous block.
+      // A repeated route must not restart while its previous message or linked
+      // child block is still in flight. Different buttons can share one route.
       if (input.contactId && input.context?.conversation_id && !isGreetingAutomation(automation.id)
           && await hasActiveDeliveryWait(db, input.accountId, input.contactId, automation.id, input.context.conversation_id)) {
         continue;
@@ -771,8 +771,9 @@ async function hasActiveDeliveryWait(
     return false
   }
   return (data ?? []).some((row) => row.context?.conversation_id === conversationId
-    && row.context?.await_delivery_only === true
-    && typeof row.context?.await_delivery_message_id === 'string')
+    && ((row.context?.await_delivery_only === true
+      && typeof row.context?.await_delivery_message_id === 'string')
+      || typeof row.context?.await_child_log_id === 'string'))
 }
 
 // ------------------------------------------------------------

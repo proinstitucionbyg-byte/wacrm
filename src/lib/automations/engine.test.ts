@@ -484,6 +484,17 @@ describe('WhatsApp delivery order', () => {
     expect(h.state.logAutomationIds).toHaveLength(0);
     expect(h.state.pendingCancels).toBe(0);
   });
+  it('does not restart the same button route while it is waiting for its linked child', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [{ ...automationWithUpdateStep(), trigger_type: 'keyword_match',
+      trigger_config: { keywords: ['Crecer en Farma', 'Negocio Farmacia'], match_type: 'exact' } }];
+    h.state.pendingRows = [{ context: { conversation_id: 'chat', await_child_log_id: 'child-log' } }];
+    await runAutomationsForTrigger({ accountId: ACCOUNT, triggerType: 'keyword_match', contactId: 'c1',
+      context: { message_text: 'Crecer en Farma', interactive_reply_id: 'btn_1', conversation_id: 'chat' } });
+    expect(h.state.logAutomationIds).toEqual([]);
+    expect(h.state.pendingCancels).toBe(0);
+    expect(engineSendMedia).not.toHaveBeenCalled();
+  });
 
   it('does not send a later block until Meta confirms the prior image was delivered', async () => {
     h.state.owned = { id: 'c1' };
