@@ -1,5 +1,6 @@
 import { parseEnrollmentData, type EnrollmentData } from './enrollment';
 import { isGuardianMessage } from './identity-evidence';
+import { intakeText } from './intake-text';
 
 export interface IntakeMessage {
   id: string;
@@ -51,6 +52,7 @@ export function collectEnrollmentData(
   const candidates = new Map<keyof EnrollmentData, Set<string>>();
   const photoCandidates = new Map<keyof EnrollmentData, Set<string>>();
   const writtenNames = new Set<string>();
+  const labelledNames = new Set<string>();
   const writtenBirthDates = new Set<string>();
   const photoNames = new Set<string>();
   const recentEmails = new Set<string>();
@@ -89,7 +91,7 @@ export function collectEnrollmentData(
       continue;
     }
     // Some captions arrive with literal backslash-n from the sender.
-    const text = (message.content_text ?? '').replace(/\\n/g, '\n');
+    const text = intakeText(message.content_text);
     const trimmed = text.trim();
     // Accept a student's unlabelled answer only when the entire line is an
     // unambiguous date or a Peruvian mobile number. These stay provisional.
@@ -133,7 +135,11 @@ export function collectEnrollmentData(
       if (!labelled) continue;
       const label = key(labelled[1]);
       const value = labelled[2];
-      if (/^NOMBRE/.test(label) && currentIdentityBatch) add('full_name', value, true);
+      if (/^NOMBRE/.test(label) && currentIdentityBatch) {
+        add('full_name', value, true);
+        const name = parseEnrollmentData({ full_name: value })?.full_name;
+        if (name) labelledNames.add(name);
+      }
       else if (/^(CORREO|EMAIL)/.test(label)) addEmail(value);
       else if (/^(CELULAR|TELEFONO)/.test(label)) {
         const phone = value.replace(/[\s()-]/g, '');
@@ -225,7 +231,9 @@ export function collectEnrollmentData(
       ? [...writtenNames].filter((name) => [...photoNames].some((photoName) => samePersonName(name, photoName)))
       : [];
     const photographed = photoCandidates.get(field);
-    const chosen = field === 'full_name' && writtenPhotoMatches.length === 1
+    const chosen = field === 'full_name' && labelledNames.size > 0
+      ? labelledNames.size === 1 ? [...labelledNames][0] : null
+      : field === 'full_name' && writtenPhotoMatches.length === 1
       ? writtenPhotoMatches[0]
       : field === 'full_name' && writtenNames.size === 1
         ? [...writtenNames][0]

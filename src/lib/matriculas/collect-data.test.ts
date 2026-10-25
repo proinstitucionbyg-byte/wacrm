@@ -31,6 +31,28 @@ const back: IntakeMessage = {
   },
 };
 describe('deterministic chat intake', () => {
+  it('reads a compound name, DNI on the next line and birth date from a bulleted block without approving identity', () => {
+    const value = collectEnrollmentData({}, [{ id: 'written', content_text:
+      '- Ana Isabel Torres Gonzales de Garcia\n- DNI\n- 12345678\n- 24/08/1966' }]);
+    expect(value).toMatchObject({ full_name: 'ANA ISABEL TORRES GONZALES DE GARCIA',
+      document_type: 'DNI', document_number: '12345678', birth_date: '1966-08-24' });
+    expect(value.identity_confirmed).not.toBe(true);
+  });
+  it('does not use a bare number without an explicit document label or resolve contradictory written numbers', () => {
+    expect(collectEnrollmentData({}, [{ id: 'number', content_text: '- 12345678' }]).document_number).toBeUndefined();
+    const value = collectEnrollmentData({}, [
+      { id: 'first', content_text: '- DNI\n- 12345678' },
+      { id: 'second', content_text: '- DNI\n- 87654321' },
+    ]);
+    expect(value.document_number).toBeUndefined();
+  });
+  it('prefers a structured identity name to an earlier conversational sentence and preserves explicit name conflicts', () => {
+    const block = { id: 'identity', content_text: '- Ana Isabel Torres Gonzales de Garcia\n- DNI\n- 12345678' };
+    expect(collectEnrollmentData({}, [{ id: 'chat', content_text: 'Le envio mis datos' }, block]).full_name)
+      .toBe('ANA ISABEL TORRES GONZALES DE GARCIA');
+    expect(collectEnrollmentData({}, [block, { id: 'other', content_text: 'Nombre: Maria Isabel Perez Torres' }]).full_name)
+      .toBeUndefined();
+  });
   it('reads Correo electrónico without including the accented label in the address', () => {
     const result = collectEnrollmentData({}, [{ id: 'written-email', content_text: 'Nombres: Ana Perez\nCorreo electrónico: ana@example.com\nDistrito: Desaguadero' }]);
     expect(result.email).toBe('ana@example.com');

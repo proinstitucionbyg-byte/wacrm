@@ -1,5 +1,6 @@
 import type { EnrollmentData } from './enrollment';
 import type { IntakeMessage } from './collect-data';
+import { intakeText } from './intake-text';
 
 const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
 export function isGuardianMessage(message: IntakeMessage): boolean {
@@ -12,7 +13,7 @@ export function declarationEvidence(data: EnrollmentData, messages: IntakeMessag
   const ids = new Set<string>();
   for (const message of messages) {
     if (isGuardianMessage(message)) continue;
-    for (const line of (message.content_text ?? '').replace(/\\n/g, '\n').split(/\r?\n/)) {
+    for (const line of intakeText(message.content_text).split(/\r?\n/)) {
       const normalized = normalize(line);
       const match = normalized.match(/^(NOMBRE(?: COMPLETO)?|NOMBRES(?: Y APELLIDOS)?|DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARNE DE EXTRANJERIA|PASAPORTE|CORREO(?: ELECTRONICO)?|EMAIL)\s*:\s*(.+)$/);
       if (!match) {

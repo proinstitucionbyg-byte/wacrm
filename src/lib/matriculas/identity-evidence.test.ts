@@ -7,6 +7,17 @@ const id='11111111-1111-4111-8111-111111111111';
 const data={full_name:'LUIS TEST',document_number:'12345678',email:'test@gmail.com'};
 const message={id,sender_type:'customer',content_text:'NOMBRE: LUIS TEST\nDNI: 12345678\nCORREO: test@gmail.com'};
 describe('identidad con respaldo escrito y tutor',()=>{
+  it('retains the original IDs for a bulleted compound name and split DNI with email in another message',()=>{
+    const fields={full_name:'ANA ISABEL TORRES GONZALES DE GARCIA',document_number:'12345678',email:'ana@example.com'};
+    const written=[
+      {id,sender_type:'customer',content_text:'- Ana Isabel Torres Gonzales de Garcia\n- DNI\n- 12345678\n- 24/08/1966'},
+      {id:'22222222-2222-4222-8222-222222222222',sender_type:'customer',content_text:fields.email},
+    ];
+    const result=prepareAutomaticIntake(fields,written,[],'2026-10-25T12:00:00Z');
+    expect(result.declaration_message_ids).toEqual(written.map(message=>message.id));
+    expect(result.identity_confirmed).not.toBe(true);
+    expect(declarationEvidence(fields,[...written,{id:'third',content_text:'DNI: 87654321'}])).toEqual([]);
+  });
   it('conserva solo declaraciones completas y concordantes',()=>{
     expect(declarationEvidence(data,[message])).toEqual([id]);
     expect(declarationEvidence(data,[{...message,content_text:'NOMBRE: LUIS TEST\nDNI: 12345678'}])).toEqual([]);
