@@ -23,6 +23,7 @@ const h = vi.hoisted(() => ({
     conversationState: null as Record<string, unknown> | null,
     messageStatus: 'sent' as 'sent' | 'delivered' | 'read' | 'failed',
     newerCustomer: false,
+    paymentPending: false,
     claimedPending: null as Record<string,unknown>|null,
   },
 }));
@@ -85,10 +86,12 @@ vi.mock("./admin-client", () => {
       }
       return { data: { steps_executed: [], status: state.logStatus }, error: null };
     }
+    if (table === 'messages' && ops.filters.some(([, key]) => key === 'media_url')) return { data: [], error: null };
     if (table === "messages") return { data: ops.filters.some(([operator,key,value]) =>
       operator === 'eq' && key === 'sender_type' && value === 'customer')
       ? (state.newerCustomer ? {id:'newer-customer'} : null) : { status: state.messageStatus }, error: null };
     if (table === "conversations") return { data: state.conversationState, error: null };
+    if (table === 'payment_reviews') return { data: state.paymentPending ? { id: 'receipt' } : null, error: null };
     if (table === "automation_steps") {
       const automationId = ops.filters.find(
         ([operator, key]) => operator === 'eq' && key === 'automation_id',
@@ -186,8 +189,56 @@ import { resumeDeliveredMessage, resumePendingExecution, runAutomationById, runA
 import { engineSendInteractive, engineSendMedia, engineSendText } from './meta-send';
 import { INITIAL_GREETING_ID, RETURN_GREETING_ID } from './greeting-continuity';
 import type { Automation } from "@/types";
+import { COMMERCIAL_CADENCE_VERSION } from './commercial-cadence';
 
 const ACCOUNT = "acct-1";
+
+describe('versioned commercial cadence integration', () => {
+  const policy = { version: COMMERCIAL_CADENCE_VERSION, steps: [
+    { id: 'intro' }, { id: 'later-wait', config: { amount: 20, unit: 'minutes' } }, { id: 'followup' },
+  ] };
+  function setup() {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [{ ...automationWithUpdateStep(), name: 'COURSE', trigger_config: { commercial_cadence: policy } }];
+    h.state.steps = [
+      { id: 'intro', automation_id: 'a1', parent_step_id: null, position: 0, step_type: 'send_message', step_config: { text: 'intro' } },
+      { id: 'removed', automation_id: 'a1', parent_step_id: null, position: 1, step_type: 'send_message', step_config: { text: 'optional material' } },
+      { id: 'later-wait', automation_id: 'a1', parent_step_id: null, position: 2, step_type: 'wait', step_config: { amount: 10, unit: 'minutes' } },
+      { id: 'followup', automation_id: 'a1', parent_step_id: null, position: 3, step_type: 'send_message', step_config: { text: 'followup' } },
+    ];
+  }
+  const pending = () => ({ id: 'p1', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1', contact_id: 'c1', log_id: 'log1',
+    parent_step_id: null, branch: null, next_step_position: 1, context: { conversation_id: 'chat' } });
+  it('pins a new automatic run, skips unsolicited material, and keeps the original next position', async () => {
+    setup();
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(engineSendText).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'intro' }));
+    expect(h.state.pendingInserts).toContainEqual(expect.objectContaining({ next_step_position: 3,
+      context: expect.objectContaining({ commercial_cadences: { a1: policy } }) }));
+  });
+  it('does not adopt the new cadence when resuming an old wait', async () => {
+    setup();
+    await resumePendingExecution(pending());
+    expect(engineSendText).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'optional material' }));
+  });
+  it('does not filter an explicit manual course request', async () => {
+    setup();
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat', manualAgentId: 'agent' });
+    expect(h.state.pendingInserts[0]?.context).not.toHaveProperty('commercial_cadences');
+  });
+  it('does not send a new course sequence when a payment is already pending', async () => {
+    setup(); h.state.paymentPending = true;
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });
+    expect(engineSendText).not.toHaveBeenCalled(); expect(h.state.pendingInserts).toHaveLength(0);
+  });
+  it('uses the pinned old configuration rather than new live edits', async () => {
+    setup();
+    await resumePendingExecution({ ...pending(), context: { conversation_id: 'chat', commercial_cadences: { a1: policy },
+      commercial_started_at: { a1: '2026-10-25T10:00:00Z' } } });
+    expect(engineSendText).not.toHaveBeenCalled();
+    expect(h.state.pendingInserts).toContainEqual(expect.objectContaining({ next_step_position: 3 }));
+  });
+})
 
 describe('Minedu saved-course integration',()=>{
  it('marks its ten-minute wait for returning to the saved course',async()=>{
@@ -253,6 +304,7 @@ beforeEach(() => {
   h.state.conversationState = {automation_enabled:true,last_human_message_at:null};
   h.state.messageStatus = 'sent';
   h.state.newerCustomer = false;
+  h.state.paymentPending = false;
   h.state.claimedPending = null;
 });
 

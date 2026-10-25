@@ -11,6 +11,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { resumeDeliveredMessage, runAutomationsForTrigger } from '@/lib/automations/engine'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { isExplicitSalesDecline } from '@/lib/ai/sales-decline'
+import { handleExplicitHumanRequest } from '@/lib/ai/explicit-human-request'
 import { canAutoReplyToInboundImage } from '@/lib/ai/inbound-image-routing'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
@@ -1035,6 +1036,10 @@ const keywordOpeningDeferred = firstInboundDisposition === 'deferred'
     supabaseAdmin(), accountId, conversation.id,
   ))
 const salesDeclined = !automatedInbound && isExplicitSalesDecline(inboundText)
+const explicitHumanRequested = !automatedInbound && await handleExplicitHumanRequest(supabaseAdmin(), {
+  accountId, conversationId: conversation.id, contactId: contactRecord.id,
+  userId: configOwnerUserId, text: inboundText, replyId: interactiveReplyId,
+})
 if (salesDeclined) {
   const db = supabaseAdmin()
   const { error: disableError } = await db.from('conversations')
@@ -1052,7 +1057,7 @@ if (salesDeclined) {
   if (cancelError) throw cancelError
 }
 let billingBlockedForThisInbound = false
-if (!unknownFirstInboundNeedsHuman && !keywordOpeningDeferred && !salesDeclined && (conversation.ai_enabled !== false || conversation.automation_enabled !== false)) {
+if (!explicitHumanRequested && !unknownFirstInboundNeedsHuman && !keywordOpeningDeferred && !salesDeclined && (conversation.ai_enabled !== false || conversation.automation_enabled !== false)) {
   const billingGate = await gateAutomaticWhatsAppConversation(supabaseAdmin(), {
     accountId,
     conversationId: conversation.id,
@@ -1060,7 +1065,7 @@ if (!unknownFirstInboundNeedsHuman && !keywordOpeningDeferred && !salesDeclined 
   })
   billingBlockedForThisInbound = !billingGate.allowed
 }
-const allAutomaticRepliesDisabled = unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || (conversation.ai_enabled === false && conversation.automation_enabled === false)
+const allAutomaticRepliesDisabled = explicitHumanRequested || unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || (conversation.ai_enabled === false && conversation.automation_enabled === false)
 
 const followupReplyHandled = !allAutomaticRepliesDisabled && interactiveReplyId
   ? await handleIdleFollowupReply({
@@ -1083,9 +1088,9 @@ if (!allAutomaticRepliesDisabled && !automatedInbound && !teacherHandled && !hum
   await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
 }
 const automationPaused =
-  unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
+  explicitHumanRequested || unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
   let automationMatched = false
-  let flowConsumed = unknownFirstInboundNeedsHuman || keywordOpeningDeferred || automatedInbound || followupReplyHandled || teacherHandled
+  let flowConsumed = explicitHumanRequested || unknownFirstInboundNeedsHuman || keywordOpeningDeferred || automatedInbound || followupReplyHandled || teacherHandled
 
 if (!automationPaused) {
   const flowResult = await dispatchInboundToFlows({
@@ -1165,6 +1170,7 @@ for (const triggerType of automationTriggers) {
   // eligibility gates + try/catch and never throws.
   if (
   conversation.ai_enabled !== false &&
+  !explicitHumanRequested &&
   !salesDeclined &&
   !humanRecentlyActive &&
   !flowConsumed &&

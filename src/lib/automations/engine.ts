@@ -32,12 +32,16 @@ import { greetingAutomationId, INITIAL_GREETING_ID, isGreetingAutomation, matche
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { captureCourseCheckpoint, currentCourseCheckpoint, isCourseContinue, isCourseDetour, isSavedCourseName, restoreCourseCheckpoint, type CourseCheckpoint } from './course-detour'
+import { applyCommercialCadence, readCommercialCadence, type CommercialCadence } from './commercial-cadence'
 
 // ------------------------------------------------------------
 // Public API
 // ------------------------------------------------------------
 
 export interface AutomationContext {
+  /** Pin the approved course cadence only on a new automatic, unbounded run. */
+  commercial_cadences?: Record<string, CommercialCadence>
+  commercial_started_at?: Record<string, string>
   /** Server-owned enrollment sequence. Its two-hour wait is independent of ordinary chat activity. */
   enrollment_sequence_id?: string
   /** Explicit adviser command; set only by the authenticated server endpoint. */
@@ -794,6 +798,13 @@ async function executeAutomation(
       ? { ...(input.context?.automation_step_end_by_id ?? {}), [automation.id]: range.endPosition }
       : input.context?.automation_step_end_by_id,
   }
+  const cadence = !range && !input.context?.manual_agent_id && !input.context?.enrollment_sequence_id
+    ? readCommercialCadence((automation.trigger_config as Record<string, unknown>)?.commercial_cadence)
+    : null
+  if (cadence) {
+    executionContext.commercial_cadences = { ...executionContext.commercial_cadences, [automation.id]: cadence }
+    executionContext.commercial_started_at = { ...executionContext.commercial_started_at, [automation.id]: new Date().toISOString() }
+  }
 
   const { data: log, error: logErr } = await db
     .from('automation_logs')
@@ -806,7 +817,7 @@ async function executeAutomation(
       // after teammates join the account.
       user_id: automation.user_id,
       contact_id: input.contactId ?? null,
-      trigger_event: triggerEventOverride ?? input.triggerType,
+      trigger_event: cadence ? `${triggerEventOverride ?? input.triggerType}:commercial_${cadence.version}` : triggerEventOverride ?? input.triggerType,
       steps_executed: [],
       status: 'success',
     })
@@ -898,11 +909,44 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     return
   }
 
+  const cadence = args.parentStepId === null && args.endPosition === undefined
+    && !args.context.manual_agent_id && !args.context.enrollment_sequence_id
+    ? readCommercialCadence(args.context.commercial_cadences?.[args.automation.id]) : null
+  let executionSteps = cadence ? applyCommercialCadence(steps as AutomationStep[], cadence) : steps as AutomationStep[]
+  const unpaidPaymentFlow = isPaymentFlow(args.automation)
+    && (args.automation.trigger_config as Record<string, unknown>)?.payment_only_unpaid === true
+  if ((cadence || unpaidPaymentFlow) && args.context.conversation_id) {
+    // A receipt awaiting review is already a payment case, not a silent lead.
+    const { data: payment, error: paymentError } = await db.from('payment_reviews').select('id')
+      .eq('account_id', args.automation.account_id).eq('conversation_id', args.context.conversation_id)
+      .in('status', ['pending', 'validated']).limit(1).maybeSingle()
+    if (paymentError) throw paymentError
+    const startedAt = args.context.commercial_started_at?.[args.automation.id]
+    if (payment) {
+      await finalizeLog(args.logId, 'success', 'La atención continúa en revisión de pago')
+      return
+    }
+    // Requested materials remain available, but a later proactive block must
+    // not send the same image/audio again. Preserve waits and the terminal UUID.
+    const mediaUrls = cadence && args.startPosition > 3 && startedAt ? executionSteps
+      .filter(step => step.step_type === 'send_media')
+      .map(step => (step.step_config as Record<string, unknown>).media_url ?? (step.step_config as Record<string, unknown>).url)
+      .filter((url): url is string => typeof url === 'string') : []
+    if (mediaUrls.length) {
+      const { data: priorMedia, error: mediaError } = await db.from('messages').select('media_url')
+        .eq('conversation_id', args.context.conversation_id).neq('sender_type', 'customer')
+        .gte('created_at', startedAt!).in('media_url', mediaUrls).neq('status', 'failed')
+      if (mediaError) throw mediaError
+      const seen = new Set((priorMedia ?? []).map(row => row.media_url))
+      executionSteps = executionSteps.filter(step => step.step_type !== 'send_media'
+        || !seen.has((step.step_config as Record<string, unknown>).media_url ?? (step.step_config as Record<string, unknown>).url))
+    }
+  }
   const results: AutomationLogStepResult[] = []
   let status: 'success' | 'partial' | 'failed' = 'success'
   let errorMessage: string | null = null
 
-  for (const [index, step] of (steps as AutomationStep[]).entries()) {
+  for (const [index, step] of executionSteps.entries()) {
     // An adviser can reply while a block is waiting for delivery or while
     // this loop is advancing. Keep the exact next step instead of sending
     // over the adviser or losing the remaining sequence.
@@ -1052,7 +1096,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
       // Meta's send response only confirms acceptance. A following message
       // can reach the phone first, especially when the prior one is media.
       // Resume through the existing cron only after Meta reports delivery.
-      const nextStep = (steps as AutomationStep[])[index + 1]
+      const nextStep = executionSteps[index + 1]
       if (args.context.await_delivery_message_id && nextStep && nextStep.step_type !== 'wait') {
         const { error: deliveryWaitError } = await db.from('automation_pending_executions').insert({
           automation_id: args.automation.id,
