@@ -273,8 +273,11 @@ function reconcileSalesMainStatus_(id, remote, local, props, base, startedAt) {
       return local;
     }
   }
-  props.setProperty('SALES_MAIN_STATUS:' + id, String(remote || ''));
-  return String(remote || '');
+  const remoteStatus = String(remote || '');
+  // Avoid a remote PropertiesService write for every unchanged contact.
+  // Keep the fresh edit/pending checks above: cached state must not hide human edits.
+  if (last !== remoteStatus) props.setProperty('SALES_MAIN_STATUS:' + id, remoteStatus);
+  return remoteStatus;
 }
 
 // Formula-only commission rows are not contacts. Keep appends beside real data.

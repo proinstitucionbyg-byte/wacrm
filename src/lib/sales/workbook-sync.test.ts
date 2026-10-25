@@ -37,6 +37,27 @@ describe('commercial workbook synchronization', () => {
     expect(c.reconcileSalesMainStatus_('id','VENTA','INTERESADO',props,'https://crm.example',100)).toBe('VENTA');
     expect(props.getProperty('SALES_MAIN_STATUS:id')).toBe('VENTA');
   });
+  it('does not rewrite remembered states for 300 unchanged contacts', () => {
+    const c=context();
+    const props=properties(Object.fromEntries(Array.from({length:300},(_,i)=>[`SALES_MAIN_STATUS:lead-${i}`,'INTERESADO'])));
+    const write=vi.spyOn(props,'setProperty');
+    c.UrlFetchApp={fetch:vi.fn(()=>{throw new Error('Unchanged states must not be sent to CRM');})};
+    for(let i=0;i<300;i++) {
+      expect(c.reconcileSalesMainStatus_(`lead-${i}`,'INTERESADO','INTERESADO',props,'https://crm.example',100)).toBe('INTERESADO');
+    }
+    expect(write).not.toHaveBeenCalled();
+    expect(c.UrlFetchApp.fetch).not.toHaveBeenCalled();
+  });
+  it('remembers a changed or initially empty CRM state once, then skips identical writes', () => {
+    const c=context();const props=properties({'SALES_MAIN_STATUS:changed':'INTERESADO'});
+    const write=vi.spyOn(props,'setProperty');
+    expect(c.reconcileSalesMainStatus_('changed','NO CONTESTA','INTERESADO',props,'https://crm.example',100)).toBe('NO CONTESTA');
+    expect(c.reconcileSalesMainStatus_('empty',null,'',props,'https://crm.example',100)).toBe('');
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(c.reconcileSalesMainStatus_('changed','NO CONTESTA','NO CONTESTA',props,'https://crm.example',100)).toBe('NO CONTESTA');
+    expect(c.reconcileSalesMainStatus_('empty',null,'',props,'https://crm.example',100)).toBe('');
+    expect(write).toHaveBeenCalledTimes(2);
+  });
   it('keeps unsent local changes and retries rather than replacing them with old CRM data', () => {
     const c=context(); const props=properties({'CRM_WRITE_API_KEY':'test-key','SALES_MAIN_STATUS:id':'','SALES_PENDING_STATE:id':'INTERESADO'});
     c.UrlFetchApp={fetch:()=>({getResponseCode:()=>403})};
