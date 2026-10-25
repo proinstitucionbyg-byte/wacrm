@@ -13,6 +13,7 @@ import { UUID_PATTERN } from '@/lib/team-chat';
 import { resumeEnrollmentAfterDocuments } from '@/lib/matriculas/sequence';
 import { isSocialChannel, socialConfiguration } from '@/lib/social/meta-api';
 import { saveSocialDocument } from '@/lib/social/storage';
+import { readConversationBillingPreflight } from '@/lib/whatsapp/billing-runtime';
 
 /** Receives only the three generated PDFs for an already registered and human-validated enrollment. */
 export async function POST(
@@ -29,7 +30,7 @@ export async function POST(
       throw badRequest('Documento inválido');
     const { data: job, error } = await ctx.supabase
       .from('enrollment_drafts')
-      .select('id,status,lease_token,data,conversation_id,review_id')
+      .select('id,status,lease_token,data,conversation_id,review_id,student_folder_url')
       .eq('id', id)
       .eq('account_id', ctx.accountId)
       .maybeSingle();
@@ -104,21 +105,46 @@ export async function POST(
         409
       );
     }
-    const { data: conversation } = await ctx.supabase
+    const { data: conversation, error: conversationError } = await ctx.supabase
       .from('conversations')
-      .select('id,contact_id,user_id,contact:contacts(channel)')
+      .select('id,contact_id,user_id,automation_enabled,contact:contacts(channel)')
       .eq('id', job.conversation_id)
       .eq('account_id', ctx.accountId)
       .maybeSingle();
+    if (conversationError) throw conversationError;
+    if (!conversation) throw badRequest('No se encontró la conversación de esta matrícula');
+    const manualDelivery = (reason: string) => {
+      const folder = typeof job.student_folder_url === 'string' &&
+        job.student_folder_url.startsWith('https://drive.google.com/drive/folders/')
+        ? ` Enlace de descarga: ${job.student_folder_url}`
+        : ' Abre Descargar documentos en la conversación.';
+      return new ApiError('bad_request', `Entrega manual: ${reason}. La matrícula se conserva; no se enviará por API.${folder}`, 409);
+    };
+    if (conversation?.automation_enabled === false)
+      throw manualDelivery('la automatización está desactivada');
+    const contact = Array.isArray(conversation?.contact)
+      ? conversation.contact[0]
+      : conversation?.contact;
+    if (contact?.channel === 'whatsapp') {
+      // Read only: the sender makes the atomic quota reservation once, at dispatch.
+      // A known block must not upload to Meta or create an uncertain-send reservation.
+      let billing;
+      try {
+        billing = await readConversationBillingPreflight(ctx.supabase, ctx.accountId, conversation.id);
+      } catch {
+        throw manualDelivery('no se pudo comprobar la cobertura del envío');
+      }
+      if (!billing.service_window_open)
+        throw manualDelivery('la ventana de atención de 24 horas venció');
+      if (!billing.automatic_send_allowed)
+        throw manualDelivery('no hay cobertura gratuita confirmada');
+    }
     const { data: config } = await ctx.supabase
       .from('whatsapp_config')
       .select('access_token,phone_number_id')
       .eq('account_id', ctx.accountId)
       .maybeSingle();
-    const contact = Array.isArray(conversation?.contact)
-      ? conversation.contact[0]
-      : conversation?.contact;
-    if (!conversation || (!isSocialChannel(contact?.channel) && contact?.channel !== 'whatsapp') || (contact?.channel === 'whatsapp' && !config))
+    if ((!isSocialChannel(contact?.channel) && contact?.channel !== 'whatsapp') || (contact?.channel === 'whatsapp' && !config))
       throw badRequest('No hay conexión para el canal de esta matrícula');
     if (isSocialChannel(contact?.channel)) socialConfiguration(contact.channel, ctx.accountId);
     const documentName = String(job.data.full_name)

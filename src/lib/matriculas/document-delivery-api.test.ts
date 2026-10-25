@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   socialDocument: vi.fn(),
   socialConfig: vi.fn(),
   resume: vi.fn(),
+  billing: vi.fn(),
 }));
+vi.mock('@/lib/whatsapp/billing-runtime', () => ({ readConversationBillingPreflight: mocks.billing }));
 vi.mock('@/lib/matriculas/sequence', () => ({ resumeEnrollmentAfterDocuments: mocks.resume }));
 vi.mock('@/lib/auth/api-context', () => ({ requireApiKey: mocks.key }));
 vi.mock('@/lib/whatsapp/meta-api', () => ({ uploadMedia: mocks.upload }));
@@ -54,6 +56,7 @@ beforeEach(() => {
         lease_token: 'lease',
         conversation_id: 'conv',
         review_id: 'review',
+        student_folder_url: 'https://drive.google.com/drive/folders/student',
         data: { full_name: 'LUIS TEST', document_number: '12345678' },
       },
     })
@@ -65,6 +68,7 @@ beforeEach(() => {
         contact: { channel: 'whatsapp' },
         contact_id: 'contact',
         user_id: 'owner',
+        automation_enabled: true,
       },
     })
     .mockResolvedValueOnce({
@@ -72,8 +76,50 @@ beforeEach(() => {
     });
   mocks.upload.mockResolvedValue({ mediaId: '1234' });
   mocks.send.mockResolvedValue({ whatsapp_message_id: 'wamid' });
+  mocks.billing.mockResolvedValue({ service_window_open: true, automatic_send_allowed: true });
 });
 describe('PDF delivery bridge', () => {
+  it.each([
+    ['expired 24-hour window even inside ad coverage', { service_window_open: false, free_entry_window_open: true, automatic_send_allowed: true }],
+    ['paid message', { service_window_open: true, state: 'paid', automatic_send_allowed: false }],
+    ['unconfirmed coverage', { service_window_open: true, state: 'unknown', automatic_send_allowed: false }],
+  ])('keeps the folder for manual delivery with %s, without uploading or reserving', async (_reason, billing) => {
+    mocks.billing.mockResolvedValue(billing);
+    const response = await POST(request(), context());
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.message).toContain('https://drive.google.com/drive/folders/student');
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.resume).not.toHaveBeenCalled();
+  });
+  it('fails closed with a download link when billing cannot be read', async () => {
+    mocks.billing.mockRejectedValue(new Error('unavailable'));
+    const response = await POST(request(), context());
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.message).toContain('Enlace de descarga:');
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it('respects a manual automation pause even with free coverage', async () => {
+    let call = 0;
+    // Preserve the other fixtures, replacing only the conversation response.
+    const replies = await Promise.all(Array.from({ length: 5 }, () => mocks.single()));
+    mocks.single.mockReset().mockImplementation(() => {
+      const reply = replies[call++];
+      return Promise.resolve(call === 4 ? { data: { ...reply.data, automation_enabled: false } } : reply);
+    });
+    const response = await POST(request(), context());
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.message).toContain('automatización está desactivada');
+    expect(mocks.billing).not.toHaveBeenCalled();
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
   it.each([
     ['instagram', 'BOLETA'],
     ['messenger', 'BOLETA'],
