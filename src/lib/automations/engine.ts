@@ -1466,6 +1466,28 @@ case 'send_media': {
         terminalReentry = true
       }
 
+      // A webhook retry or a repeated button event can reach this link while
+      // the same child automation is already waiting. Starting it again would
+      // resend the whole linked block (images/audio included). Keep the first
+      // run and treat the duplicate link as a successful no-op. This guard is
+      // intentionally limited to pending/running child executions so a later,
+      // legitimate return can still launch the block after it finishes.
+      if (args.contactId && args.context.conversation_id && !hasRange) {
+        const { data: activeChild, error: activeChildError } = await db
+          .from('automation_pending_executions')
+          .select('id')
+          .eq('account_id', args.automation.account_id)
+          .eq('automation_id', targetId)
+          .eq('contact_id', args.contactId)
+          .in('status', ['pending', 'running'])
+          .contains('context', { conversation_id: args.context.conversation_id })
+          .limit(1)
+        if (activeChildError) throw activeChildError
+        if (activeChild?.length) {
+          return `automation ${targetId} already pending; duplicate link skipped`
+        }
+      }
+
       const childLogId = await executeAutomation(
         target as Automation,
         {
