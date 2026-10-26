@@ -25,8 +25,11 @@ const normalizeIdentityName = (value: unknown) => {
   const parts = value.split(',').map(clean).filter(Boolean);
   return parts.length === 2 ? `${parts[1]} ${parts[0]}` : value;
 };
+const isConversationalAcknowledgement = (value: string) =>
+  /\b(?:YA|LISTO|PAGUE|PAGO|PAGADO|PAGAR|VERIFIQUE|VERIFICAR|LLEGO|LLEGARON|ENVIE|ENVIADO|MANDE|MANDADO)\b/.test(key(value));
 const isBarePersonName = (value: string) =>
   /^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(value) &&
+  !isConversationalAcknowledgement(value) &&
   !/\b(ES|UN|UNA|MI|SOY|TENGO|QUIERO|COMO|CUANDO|CURSO|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL|DISTRITO|DEPARTAMENTO|DIRECCION|DOCUMENTO|CELULAR|TELEFONO|OK|POR|FAVOR|INFORMACION|CONGREGACION)\b|\b(?:INSCRIB|MATRICUL)\w*/.test(key(value));
 const courses = [
   [/\bNUTRICION(?: Y DIETETICA)?\b/, 'NUTRICION Y DIETETICA'],
@@ -214,6 +217,10 @@ export function collectEnrollmentData(
     }
   }
   const next = { ...data };
+  // Repair an earlier provisional chat-phrase extraction, preserving names
+  // whose identity was explicitly confirmed by a person.
+  if (!data.identity_confirmed && next.full_name && isConversationalAcknowledgement(next.full_name))
+    delete next.full_name;
   // While identity is still pending, recalculate identity fields from the
   // newest front/back batch. This repairs an earlier bad OCR attempt instead
   // of permanently keeping the first value written into the draft.

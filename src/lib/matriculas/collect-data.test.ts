@@ -31,6 +31,39 @@ const back: IntakeMessage = {
   },
 };
 describe('deterministic chat intake', () => {
+  it.each([
+    'Ya pague para recursos humanos',
+    'Listo verifique si llegó',
+    'Ya pagué el curso',
+    'Me llegaron los documentos',
+  ])('does not interpret the conversational acknowledgement "%s" as a name', (content_text) => {
+    expect(collectEnrollmentData({}, [{ id: 'chat', content_text }]).full_name).toBeUndefined();
+  });
+  it('repairs a provisional conversational name while keeping photo identity unconfirmed', () => {
+    const result = collectEnrollmentData({ full_name: 'YA PAGUE PARA RECURSOS HUMANOS' }, [
+      { id: 'photo', created_at: '2026-10-25T16:59:05Z', content_text: null,
+        image_analysis: { category: 'identity_document', fields: { full_name: 'CARLOS ANDRES SALAZAR', document_type: 'DNI', document_number: '12345678' } } },
+      { id: 'chat', created_at: '2026-10-25T17:49:16Z', content_text: 'Ya pague para recursos humanos' },
+    ]);
+    expect(result.full_name).toBe('CARLOS ANDRES SALAZAR');
+    expect(result.identity_confirmed).not.toBe(true);
+  });
+  it('does not prefer an old conversational sentence over a newer front/back identity batch', () => {
+    const result = collectEnrollmentData({ full_name: 'LISTO VERIFIQUE SI LLEGÓ' }, [
+      { id: 'chat', created_at: '2026-10-25T16:37:48Z', content_text: 'Listo verifique si llegó' },
+      { id: 'front', created_at: '2026-10-25T16:57:12Z', content_text: null,
+        image_analysis: { category: 'identity_document', fields: { full_name: 'TORRES RAMOS, LUIS ALBERTO', document_type: 'DNI', document_number: '12345678' } } },
+      { id: 'back', created_at: '2026-10-25T16:57:30Z', content_text: null,
+        image_analysis: { category: 'identity_document', fields: { full_name: 'TORRES LUIS ALBERTO', address: 'CALLE EJEMPLO', document_number: '12345678' } } },
+    ]);
+    expect(result.full_name).toBe('LUIS ALBERTO TORRES RAMOS');
+    expect(result.identity_confirmed).not.toBe(true);
+  });
+  it('clears only an unconfirmed conversational value when no identity evidence is available', () => {
+    const data = { full_name: 'LISTO VERIFIQUE SI LLEGÓ' };
+    expect(collectEnrollmentData(data, []).full_name).toBeUndefined();
+    expect(collectEnrollmentData({ ...data, identity_confirmed: true }, []).full_name).toBe(data.full_name);
+  });
   it('reads a compound name, DNI on the next line and birth date from a bulleted block without approving identity', () => {
     const value = collectEnrollmentData({}, [{ id: 'written', content_text:
       '- Ana Isabel Torres Gonzales de Garcia\n- DNI\n- 12345678\n- 24/08/1966' }]);
