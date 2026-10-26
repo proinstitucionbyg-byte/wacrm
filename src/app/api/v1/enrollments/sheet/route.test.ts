@@ -18,6 +18,16 @@ beforeEach(() => {
   h.key.mockResolvedValue({ accountId: 'account-a', supabase: { from: h.from } });
 });
 describe('paid enrollment sheet snapshot', () => {
+  it('exports stable contact identity and existing human review metadata for the central bridge', async () => {
+    h.rows = [{ ...draft('real','51912345678','registered'), updated_at: '2026-10-26T04:00:00Z',
+      review: { status: 'validated', payment_purpose: 'enrollment', operation_reference: '000123',
+        contact_id: 'contact-a', reviewed_by: 'reviewer-a', reviewed_at: '2026-10-25T15:00:00Z' } }];
+    const result = await (await GET(new Request('https://crm.example/api/v1/enrollments/sheet'))).json();
+    expect(result.data[0]).toMatchObject({ contact_id: 'contact-a', updated_at: '2026-10-26T04:00:00Z',
+      reviewed_by: 'reviewer-a', reviewed_at: '2026-10-25T15:00:00Z' });
+    expect(h.key).toHaveBeenCalledWith(expect.any(Request), 'enrollments:sync');
+    expect(h.calls.some(([method]) => ['update','insert','delete'].includes(method))).toBe(false);
+  });
   it('includes incomplete paid intakes while excluding tests and non-enrollment payments', async () => {
     h.rows = [draft('real','51912345678'), draft('test','+51 987 020 644'), draft('legacy','51911111111','registered','unclassified'), draft('unclassified','51922222222','collecting','unclassified'), draft('other','51933333333','collecting','other')];
     const response = await GET(new Request('https://crm.example/api/v1/enrollments/sheet'));

@@ -7,12 +7,14 @@ interface SheetDraft {
   id: string;
   review_id: string;
   created_at: string;
+  updated_at: string;
   status: string;
   data: unknown;
   sales_adviser: string | null;
   registered_number: string | null;
   student_folder_url: string | null;
-  review: { status: string; payment_purpose: string; operation_reference: string | null };
+  review: { status: string; payment_purpose: string; operation_reference: string | null;
+    contact_id: string | null; reviewed_by: string | null; reviewed_at: string | null };
 }
 
 /** A paid intake must appear in the sheet before identity/document processing is complete. */
@@ -21,7 +23,7 @@ export async function GET(request: Request) {
     const ctx = await requireApiKey(request, 'enrollments:sync');
     const { limit, cursor } = parseListParams(request);
     let query = ctx.supabase.from('enrollment_drafts')
-      .select('id,review_id,created_at,status,data,sales_adviser,registered_number,student_folder_url,review:payment_reviews!inner(account_id,status,payment_purpose,operation_reference)')
+      .select('id,review_id,created_at,updated_at,status,data,sales_adviser,registered_number,student_folder_url,review:payment_reviews!inner(account_id,status,payment_purpose,operation_reference,contact_id,reviewed_by,reviewed_at)')
       .eq('account_id', ctx.accountId)
       .eq('review.account_id', ctx.accountId)
       .eq('review.status', 'validated')
@@ -53,6 +55,10 @@ export async function GET(request: Request) {
         registered_number: row.registered_number, student_folder_url: row.student_folder_url,
         payment_status: row.review.status, payment_purpose: row.review.payment_purpose,
         operation_reference: row.review.operation_reference,
+        // Stable IDs link the same person across the existing central formats.
+        // These are existing review facts, not a new payment validation.
+        contact_id: row.review.contact_id ?? null, updated_at: row.updated_at ?? null,
+        reviewed_by: row.review.reviewed_by ?? null, reviewed_at: row.review.reviewed_at ?? null,
       }];
     }), nextCursor);
   } catch (error) {
