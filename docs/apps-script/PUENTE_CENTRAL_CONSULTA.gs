@@ -124,9 +124,9 @@ function planAppend(existingRows, incomingRows) {
 
 return {planEnrollments:planEnrollments};
 })();
-/** Complements the installed enrollment bridge. Append-only consultation copy.
+/** Complements the installed enrollment bridge. Consultation copy and delivery receipts.
  * Reuses C_CONFIG_(), the existing enrollments:sync key and the verified planner.
- * Never approves payments, generates files, sends messages or overwrites existing rows.
+ * Never approves payments, generates files or sends messages. Human edits are preserved.
  */
 var VC_BOOKS_ = ['1qg1xwDf0RIscrXFaupj-EuUzWEzfNNSrfHhglAIXbo8', '1b1ZlP9PWKu0I9VaJIE9bYDJsy5Ooy6OYtCupfBa-0eo'];
 var VC_COLUMNS_ = { ALUMNOS:18, MATRICULAS:20, PAGOS:15, DOCUMENTOS:14 };
@@ -156,9 +156,10 @@ function VC_SOURCE_(jobs, matriculas, documents) {
     var tipo=VC_TEXT_(copy.data.document_type).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
     if(tipo==='CARNE DE EXTRANJERIA'||tipo==='CARNET DE EXTRANJERIA')copy.data.document_type='CE';
     copy.updated_at=VC_DATE_(copy.updated_at);copy.reviewed_at=VC_DATE_(copy.reviewed_at);
-    // The API does not assert original contact arrival/referral or delivery receipts.
-    // Leave those unknown; never infer them from document creation or an absent API row.
-    copy.contact_created_at='';copy.first_ad_referral=null;copy.deliveries=[];
+    // Original contact arrival/referral stay unknown. Delivery evidence is
+    // read from the existing reservations AND matching Meta message receipts.
+    copy.contact_created_at='';copy.first_ad_referral=null;
+    copy.deliveries=Array.isArray(job.deliveries)?JSON.parse(JSON.stringify(job.deliveries)):[];
     ready.push(copy);
   });
   return {source:{enrollments:ready,matriculas:{values:matriculas},documents:{values:documents}},pending:pending};
@@ -219,6 +220,37 @@ function VC_ROWS_(sheet,width,start) {
   if(sheet.getLastRow()>10000)throw Error('LOTE FUERA DEL LIMITE: REVISAR');
   return sheet.getLastRow()<start?[]:VC_VALUES_(sheet.getRange(start,1,sheet.getLastRow()-start+1,width));
 }
+/** Only upgrade canonical machine-owned delivery cells, never a manual note,
+ * external delivery, changed PDF, or an uncertain send. M (responsible) is untouched. */
+function VC_DELIVERY_PLAN_(existing,incoming){
+  var byId={},updates=[],conflicts=0;
+  incoming.forEach(function(row){if(byId[row[0]])throw Error('DOCUMENTO ORIGEN DUPLICADO');byId[row[0]]=row;});
+  var seen={};
+  existing.forEach(function(old,index){
+    if(!old[0])return;
+    if(seen[old[0]])throw Error('DOCUMENTO DESTINO DUPLICADO');seen[old[0]]=true;
+    var row=byId[old[0]];
+    if(!row||row[9]!=='Entregado'||row[10]!=='WhatsApp API'||!/^Entrega confirmada por Meta \((?:delivered|read)\)\.$/.test(row[13]))return;
+    var columns=[9,10,11,13],before=columns.map(function(i){return old[i]==null?'':old[i];}),values=columns.map(function(i){return row[i]==null?'':row[i];});
+    if(JSON.stringify(before)===JSON.stringify(values))return;
+    var unknown=old[9]==='Generado'&&!old[10]&&!old[11]&&old[13]==='Sin registro API no se presume entrega; puede haberse enviado por otro medio.';
+    var sent=old[9]==='Generado'&&old[10]==='WhatsApp API'&&!old[11]&&old[13]==='Enviado a Meta; entrega todavía sin confirmar.';
+    var confirmed=old[9]==='Entregado'&&old[10]==='WhatsApp API'&&/^Entrega confirmada por Meta \((?:delivered|read)\)\.$/.test(old[13]);
+    if([1,2,3,7,8].some(function(i){return VC_TEXT_(old[i])!==VC_TEXT_(row[i]);})||!(unknown||sent||confirmed)) {conflicts++;return;}
+    if(confirmed&&old[13].indexOf('(read)')!==-1&&row[13].indexOf('(delivered)')!==-1)return;
+    if(confirmed&&old[11]&&row[11]&&old[11]!==row[11]){conflicts++;return;}
+    if(!values[2]&&old[11])values[2]=old[11];
+    updates.push({id:old[0],row:index+5,before:before,values:values});
+  });
+  return {updates:updates,conflicts:conflicts};
+}
+function VC_APPLY_DELIVERY_(sheet,change){
+  var first=sheet.getRange(change.row,10,1,3),note=sheet.getRange(change.row,14,1,1);
+  var current=VC_VALUES_(first)[0].concat(VC_VALUES_(note)[0]);
+  if(JSON.stringify(current)!==JSON.stringify(change.before)||first.getFormulas()[0].some(Boolean)||note.getFormulas()[0].some(Boolean))throw Error('CAMBIO HUMANO EN ENTREGA: NO SE SOBREESCRIBIO');
+  first.setValues([change.values.slice(0,3)]);note.setValues([[change.values[3]]]);SpreadsheetApp.flush();
+  if(JSON.stringify(VC_VALUES_(first)[0].concat(VC_VALUES_(note)[0]))!==JSON.stringify(change.values))throw Error('ENTREGA: LECTURA DE VUELTA NO COINCIDE');
+}
 function VC_RUN_(write) {
   var lock=LockService.getScriptLock();lock.waitLock(20000);
   try{
@@ -236,7 +268,7 @@ function VC_RUN_(write) {
         if(headers[0]!==first||headers.some(function(v){return !v;}))throw Error('CABECERAS CAMBIARON: '+name);
         existing[name]=VC_ROWS_(sheet,width,5);sheets[name]=sheet;
       });
-      books.push({id:id,existing:existing,sheets:sheets,additions:VC_APPEND_PLAN_(existing,planned.tables)});
+      books.push({id:id,existing:existing,sheets:sheets,additions:VC_APPEND_PLAN_(existing,planned.tables),deliveries:VC_DELIVERY_PLAN_(existing.DOCUMENTOS,planned.tables.DOCUMENTOS)});
     });
     var counts=[];
     books.forEach(function(book){
@@ -256,9 +288,11 @@ function VC_RUN_(write) {
         range.setValues(literal);SpreadsheetApp.flush();
         if(JSON.stringify(VC_VALUES_(range))!==JSON.stringify(rows))throw Error('LECTURA DE VUELTA NO COINCIDE: '+name);
       });
+      if(write)book.deliveries.updates.forEach(function(change){VC_APPLY_DELIVERY_(book.sheets.DOCUMENTOS,change);});
+      added.delivery_updates=book.deliveries.updates.length;added.delivery_conflicts=book.deliveries.conflicts;
       counts.push(added);
     });
-    var summary={mode:write?'append-only':'read-only',registered:source.source.enrollments.length,pending:source.pending,additions:counts,at:new Date().toISOString()};
+    var summary={mode:write?'consultation-and-confirmed-receipts':'read-only',registered:source.source.enrollments.length,pending:source.pending,additions:counts,at:new Date().toISOString()};
     console.log(JSON.stringify(summary));return summary;
   }finally{lock.releaseLock();}
 }
@@ -268,5 +302,5 @@ function INSTALAR_PUENTE_CENTRAL_CONSULTA(){
   // Preflight without changing tables before installing the periodic consumer.
   VERIFICAR_PUENTE_CENTRAL_CONSULTA();
   if(!ScriptApp.getProjectTriggers().some(function(t){return t.getHandlerFunction()==='SINCRONIZAR_CENTRAL_CONSULTA';}))ScriptApp.newTrigger('SINCRONIZAR_CENTRAL_CONSULTA').timeBased().everyMinutes(10).create();
-  console.log('PUENTE DE CONSULTA INSTALADO CADA 10 MINUTOS. EXISTENTES CONSERVADOS. SIN ENVIOS NI EDICION BILATERAL.');
+  console.log('PUENTE DE CONSULTA Y ENTREGAS CONFIRMADAS CADA 10 MINUTOS. NOTAS HUMANAS CONSERVADAS. SIN ENVIOS NI EDICION BILATERAL.');
 }

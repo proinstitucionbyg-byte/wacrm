@@ -41,6 +41,40 @@ test('only uses the expected host and existing API key; no third-party destinati
   const c=load({C_CONFIG_:()=>({base:'https://other.example',key:'test-only'}),UrlFetchApp:{fetch:()=>assert.fail('must not fetch')}});
   assert.throws(()=>c.VC_JOBS_(),/HOST/);
 });
+function docRow(status='Generado',note='Sin registro API no se presume entrega; puede haberse enviado por otro medio.'){
+  return ['DOC-one-BOLETA','EST-one','MAT-one','PAG-one','Boleta','B-001',46320,'https://drive.google.com/file/d/one/view','https://drive.google.com/drive/folders/one',status,'','','ASESORA HUMANA',note];
+}
+function delivered(){const row=docRow('Entregado','Entrega confirmada por Meta (read).');row[10]='WhatsApp API';row[11]=46321;return row;}
+test('updates only delivery fields with confirmed evidence and retains human responsibility',()=>{
+  const c=load(),old=docRow(),incoming=delivered(),before=structuredClone(old);
+  const plan=plain(c.VC_DELIVERY_PLAN_([old],[incoming]));
+  assert.equal(plan.updates.length,1);assert.equal(plan.updates[0].row,5);
+  assert.deepEqual(plan.updates[0].values,['Entregado','WhatsApp API',46321,'Entrega confirmada por Meta (read).']);
+  assert.deepEqual(old,before);assert.equal(old[12],'ASESORA HUMANA');
+  assert.equal(c.VC_DELIVERY_PLAN_([incoming],[incoming]).updates.length,0);
+});
+test('preserves manual notes, manual delivery channels, formulas and mismatched PDF relations',()=>{
+  const c=load();
+  for(const edit of [r=>r[13]='NOTA HUMANA',r=>r[10]='WhatsApp personal',r=>r[7]='https://drive.google.com/file/d/replacement/view',r=>r[9]='Anulado']){
+    const old=docRow();edit(old);const plan=c.VC_DELIVERY_PLAN_([old],[delivered()]);
+    assert.equal(plan.updates.length,0);assert.equal(plan.conflicts,1);
+  }
+});
+test('does not turn sent, missing receipts or uncertain reservations into delivered, nor downgrade read',()=>{
+  const c=load();
+  for(const row of [docRow(),docRow('Generado','Enviado a Meta; entrega todavía sin confirmar.'),docRow('Observado','Entrega por revisar. No repetir el envío incierto. Descargar para gestión manual.')]){
+    assert.equal(c.VC_DELIVERY_PLAN_([docRow()],[row]).updates.length,0);
+  }
+  const incoming=delivered();incoming[13]='Entrega confirmada por Meta (delivered).';
+  assert.equal(c.VC_DELIVERY_PLAN_([delivered()],[incoming]).updates.length,0);
+});
+test('passes only the existing delivery evidence through the source adapter',()=>{
+  const c=load();
+  const job={id:'one',status:'registered',registered_number:'1',contact_id:'contact',reviewed_by:'human',reviewed_at:'2026-10-26T12:00:00Z',data:{document_type:'DNI'},deliveries:[{kind:'BOLETA',status:'sent',message_status:'read',delivered_at:'2026-10-26T17:00:29Z'}]};
+  const docs=Array(17).fill('');docs[0]='1';docs[15]='GENERADO';docs.splice(2,6,19.9,49.9,49.9,49.9,49.9,49.9);
+  const adapted=c.VC_SOURCE_([job],[[]],[[],docs]);
+  assert.deepEqual(plain(adapted.source.enrollments[0].deliveries),job.deliveries);
+});
 const privateSource=new URL('../../output/centralizacion-2026-10/private/new-two-source.json',import.meta.url);
 const privatePlan=new URL('../../output/centralizacion-2026-10/private/reconciled-30-plan.json',import.meta.url);
 test('read-only replay of the two reconciled enrollments is idempotent against the current 30-person copy',{skip:!existsSync(privateSource)||!existsSync(privatePlan)},()=>{

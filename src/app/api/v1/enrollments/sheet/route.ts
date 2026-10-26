@@ -2,10 +2,12 @@ import { requireApiKey } from '@/lib/auth/api-context';
 import { okList, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { buildPage, keysetFilter, parseListParams } from '@/lib/api/v1/pagination';
 import { ENROLLMENT_FIELDS, parseEnrollmentData } from '@/lib/matriculas/enrollment';
+import { readEnrollmentDeliverySnapshots } from '@/lib/matriculas/delivery-snapshot';
 
 interface SheetDraft {
   id: string;
   review_id: string;
+  conversation_id: string;
   created_at: string;
   updated_at: string;
   status: string;
@@ -23,7 +25,7 @@ export async function GET(request: Request) {
     const ctx = await requireApiKey(request, 'enrollments:sync');
     const { limit, cursor } = parseListParams(request);
     let query = ctx.supabase.from('enrollment_drafts')
-      .select('id,review_id,created_at,updated_at,status,data,sales_adviser,registered_number,student_folder_url,review:payment_reviews!inner(account_id,status,payment_purpose,operation_reference,contact_id,reviewed_by,reviewed_at)')
+      .select('id,review_id,conversation_id,created_at,updated_at,status,data,sales_adviser,registered_number,student_folder_url,review:payment_reviews!inner(account_id,status,payment_purpose,operation_reference,contact_id,reviewed_by,reviewed_at)')
       .eq('account_id', ctx.accountId)
       .eq('review.account_id', ctx.accountId)
       .eq('review.status', 'validated')
@@ -36,7 +38,7 @@ export async function GET(request: Request) {
     const { data, error } = await query;
     if (error) throw error;
     const { items, nextCursor } = buildPage((data ?? []) as unknown as SheetDraft[], limit);
-    return okList(items.flatMap((row) => {
+    const rows = items.flatMap((row) => {
       const input = row.data && typeof row.data === 'object' ? row.data as Record<string, unknown> : {};
       // Evidence/prices may still need review. They must not hide the paid
       // student's row; this snapshot only needs the known text fields.
@@ -60,7 +62,11 @@ export async function GET(request: Request) {
         contact_id: row.review.contact_id ?? null, updated_at: row.updated_at ?? null,
         reviewed_by: row.review.reviewed_by ?? null, reviewed_at: row.review.reviewed_at ?? null,
       }];
-    }), nextCursor);
+    });
+    const allowed = new Set(rows.map(row => row.id));
+    const deliveries = await readEnrollmentDeliverySnapshots(ctx.supabase, ctx.accountId,
+      items.filter(row => allowed.has(row.id)));
+    return okList(rows.map(row => ({ ...row, deliveries: deliveries.get(row.id) ?? [] })), nextCursor);
   } catch (error) {
     return toApiErrorResponse(error);
   }
