@@ -5,8 +5,8 @@ const h = vi.hoisted(() => ({
   customer: {} as Record<string, unknown>, pending: [] as unknown[],
   text: vi.fn(), interactive: vi.fn(), context: vi.fn(), candidates: vi.fn(),
   run:vi.fn(), route:vi.fn(), general:null as null | {id:string;name:string;trigger_config:object},
-  runs:[] as Array<{automation_id:string;status?:string;created_at?:string;steps_executed:Array<{detail:string}>}>,
-  runAutomations:[] as Array<{id:string;name:string}>,
+  runs:[] as Array<{automation_id:string;status?:string;created_at?:string;trigger_event?:string;steps_executed:Array<{detail:string}>}>,
+  runAutomations:[] as Array<{id:string;name:string;trigger_config?:object}>,
 }))
 vi.mock('./admin-client', () => ({ supabaseAdmin: () => ({ from: (table: string) => {
   let update = false
@@ -20,7 +20,10 @@ vi.mock('./admin-client', () => ({ supabaseAdmin: () => ({ from: (table: string)
     lt: () => chain, gt: () => chain, gte: () => chain, neq: () => chain, in: (key:string,value:unknown) => {filters.push([key,value]); return chain},
     is: () => chain, order: () => chain, limit: () => chain,
     maybeSingle: async () => table === 'automation_pending_executions'
-      ? {data:h.pending[0] ?? null,error:null} : result(),
+      ? {data:h.pending.find(row => {
+        const statuses=filters.find(([key])=>key==='status')?.[1] as string[] | undefined
+        return statuses?.includes((row as {status?:string}).status ?? 'pending')
+      }) ?? null,error:null} : result(),
     then: (resolve:(value:unknown)=>unknown) => Promise.resolve(result()).then(resolve),
   }
   return chain
@@ -95,6 +98,22 @@ describe('idle follow-up dispatch', () => {
     expect(await runIdleFollowups()).toBe(0)
     expect(h.run).not.toHaveBeenCalled()
     expect(h.text).not.toHaveBeenCalled()
+  })
+  it('does not start an unused Administrative block after the real abbreviated root finishes',async()=>{
+    h.conv.followup_sent_at=null
+    h.last={sender_type:'bot',content_type:'text',content_text:'Puedes revisar los beneficios.',created_at:'2026-10-17T19:40:00Z'}
+    h.runs=[{automation_id:'admin',status:'success',steps_executed:[]}]
+    h.runAutomations=[{id:'admin',name:'ASISTENTE A 19.90 (49.90)',trigger_config:{sales_window_close:true}}]
+    h.candidates.mockResolvedValue([{id:'admin-zero',name:'DESDE CERO ADMIN (49.90)'}])
+    expect(await runIdleFollowups()).toBe(0)
+    expect(h.run).not.toHaveBeenCalled()
+    expect(h.text).not.toHaveBeenCalled()
+  })
+  it('does not follow up before ten minutes when the last-message timestamp was stale',async()=>{
+    h.conv.followup_sent_at=null
+    h.last.created_at='2026-10-17T19:59:43Z'
+    expect(await runIdleFollowups()).toBe(0)
+    expect(h.run).not.toHaveBeenCalled()
   })
   it('does not repeat a follow-up when our outgoing updated the conversation time', async () => {
     expect(await runIdleFollowups()).toBe(0)
@@ -206,6 +225,13 @@ describe('idle follow-up dispatch', () => {
     expect(await runIdleFollowups()).toBe(0)
     expect(h.interactive).not.toHaveBeenCalled()
   })
+  it('does not replace a paused saved sequence with a different block',async()=>{
+    h.conv.followup_sent_at=null
+    h.pending=[{id:'saved-paused-step',status:'paused'}]
+    expect(await runIdleFollowups()).toBe(0)
+    expect(h.run).not.toHaveBeenCalled()
+    expect(h.text).not.toHaveBeenCalled()
+  })
   it('does not launch general courses after a payment activation when an older payment run has no pending wait', async () => {
     h.conv.followup_sent_at = null
     h.customer = {sender_type:'customer',content_text:'🔥 Activar promoción',created_at:'2026-10-17T19:29:00Z'}
@@ -215,5 +241,27 @@ describe('idle follow-up dispatch', () => {
     expect(await runIdleFollowups()).toBe(0)
     expect(h.run).not.toHaveBeenCalled()
     expect(h.text).not.toHaveBeenCalled()
+  })
+  it.each([false,true])('retains payment after a newer question about class days (failed menu: %s)',async failedMenu=>{
+    h.conv.followup_sent_at=null
+    h.customer={sender_type:'customer',content_text:'¿Qué días son las clases?',created_at:'2026-10-17T19:35:00Z'}
+    h.context.mockResolvedValue([{role:'user',content:'¿Qué días son las clases?'}])
+    if(!failedMenu) h.last={sender_type:'bot',content_type:'text',content_text:'Puedes estudiar desde tu celular.',created_at:'2026-10-17T19:36:00Z'}
+    else h.last.status='failed'
+    h.runs=[{automation_id:'payment',status:'success',created_at:'2026-10-17T19:29:02Z',steps_executed:[]}]
+    h.runAutomations=[{id:'payment',name:'YAPE O PLIN',trigger_config:{payment_followup:true}}]
+    expect(await runIdleFollowups()).toBe(0)
+    expect(h.run).not.toHaveBeenCalled()
+    expect(h.text).not.toHaveBeenCalled()
+  })
+  it('still routes fidelity support after a recent payment flow',async()=>{
+    h.conv.followup_sent_at=null
+    h.conv.ai_handoff_area='FIDELIZACION'
+    h.last={...h.customer}
+    h.runs=[{automation_id:'payment',status:'success',created_at:'2026-10-17T18:29:02Z',steps_executed:[]}]
+    h.runAutomations=[{id:'payment',name:'YAPE O PLIN',trigger_config:{payment_followup:true}}]
+    expect(await runIdleFollowups()).toBe(1)
+    expect(h.route).toHaveBeenCalledWith(expect.anything(),'account','chat','fidelizacion')
+    expect(h.run).not.toHaveBeenCalled()
   })
 })
