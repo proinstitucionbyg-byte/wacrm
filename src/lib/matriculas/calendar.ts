@@ -36,10 +36,13 @@ export async function loadAcademicCalendar(db: SupabaseClient, accountId: string
   if (error || !data || Date.now() - Date.parse(data.updated_at) > 30 * 60_000) return [];
   return parseAcademicModules(data.modules) ?? [];
 }
-export async function academicContext(db: SupabaseClient, accountId: string): Promise<string[]> {
+export async function academicContext(db: SupabaseClient, accountId: string, selectedCourse?: string | null): Promise<string[]> {
+  const selected = selectedCourse ? courseKey(selectedCourse) : null;
+  if (selectedCourse !== undefined && !selected)
+    return ['No hay un curso elegido de forma inequívoca. Confirma el curso antes de indicar una fecha, módulo u horario; no elijas el calendario de otro programa.'];
   const rows = await loadAcademicCalendar(db, accountId);
   if (!rows.length) return ['No hay un cuadro de inicios reciente disponible. No inventes fechas; indica que deben confirmarse.'];
-  const lines = [...new Set(rows.map((row) => row.course))].map((course) => {
+  const lines = [...new Set(rows.filter(row => !selected || row.course === selected).map((row) => row.course))].map((course) => {
     const offer = academicOffer(rows, course);
     return offer ? `${course}: MODULO ${offer.module}; SU CLASE ES EL ${offer.offered_date} A LAS ${offer.hour} HORA LIMA.` : `${course}: inicio por confirmar.`;
   });

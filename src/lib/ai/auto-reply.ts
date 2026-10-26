@@ -4,7 +4,7 @@ import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
-import { findCandidateAutomations, preferredCourseInformationAutomation, preferredEnrollmentAutomation } from './automation-match'
+import { conversationCourse, findCandidateAutomations, preferredCourseInformationAutomation, preferredEnrollmentAutomation } from './automation-match'
 import { routeConversationToArea, explicitlyRequestedArea } from './handoff-routing'
 import {
   buildWaitingReminder as waitingReminder,
@@ -118,6 +118,7 @@ export async function dispatchInboundToAiReply(
     }
 
     const latestText = latestUserMessage(messages)
+    const selectedCourse = conversationCourse(messages)
     const modalityReply = verifiedCourseModalityReply(latestText)
     if (modalityReply) {
       const { data: claimed, error } = await db.rpc('claim_ai_reply_slot', {
@@ -220,9 +221,9 @@ export async function dispatchInboundToAiReply(
       db,
       accountId,
       config,
-      latestUserMessage(messages),
+      selectedCourse ? `${selectedCourse}\n${latestText}` : latestText,
     )
-    knowledge.push(...await academicContext(db, accountId));
+    knowledge.push(...await academicContext(db, accountId, selectedCourse));
     if (continuingSequence && !requestedArea) knowledge.push('CONTINUIDAD: hay una automatizacion en curso con su siguiente bloque guardado. Responde la consulta puntual por texto y conserva esa secuencia; no reinicies el curso ni propongas ejecutar otra automatizacion. El motor continuara desde el punto guardado respetando sus esperas.')
     knowledge.push('REGISTRO: si la fecha de nacimiento indica que el estudiante es menor de 18 anos, solicita tambien "DNI DEL TUTOR O PADRES". Pide que envie esa foto con la descripcion "DOCUMENTO DEL TUTOR" para identificarla. Si falta la foto del estudiante, solicita NOMBRE COMPLETO, DNI o CARNE DE EXTRANJERIA y CORREO ELECTRONICO por escrito; se conservara ese texto como respaldo y se dejara FOTO DEL DOCUMENTO PENDIENTE. Nunca declares verificada una identidad sin foto. Todos los comprobantes requieren validacion humana del CEO.');
 
@@ -234,6 +235,7 @@ export async function dispatchInboundToAiReply(
       automations: offeredAutomations,
       handedOff,
       scheduleNote: scheduleContext(),
+      selectedCourse,
     })
 
     const { text: generatedText, handoff, handoffArea, usage, automationId } =

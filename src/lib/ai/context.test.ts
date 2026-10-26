@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildConversationContext } from './context'
+import { conversationCourse } from './automation-match'
 
 /** Minimal fake matching the query chain in buildConversationContext:
  *  from().select().eq().eq().order().limit() → { data, error }. */
@@ -17,6 +18,18 @@ function fakeDb(rows: unknown[]): SupabaseClient {
 }
 
 describe('buildConversationContext', () => {
+  it('retains an earlier real course choice after it falls outside the recent window, instead of trusting our own wrong course reply',async()=>{
+    const current=[{sender_type:'customer',content_type:'text',content_text:'Pero cuando empiezan las clases'},
+      {sender_type:'bot',content_type:'text',content_text:'Recursos Humanos tiene clases a las 20:00',status:'read'}];
+    const history=[{sender_type:'customer',content_type:'text',content_text:'Hola, me interesa Educación Inicial' }];
+    const calls:number[]=[];
+    const chain={select:()=>chain,eq:()=>chain,in:()=>chain,order:()=>chain,limit:async(n:number)=>{calls.push(n);return {data:n>20?history:current,error:null}}};
+    const result=await buildConversationContext({from:()=>chain} as unknown as SupabaseClient,'conv-1',20);
+    expect(result[0]).toEqual({role:'user',content:'Hola, me interesa Educación Inicial'});
+    expect(conversationCourse(result)).toBe('AUXILIAR DE EDUCACION INICIAL');
+    expect(result).toHaveLength(3);
+    expect(calls).toEqual([20,100]);
+  });
   it('keeps course button titles and excludes failed outgoing captions from the context',async()=>{
     const result=await buildConversationContext(fakeDb([
       {sender_type:'bot',content_type:'video',content_text:'Clase Admin',status:'failed'},

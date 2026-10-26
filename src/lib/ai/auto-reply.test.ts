@@ -137,6 +137,17 @@ beforeEach(() => {
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
+  it('grounds a start-date question in the course already chosen instead of asking for it again',async()=>{
+    h.buildConversationContext.mockResolvedValue([
+      {role:'user',content:'🌱 Cero en Inicial'},
+      {role:'assistant',content:'Si deseas te comparto el proceso de matrícula.'},
+      {role:'user',content:'Pero cuando empiezan las clases'},
+    ]);
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.retrieveKnowledge).toHaveBeenCalledWith(expect.anything(),'acct-1',expect.anything(),expect.stringContaining('AUXILIAR DE EDUCACION INICIAL'));
+    expect(h.generateReply.mock.calls[0][0].systemPrompt).toContain('SELECTED COURSE: AUXILIAR DE EDUCACION INICIAL');
+    expect(h.runAutomation).not.toHaveBeenCalled();
+  });
   it('corrects a presencial question without calling the model or interrupting the course', async () => {
     h.state.pendingSequence = [{automation_id:'education',context:{conversation_id:'conv-1'}}]
     h.buildConversationContext.mockResolvedValue([{role:'user',content:'¿Es precencial?'}])
@@ -399,7 +410,7 @@ describe('dispatchInboundToAiReply — handoff', () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).toHaveBeenCalledTimes(1)
-    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('derivé tu consulta a ventas') }))
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringMatching(/consulta (?:a|qued[oó] derivada a) ventas/) }))
     expect(h.state.rpcCalls).toHaveLength(0)
     expect(h.state.updatePayload?.ai_handed_off_at).toEqual(expect.any(String))
     expect(h.state.updatePayload).not.toHaveProperty('ai_autoreply_disabled')

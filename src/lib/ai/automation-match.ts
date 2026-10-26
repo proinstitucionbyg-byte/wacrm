@@ -88,9 +88,22 @@ export function preferredCourseInformationAutomation(options: AutomationOption[]
 }
 
 /** Explicit enrollment questions should use the saved payment steps. */
+function enrollmentRequested(messages: ChatMessage[]): boolean {
+  let index = messages.length - 1
+  while (index >= 0 && messages[index].role !== 'user') index--
+  const latest = normalize(messages[index]?.content ?? '')
+  if (/\b(inscribirme|matricularme|inscripcion|matricula|activar (?:la|mi|tu|esta) promo|medios? de pago|como (?:hago|puedo|seria).{0,30}(?:inscrib|matricul))\b/.test(latest)) return true
+  const answer = latest.replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+  if (!/^(?:si(?: por favor)?|claro|dale|adelante|por favor|(?:a ver|haber)(?: brindeme)?|brindeme)$/.test(answer)) return false
+  const previous = messages.slice(0, index).reverse().find(message => message.role === 'assistant')?.content ?? ''
+  const invitation = normalize(previous)
+  return /[¿?]/.test(previous)
+    && /\b(?:compart|brind|envi|expli)\w*\b[^?¿]{0,100}\b(?:proceso|pasos|informacion)\b[^?¿]{0,50}\b(?:matricula|inscripcion)\b/.test(invitation)
+    && !/\bo\b.{0,30}\b(?:malla|curso|clase|temario|informacion)\b/.test(invitation)
+}
+
 export function preferredEnrollmentAutomation(options: AutomationOption[], messages: ChatMessage[]): string | null {
-  const latest = normalize(messages.filter(m => m.role === 'user').at(-1)?.content ?? '')
-  if (!/\b(inscribirme|matricularme|inscripcion|matricula|activar (?:la|mi|tu|esta) promo|medios? de pago|como (?:hago|puedo|seria).{0,30}(?:inscrib|matricul))\b/.test(latest)) return null
+  if (!enrollmentRequested(messages)) return null
   const matches = options.filter(option => normalize(option.name ?? '').trim() === 'yape o plin')
   return matches.length === 1 ? matches[0].id : null
 }
@@ -131,7 +144,8 @@ export async function findCandidateAutomations(
       }
     })
     const queryTokens = Array.from(recency.keys())
-    if (queryTokens.length === 0) return []
+    const wantsEnrollment = enrollmentRequested(messages)
+    if (queryTokens.length === 0 && !wantsEnrollment) return []
 
     const { data, error } = await db
       .from('automations')
@@ -199,8 +213,7 @@ export async function findCandidateAutomations(
 
     // The payment block must remain available even when other course blocks
     // outrank it in the small candidate list.
-    const enrollmentRequested = /\b(inscribirme|matricularme|inscripcion|matricula|medios? de pago)\b/.test(latest)
-    if (enrollmentRequested) {
+    if (wantsEnrollment) {
       const paymentBlocks = docs.filter(d => normalize(d.label).trim() === 'yape o plin')
       if (paymentBlocks.length === 1 && !scored.some(x => x.d.id === paymentBlocks[0].id)) {
         scored.unshift({ d: paymentBlocks[0], score: Number.POSITIVE_INFINITY })

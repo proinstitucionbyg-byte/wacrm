@@ -3,6 +3,22 @@ import { academicContext, academicOffer, parseAcademicModules } from './calendar
 const courses=['NUTRICION Y DIETETICA','AUXILIAR DE FARMACIA','RECURSOS HUMANOS','ASISTENTE ADMINISTRATIVO','AUXILIAR DE EDUCACION INICIAL'];
 const input=()=>courses.flatMap(course=>[10,11].map(month=>({course,module:'MODULO',start_date:`2026-${month}-01`,class_dates:Array.from({length:8},(_,i)=>`2026-${month}-${String(i*2+1).padStart(2,'0')}`),hour:'20:00'})));
 describe('academic calendar snapshot',()=>{
+  it('keeps only the selected course timetable when the customer is already following Inicial',async()=>{
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-09T12:00:00-05:00'));
+      const modules=input().map(r=>({...r,hour:r.course===courses[4]?'18:00':'20:00',module:r.course===courses[4]?'DESARROLLO INFANTIL':'RECLUTAMIENTO'}));
+      const chain={select:()=>chain,eq:()=>chain,maybeSingle:async()=>({data:{modules,updated_at:new Date().toISOString()},error:null})};
+      const db={from:()=>chain} as unknown as Parameters<typeof academicContext>[0];
+      const text=(await academicContext(db,'account',courses[4])).join('\n');
+      expect(text).toContain(courses[4]);
+      expect(text).toContain('A LAS 18:00');
+      expect(text).not.toContain('RECURSOS HUMANOS');
+      expect(text).not.toContain('RECLUTAMIENTO');
+      expect(text).not.toContain('A LAS 20:00');
+      expect((await academicContext(db,'account',null)).join('\n')).not.toContain('SU CLASE ES EL');
+    } finally {vi.useRealTimers();}
+  });
   it('preserves the exact WhatsApp tab and the explanation without allowing arbitrary links',()=>{
     const rows=input().map(r=>({...r,group_url:'https://docs.google.com/spreadsheets/d/book/edit#gid=10081013',change_reason:'Solicitud del docente'}));
     expect(parseAcademicModules(rows)?.[0].group_url).toContain('#gid=10081013');

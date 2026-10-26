@@ -16,6 +16,16 @@ function db() {
 async function candidates(messages: ChatMessage[]) { return findCandidateAutomations(db(), 'account-test', messages) }
 
 describe('prioridad de informacion inicial del curso', () => {
+  it.each(['Sí','A ver, bríndeme','Haber brindeme','Sí por favor'])('continues the requested enrollment steps after a clear invitation: %s',async(content)=>{
+    const messages:ChatMessage[]=[{role:'user',content:'Cero en Inicial'},{role:'assistant',content:'¿Te gustaría que te comparta el proceso de matrícula?'},{role:'user',content}];
+    expect(preferredEnrollmentAutomation(await candidates(messages),messages)).toBe('payment');
+  });
+  it('does not treat a generic yes to a class sample or an already sent payment instruction as another enrollment request',async()=>{
+    for(const invitation of ['¿Quieres ver nuestra clase modelo?', 'Estos son los medios de pago. Envía el comprobante por aquí.']){
+      const messages:ChatMessage[]=[{role:'assistant',content:invitation},{role:'user',content:'Sí'}];
+      expect(preferredEnrollmentAutomation(await candidates(messages),messages)).toBeNull();
+    }
+  });
   it('keeps the latest selected course even after older questions about another one',async()=>{
     const messages:ChatMessage[]=[{role:'user',content:'Info de farmacia'},{role:'user',content:'Quisiera nutrición dietética'}]
     expect((await candidates(messages)).every(option=>option.id==='promo-nutricion')).toBe(true)

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ChatMessage } from './types'
 import { aiContextMessageLimit } from './defaults'
 import type { ImageAnalysis } from './analyze-image'
+import { salesCourseKey } from './automation-match'
 
 interface DbMessage {
   sender_type: 'customer' | 'agent' | 'bot'
@@ -60,7 +61,7 @@ export async function buildConversationContext(
   if (error) throw error
 
   const rows = ((data ?? []) as DbMessage[]).reverse()
-  return rows
+  const context = rows
     .filter(m=>m.sender_type==='customer'||m.status!=='failed')
     .map((m) => {
       const content = [
@@ -75,4 +76,21 @@ export async function buildConversationContext(
       }
     })
     .filter((m) => m.content.length > 0)
+
+  // Keep one actual customer choice when many follow-up blocks push it out
+  // of the small provider window. Do not replace it with our own past reply.
+  if (rows.some(m => m.sender_type === 'customer'
+    && ['text', 'interactive', 'audio'].includes(m.content_type)
+    && salesCourseKey(m.content_text ?? ''))) return context
+  const history = await db.from('messages')
+    .select('sender_type, content_type, content_text')
+    .eq('conversation_id', conversationId).eq('sender_type', 'customer')
+    .in('content_type', ['text', 'interactive', 'audio'])
+    .order('created_at', { ascending: false }).limit(100)
+  if (history.error) return context
+  const choice = (history.data as DbMessage[] | null)?.find(m => m.sender_type === 'customer'
+    && ['text', 'interactive', 'audio'].includes(m.content_type)
+    && salesCourseKey(m.content_text ?? ''))
+  if (choice?.content_text?.trim()) context.unshift({ role: 'user', content: choice.content_text.trim() })
+  return context
 }
