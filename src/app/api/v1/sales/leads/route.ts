@@ -65,7 +65,7 @@ function newestRoute(routes: RawConversation['conversation_sales_routes']) {
   return [...routes].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
 }
 
-type EnrollmentSnapshot = { status: string; data: { prices?: unknown } | null; student_folder_url: string | null };
+type EnrollmentSnapshot = { status: string; data: { prices?: unknown; course?: unknown; phone1?: unknown } | null; student_folder_url: string | null };
 
 // review_id is unique: PostgREST returns an object for this relation in production.
 // Accept arrays too, so exports remain compatible with older schema metadata.
@@ -175,15 +175,30 @@ export async function GET(request: Request) {
         .filter((message) => message.sender_type === 'customer')
         .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
       const courseInterest = courseInterestFromMessages(messages);
+      // A registered intake contains reviewed data even when the contact's
+      // identifier is blank or its newest conversation has no course text.
+      // Do not guess between conflicting registrations or use unfinished data.
+      const registered = sale?.enrollments.filter(draft => draft.status === 'registered') ?? [];
+      const uniqueRegisteredValue = (field: 'course' | 'phone1') => {
+        const values = [...new Set(registered.map(draft => draft.data?.[field])
+          .filter((value): value is string => typeof value === 'string' && !!value.trim())
+          .map(value => value.trim()))];
+        return values.length === 1 ? values[0] : '';
+      };
+      const registeredCourse = uniqueRegisteredValue('course');
+      const candidatePhone = uniqueRegisteredValue('phone1');
+      const registeredPhone = (contact.channel || 'whatsapp') === 'whatsapp'
+        && /^\+?\d{7,15}$/.test(candidatePhone) ? candidatePhone : '';
 
       return [{
         id: contact.id,
         name: contact.name?.trim() || 'Sin nombre',
-        phone_or_user_id: contact.phone_normalized || contact.external_id || contact.phone || '',
+        phone_or_user_id: contact.phone_normalized || contact.external_id || contact.phone || registeredPhone,
         channel: contact.channel || 'whatsapp',
-        course_interest: courseInterest.course,
+        course_interest: courseInterest.course || registeredCourse,
         course_details: courseInterest.details,
-        course_basis: 'coincidencia en los mensajes entrantes de la conversación más reciente; confirmar si está vacío',
+        course_basis: !courseInterest.course && registeredCourse ? 'curso de la matrícula registrada con pago validado'
+          : 'coincidencia en los mensajes entrantes de la conversación más reciente; confirmar si está vacío',
         created_at: contact.created_at,
         institute: 'INSTICRECE',
         crm_tags: tags,

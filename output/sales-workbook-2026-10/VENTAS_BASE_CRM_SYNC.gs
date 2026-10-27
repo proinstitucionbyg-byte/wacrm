@@ -481,7 +481,7 @@ function normalizeCourse_(value) {
   if (course.includes('nutricion') || course.includes('dietetic')) return 'Nutrición';
   if (course.includes('farmacia')) return 'Farmacia';
   if (course.includes('inicial')) return 'Inicial';
-  if (course.includes('recurso humano') || course.includes('gestion humana') || course.includes('talento humano')) return 'Recursos Humanos';
+  if (/recursos?\s+humanos?/.test(course) || course.includes('gestion humana') || course.includes('talento humano')) return 'Recursos Humanos';
   if (course.includes('administr')) return 'Administrativo';
   return 'Otro';
 }

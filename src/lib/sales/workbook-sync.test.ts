@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 const source = readFileSync('output/sales-workbook-2026-10/VENTAS_BASE_CRM_SYNC.gs','utf8');
 const context = () => { const c = createContext({console,Map,Date}); runInContext(source,c); return c; };
 describe('commercial workbook synchronization', () => {
+  it.each(['Recursos humanos','RECURSOS HUMANOS','recurso humano','Recursos   Humanos'])('classifies %s as Recursos Humanos', value => {
+    expect(context().normalizeCourse_(value)).toBe('Recursos Humanos');
+  });
   it('refuses an older API snapshot rather than erasing durable sales during deployment', () => {
     const c=context();let data=[{id:'lead'}];
     c.UrlFetchApp={fetch:()=>({getResponseCode:()=>200,getContentText:()=>JSON.stringify({data,meta:{}})})};

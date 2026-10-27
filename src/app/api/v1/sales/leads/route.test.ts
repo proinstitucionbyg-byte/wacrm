@@ -22,6 +22,44 @@ beforeEach(() => {
   h.key.mockResolvedValue({ accountId: 'account-a', supabase: { from } });
 });
 describe('commercial base export', () => {
+  it('uses the registered enrollment when the contact has no phone and the latest chat has no course evidence', async () => {
+    h.rows.contacts=[contact('registered',['AREA FIDELIZACION'],'')];
+    const paid=payment('registered');
+    Object.assign(paid.enrollments.data,{course:'RECURSOS HUMANOS',phone1:'999000111'});
+    h.rows.payment_reviews=[paid];
+    const result=await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({phone_or_user_id:'999000111',course_interest:'RECURSOS HUMANOS'});
+    expect(result.data[0].course_basis).toContain('matrícula registrada');
+  });
+  it('does not use an unfinished enrollment to invent missing contact data', async () => {
+    h.rows.contacts=[contact('unfinished',[],'')];
+    const paid=payment('unfinished','enrollment','collecting');
+    Object.assign(paid.enrollments.data,{course:'FARMACIA',phone1:'999000111'});
+    h.rows.payment_reviews=[paid];
+    const result=await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({phone_or_user_id:'',course_interest:''});
+  });
+  it('keeps the current contact identifier and explicit course interests over an older registration', async () => {
+    const c=contact('current');
+    h.rows.contacts=[{...c,conversations:[{id:'chat',messages:[{id:'message',sender_type:'customer',content_text:'Quiero Farmacia',interactive_reply_id:null,created_at:'2026-10-27T10:00:00Z'}]}]}];
+    const paid=payment('current');
+    Object.assign(paid.enrollments.data,{course:'RECURSOS HUMANOS',phone1:'999000111'});
+    h.rows.payment_reviews=[paid];
+    const result=await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({phone_or_user_id:'51911111111',course_interest:'Auxiliar de farmacia'});
+  });
+  it('leaves conflicting registered values empty and never uses an SMS phone as an Instagram user ID', async () => {
+    h.rows.contacts=[contact('conflict',[],''),{...contact('instagram',[],''),channel:'instagram'}];
+    const paid=payment('conflict'), ig=payment('instagram');
+    Object.assign(ig.enrollments.data,{course:'FARMACIA',phone1:'999000111'});
+    h.rows.payment_reviews=[{...paid,enrollments:[
+      {...paid.enrollments,data:{course:'FARMACIA',phone1:'999000111'}},
+      {...paid.enrollments,data:{course:'RECURSOS HUMANOS',phone1:'999000222'}},
+    ]},ig];
+    const result=await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({phone_or_user_id:'',course_interest:''});
+    expect(result.data[1].phone_or_user_id).toBe('');
+  });
   it('keeps a historical sale and its owner after all sales labels and the current assignment disappear', async () => {
     h.rows.contacts=[contact('history',['AREA FIDELIZACION'])];
     h.rows.contact_sales_states=[{contact_id:'history',commercial_status:'VENTA',status_changed_at:'2026-10-23T13:00:00Z',sale_at:'2026-10-23T13:00:00Z',sales_owner_id:'staff-a',sales_owner_name:'ANA',explicitly_cleared:false}];
