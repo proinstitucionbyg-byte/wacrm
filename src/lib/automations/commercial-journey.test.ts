@@ -241,6 +241,12 @@ describe('complete course journey: real catalog, local dispatch → waits → de
     const c=setup();h.tables.payment_reviews.push({id:'paid',account_id:A,conversation_id:CHAT,contact_id:C,status:'validated'})
     await start(c.id);await finish();expect(h.sends).toHaveLength(0)
   })
+  it('an exceptional late start uses the existing window and still reaches the closing',async()=>{
+    const c=setup();vi.setSystemTime(time('13:00'))
+    await start(c.id);await finish()
+    expect(h.sends.at(-1)!.at).toBe('2026-10-28T05:00:00.000Z')
+    expect(h.tables.automation_logs.every(row=>row.status==='success')).toBe(true)
+  })
   it('disabling the actual automation holds the next position without sending',async()=>{
     const c=setup();await start(c.id);const sent=h.sends.length
     h.tables.automations.find(r=>r.id===c.id)!.is_active=false

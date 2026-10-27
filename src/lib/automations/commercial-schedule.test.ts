@@ -22,6 +22,7 @@ describe('Lima commercial scheduling',()=>{
   })
   it('anchors the final closing near 23 hours',()=>expect(plan('17:00',{position:53}).runAt).toBe(new Date(date(28,'00:00')).toISOString()))
   it('recalculates after a genuine new inbound',()=>expect(plan('17:00',{position:53,lastCustomerAt:date(27,'14:00')}).runAt).toBe(new Date(date(28,'13:00')).toISOString()))
+  it('a late exceptional restart closes against the original inbound window',()=>expect(plan('17:00',{position:53,startedAt:date(27,'17:00')}).runAt).toBe(new Date(date(28,'00:00')).toISOString()))
   it('prioritizes essential blocks with less than two hours',()=>expect(plan('23:00').prioritizeEssential).toBe(true))
   it('never schedules a free-form message after expiry',()=>{
     expect(plan('23:50',{now:Date.parse(date(28,'00:50')),position:53}).runAt).toBeNull()

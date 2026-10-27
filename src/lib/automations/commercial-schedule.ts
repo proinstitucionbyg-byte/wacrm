@@ -18,7 +18,8 @@ export function planCommercialWait(args:{now:number; lastCustomerAt:string; star
   if (!Number.isFinite(last) || !Number.isFinite(started) || last > args.now + MINUTE)
     return {runAt:null,deadline:null,reason:'Ventana de atención no verificable',prioritizeEssential:false}
   const deadline = last + 24*HOUR - MINUTE
-  const target = Math.max(started,last) + 23*HOUR
+  // A late or explicitly restarted journey never creates a new service window.
+  const target = last + 23*HOUR
   const prioritizeEssential = deadline-args.now < Math.max(1,args.remainingWaits)*20*MINUTE
   if (args.now >= deadline) return {runAt:null,deadline:new Date(deadline).toISOString(),reason:'Ventana de 24 horas vencida',prioritizeEssential}
   let due:number, reason:string
