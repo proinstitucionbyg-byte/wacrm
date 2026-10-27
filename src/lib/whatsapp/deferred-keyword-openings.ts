@@ -147,6 +147,7 @@ export async function resumeDeferredKeywordOpening(
     message_text: row.message_text,
     conversation_id: row.conversation_id,
     inbound_at: row.received_at,
+    inbound_message_id: row.meta_message_id,
     ...(keywordOpeningFallback ? { billing_unknown_keyword_fallback: true } : {}),
   }
 

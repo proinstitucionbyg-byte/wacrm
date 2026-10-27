@@ -1156,6 +1156,7 @@ for (const triggerType of automationTriggers) {
       interactive_reply_id: interactiveReplyId ?? undefined,
       previous_inbound_at: previousInboundAt,
       inbound_at: inboundAt,
+      inbound_message_id: message.id,
     },
 })
 

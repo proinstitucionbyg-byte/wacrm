@@ -155,6 +155,11 @@ export async function assertAutomaticWhatsAppSendIsFree(
   },
 ): Promise<WhatsAppAutomaticSendPermit> {
   const preflight = await readConversationBillingPreflight(db, args.accountId, args.conversationId)
+  // Economic coverage is not permission to send free-form content. Even an
+  // eligible 72-hour ad window cannot bypass the owner's strict 24-hour rule.
+  if (args.messageCategory !== 'template' && !preflight.service_window_open) {
+    throw new Error('Ventana de atención de 24 horas vencida: requiere plantilla aprobada')
+  }
   if (preflight.free_entry_window_open) {
     // Confirmed click-to-WhatsApp free-entry coverage takes precedence over
     // the monthly service-message allowance; do not debit that allowance.

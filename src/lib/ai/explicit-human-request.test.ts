@@ -8,7 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 describe('solicitud humana sin tokens de IA', () => {
   it.each(['Quiero hablar con una asesora', 'Necesito una persona real', 'Pásame con alguien',
-    'Parece robot', 'Eres un bot', '¿Puedo comunicarme con un humano?', 'Asesora real por favor'])('reconoce %s', text => {
+    'Parece robot', 'Eres un bot', '¿Puedo comunicarme con un humano?', 'Asesora real por favor',
+    'Asesora', 'Asesor por favor', 'Una asesora.'])('reconoce %s', text => {
     expect(explicitlyWantsHuman(text)).toBe(true)
   })
   it.each(['Quiero información de Recursos Humanos', 'Soy estudiante de recursos humanos',

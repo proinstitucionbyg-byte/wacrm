@@ -32,7 +32,9 @@ import { greetingAutomationId, INITIAL_GREETING_ID, isGreetingAutomation, matche
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { captureCourseCheckpoint, currentCourseCheckpoint, isCourseContinue, isCourseDetour, isSavedCourseName, restoreCourseCheckpoint, type CourseCheckpoint } from './course-detour'
-import { applyCommercialCadence, readCommercialCadence, type CommercialCadence } from './commercial-cadence'
+import { applyCommercialCadence, readCommercialCadence, COMPLETE_CADENCE_VERSION, ESSENTIAL_POSITIONS, INFORMATION_GROUP_POSITIONS, splitCommercialCaption, type CommercialCadence } from './commercial-cadence'
+import { COMMERCIAL_SCHEDULE_VERSION, COMMERCIAL_TIMEZONE, planCommercialWait } from './commercial-schedule'
+import {resumeCommercialWindow} from './commercial-window-resume'
 
 // ------------------------------------------------------------
 // Public API
@@ -42,6 +44,11 @@ export interface AutomationContext {
   /** Pin the approved course cadence only on a new automatic, unbounded run. */
   commercial_cadences?: Record<string, CommercialCadence>
   commercial_started_at?: Record<string, string>
+  commercial_schedule?: {version:string; timezone:string; deadline:string|null; last_customer_at:string}
+  commercial_deferred_reason?: string
+  commercial_remaining_step_ids?: string[]
+  commercial_window_hold?: boolean
+  commercial_caption_tail?: {automation_id:string;step_id:string;position:number;text:string}
   /** Server-owned enrollment sequence. Its two-hour wait is independent of ordinary chat activity. */
   enrollment_sequence_id?: string
   /** Explicit adviser command; set only by the authenticated server endpoint. */
@@ -52,6 +59,8 @@ export interface AutomationContext {
   previous_inbound_at?: string
   /** Provider timestamp of this inbound, used only for greeting continuity. */
   inbound_at?: string
+  /** Provider event identity, supplied only by the webhook/server queue. */
+  inbound_message_id?: string
   /** Set only by the one-minute server queue for a configured opening keyword;
    * sends remain billing_status=unknown until Meta confirms pricing. */
   billing_unknown_keyword_fallback?: boolean
@@ -149,6 +158,10 @@ export async function runAutomationsForTrigger(
       }
     }
 
+    if(input.triggerType==='new_message_received' && input.contactId && input.context?.conversation_id && input.context.inbound_at) {
+      await resumeCommercialWindow(db,{account:input.accountId,contact:input.contactId,
+        chat:input.context.conversation_id,inboundAt:input.context.inbound_at})
+    }
     const { data: automations, error } = await db
       .from("automations")
       .select("*")
@@ -230,12 +243,15 @@ export async function runAutomationsForTrigger(
         await continueSavedCourse(automation, input.contactId, input.context.conversation_id)
         continue
       }
+      // Claim the inbound in automation_logs before changing an existing cursor.
+      // A duplicate webhook must not cancel the course even if it sends nothing.
+      const prepare = async ():Promise<DispatchInput> => {
       const detour = isCourseDetour(automation) && input.contactId && input.context?.conversation_id
         ? await captureCourseCheckpoint(db, input.accountId, input.contactId, input.context.conversation_id) : null
-      if (detour) input.context = { ...input.context, course_checkpoint: detour.checkpoint, course_detour_capture: detour.busy }
+      const context = detour ? { ...input.context, course_checkpoint: detour.checkpoint, course_detour_capture: detour.busy } : input.context
       const paymentResumeId = isPaymentFlow(automation) && input.contactId
         ? await findPaymentResumeId(db, input.accountId, input.contactId, automation.id, input.context?.conversation_id)
-        : undefined;
+        : undefined
       // A greeting is only a menu. Its unanswered buttons must not cancel an
       // 18-hour sales/fidelity wait already scheduled for this contact.
       if (input.contactId && !cancelledOld && !isGreetingAutomation(automation.id) && !detour?.busy) {
@@ -248,14 +264,15 @@ export async function runAutomationsForTrigger(
           .eq("status", "pending")
           .is('context->>enrollment_sequence_id', null);
         if (detour) cancelQuery.is('context->>manual_agent_id', null)
-        await cancelQuery
+        const {error:cancelError}=await cancelQuery
+        if(cancelError)throw cancelError
+      }
+      return {...input,context:isPaymentFlow(automation)?{...context,
+        ...(paymentResumeId?{payment_resume_pending_id:paymentResumeId}:{}),
+        payment_activation_at:input.context?.inbound_at??new Date().toISOString()}:context}
       }
       try {
-        await executeAutomation(automation, isPaymentFlow(automation)
-          ? { ...input, context: { ...input.context,
-              ...(paymentResumeId ? { payment_resume_pending_id: paymentResumeId } : {}),
-              payment_activation_at: input.context?.inbound_at ?? new Date().toISOString() } }
-          : input);
+        await executeAutomation(automation,input,undefined,undefined,prepare)
       } catch (err) {
         console.error(
           "[automations] execute failed:",
@@ -451,6 +468,11 @@ export async function resumePendingExecution(pending: {
     await markPending(pending.id, 'failed')
     return
   }
+  if(automation.is_active===false) {
+    await db.from('automation_pending_executions').update({status:'paused'})
+      .eq('id',pending.id).eq('status','running')
+    return
+  }
   // A manually disabled conversation pauses every automatic sequence,
   // including enrollment welcomes and payment follow-ups. Keep its exact
   // next step so an explicit reactivation can resume it later.
@@ -519,11 +541,25 @@ export async function resumePendingExecution(pending: {
       await markPending(pending.id, 'failed')
       return
     }
-    if (newerCustomer) {
+    if (newerCustomer && !pending.context.payment_resume_pending_id) {
       await markPending(pending.id, 'cancelled')
       return
     }
-    if (pending.context.payment_resume_previous === true) {
+    // A reply ends the redundant payment reminder, not the saved course.
+    // Restore its exact cursor through the same guarded path as the final wait.
+    if (newerCustomer || pending.context.payment_resume_previous === true) {
+      const { data: payment, error: paymentError } = await db.from('payment_reviews').select('id')
+        .eq('account_id', pending.account_id).eq('conversation_id', pending.context.conversation_id)
+        .in('status', ['pending', 'validated']).limit(1).maybeSingle()
+      if (paymentError) {
+        await markPending(pending.id, 'failed')
+        return
+      }
+      if (payment) {
+        await finalizeLog(pending.log_id, 'success', 'La atención continúa en revisión de pago')
+        await markPending(pending.id, 'done')
+        return
+      }
       const previousId = pending.context.payment_resume_pending_id
       if (!previousId) {
         let nextStepQuery = db.from('automation_steps').select('id')
@@ -563,10 +599,10 @@ export async function resumePendingExecution(pending: {
         .select('id,automation_id,context').eq('id', previousId)
         .eq('account_id', pending.account_id).eq('contact_id', pending.contact_id)
         .eq('status', 'cancelled').maybeSingle()
-      const { data: previousFlow } = previous ? await db.from('automations').select('id,name')
+      const { data: previousFlow } = previous ? await db.from('automations').select('id,name,is_active')
         .eq('id', previous.automation_id).eq('account_id', pending.account_id).maybeSingle()
         : { data: null }
-      if (!previous || !previousFlow || !isSavedCourseName(previousFlow.name)
+      if (!previous || !previousFlow || previousFlow.is_active !== true || !isSavedCourseName(previousFlow.name)
           || (previous.context as AutomationContext | null)?.conversation_id !== pending.context.conversation_id) {
         await finalizeLog(pending.log_id, 'failed', 'El bloque anterior no coincide con este chat')
         await markPending(pending.id, 'failed')
@@ -661,7 +697,7 @@ export async function resumePendingExecution(pending: {
     try {
       await restoreCourseCheckpoint(db, { account: pending.account_id, contact: pending.contact_id,
         chat: pending.context.conversation_id, checkpoint: pending.context.course_checkpoint,
-        automatic: true, ignorePendingId: pending.id })
+        automatic: false, ignorePendingId: pending.id })
       await finalizeLog(pending.log_id, 'success', null)
       await markPending(pending.id, 'done')
     } catch {
@@ -785,6 +821,7 @@ async function executeAutomation(
   input: DispatchInput,
   triggerEventOverride?: string,
   range?: { startPosition: number; endPosition: number; terminalReentry?: boolean },
+  prepareInput?:()=>Promise<DispatchInput>,
 ) {
   const db = supabaseAdmin()
   const priorChain = input.context?.automation_chain_ids ?? []
@@ -792,19 +829,16 @@ async function executeAutomation(
     console.warn('[automations] circular automation link blocked:', automation.id)
     return null
   }
-  const executionContext: AutomationContext = {
-    ...(input.context ?? {}),
-    automation_chain_ids: [...priorChain, automation.id],
-    automation_step_end_by_id: range
-      ? { ...(input.context?.automation_step_end_by_id ?? {}), [automation.id]: range.endPosition }
-      : input.context?.automation_step_end_by_id,
-  }
   const cadence = !range && !input.context?.manual_agent_id && !input.context?.enrollment_sequence_id
     ? readCommercialCadence((automation.trigger_config as Record<string, unknown>)?.commercial_cadence)
     : null
-  if (cadence) {
-    executionContext.commercial_cadences = { ...executionContext.commercial_cadences, [automation.id]: cadence }
-    executionContext.commercial_started_at = { ...executionContext.commercial_started_at, [automation.id]: new Date().toISOString() }
+  if(cadence?.version===COMPLETE_CADENCE_VERSION && input.contactId) {
+    const {data:prior,error:priorError}=await db.from('automation_logs').select('id')
+      .eq('account_id',automation.account_id).eq('contact_id',input.contactId).eq('automation_id',automation.id)
+      .like('trigger_event',`%:commercial_${COMPLETE_CADENCE_VERSION}`).in('status',['partial','success'])
+      .limit(1).maybeSingle()
+    if(priorError)throw priorError
+    if(prior)return prior.id as string
   }
 
   const { data: log, error: logErr } = await db
@@ -819,6 +853,7 @@ async function executeAutomation(
       user_id: automation.user_id,
       contact_id: input.contactId ?? null,
       trigger_event: cadence ? `${triggerEventOverride ?? input.triggerType}:commercial_${cadence.version}` : triggerEventOverride ?? input.triggerType,
+      ...(input.context?.inbound_message_id ? {inbound_message_id:input.context.inbound_message_id} : {}),
       steps_executed: [],
       status: 'success',
     })
@@ -826,8 +861,28 @@ async function executeAutomation(
     .single()
 
   if (logErr || !log) {
+    if(logErr?.code==='23505' && input.context?.inbound_message_id) {
+      const {data:existing,error:existingError}=await db.from('automation_logs').select('id')
+        .eq('account_id',automation.account_id).eq('automation_id',automation.id)
+        .eq('inbound_message_id',input.context.inbound_message_id).maybeSingle()
+      if(!existingError && existing)return existing.id as string
+    }
     console.error('[automations] cannot create log:', logErr)
     return
+  }
+
+  if(prepareInput) {
+    try { input=await prepareInput() }
+    catch(error) { await finalizeLog(log.id,'failed',error instanceof Error?error.message:String(error));return log.id as string }
+  }
+  const executionContext: AutomationContext = {
+    ...(input.context ?? {}),automation_chain_ids:[...priorChain,automation.id],
+    automation_step_end_by_id:range?{...input.context?.automation_step_end_by_id,[automation.id]:range.endPosition}
+      :input.context?.automation_step_end_by_id,
+  }
+  if(cadence) {
+    executionContext.commercial_cadences={...executionContext.commercial_cadences,[automation.id]:cadence}
+    executionContext.commercial_started_at={...executionContext.commercial_started_at,[automation.id]:new Date().toISOString()}
   }
 
   await executeStepsFrom({
@@ -869,6 +924,15 @@ interface ExecuteArgs {
   pendingExecutionId?: string
 }
 
+async function completeCourseDetour(args:ExecuteArgs):Promise<string|null> {
+  if(!isCourseDetour(args.automation) || !args.contactId || !args.context.conversation_id || !args.context.course_checkpoint) return null
+  const restored=await restoreCourseCheckpoint(supabaseAdmin(),{
+    account:args.automation.account_id,contact:args.contactId,chat:args.context.conversation_id,
+    checkpoint:args.context.course_checkpoint,automatic:false,ignorePendingId:args.pendingExecutionId,
+  })
+  return restored==='missing'?'No se encontró la posición guardada del curso; requiere revisión':null
+}
+
 async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   const db = supabaseAdmin()
   if (isCourseDetour(args.automation) && args.context.course_detour_capture) {
@@ -905,7 +969,8 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   }
   if (!steps || steps.length === 0) {
     if (args.parentStepId === null && args.logId) {
-      await finalizeLog(args.logId, 'success', null)
+      const detourError=await completeCourseDetour(args)
+      await finalizeLog(args.logId, detourError?'failed':'success', detourError)
     }
     return
   }
@@ -914,6 +979,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     && !args.context.manual_agent_id && !args.context.enrollment_sequence_id
     ? readCommercialCadence(args.context.commercial_cadences?.[args.automation.id]) : null
   let executionSteps = cadence ? applyCommercialCadence(steps as AutomationStep[], cadence) : steps as AutomationStep[]
+  const completeCourse = cadence?.version === COMPLETE_CADENCE_VERSION
   const unpaidPaymentFlow = isPaymentFlow(args.automation)
     && (args.automation.trigger_config as Record<string, unknown>)?.payment_only_unpaid === true
   if ((cadence || unpaidPaymentFlow) && args.context.conversation_id) {
@@ -934,30 +1000,90 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
       .map(step => (step.step_config as Record<string, unknown>).media_url ?? (step.step_config as Record<string, unknown>).url)
       .filter((url): url is string => typeof url === 'string') : []
     if (mediaUrls.length) {
-      const { data: priorMedia, error: mediaError } = await db.from('messages').select('media_url')
+      const { data: priorMedia, error: mediaError } = await db.from('messages').select('media_url,content_text')
         .eq('conversation_id', args.context.conversation_id).neq('sender_type', 'customer')
         .gte('created_at', startedAt!).in('media_url', mediaUrls).neq('status', 'failed')
       if (mediaError) throw mediaError
-      const seen = new Set((priorMedia ?? []).map(row => row.media_url))
+      const complete=cadence?.version===COMPLETE_CADENCE_VERSION
+      const seen = new Set((priorMedia ?? []).map(row => complete
+        ? `${row.media_url}\u0000${row.content_text??''}` : row.media_url))
       executionSteps = executionSteps.filter(step => step.step_type !== 'send_media'
-        || !seen.has((step.step_config as Record<string, unknown>).media_url ?? (step.step_config as Record<string, unknown>).url))
+        || !seen.has(complete
+          ? `${(step.step_config as Record<string,unknown>).media_url??(step.step_config as Record<string,unknown>).url}\u0000${(step.step_config as Record<string,unknown>).caption??''}`
+          : (step.step_config as Record<string, unknown>).media_url ?? (step.step_config as Record<string, unknown>).url))
     }
   }
   const results: AutomationLogStepResult[] = []
   let status: 'success' | 'partial' | 'failed' = 'success'
   let errorMessage: string | null = null
 
+  const holdRemaining = async (position:number, reason:string) => {
+    const {error} = await db.from('automation_pending_executions').insert({
+      automation_id:args.automation.id,account_id:args.automation.account_id,user_id:args.automation.user_id,
+      contact_id:args.contactId,log_id:args.logId,parent_step_id:args.parentStepId,branch:args.branch,
+      next_step_position:position,status:'paused',run_at:new Date().toISOString(),
+      context:{...args.context,commercial_window_hold:true,commercial_deferred_reason:reason,
+        commercial_remaining_step_ids:executionSteps.filter(row=>row.position>=position).map(row=>row.id)},
+    })
+    if(error) throw error
+    await appendResults(args.logId,results,'partial',reason)
+  }
+
+  // Re-evaluate the real inbound timestamp on every cron resume. Restricting
+  // future sends does not block reception or reset the student's course.
+  if (completeCourse && args.context.conversation_id) {
+    const {data:window,error:windowError}=await db.from('conversations').select('last_customer_message_at')
+      .eq('id',args.context.conversation_id).eq('account_id',args.automation.account_id).maybeSingle()
+    if(windowError) throw windowError
+    const last=window?.last_customer_message_at
+    const preview=planCommercialWait({now:Date.now(),lastCustomerAt:last??'',
+      startedAt:args.context.commercial_started_at?.[args.automation.id]??'',position:4,
+      remainingWaits:executionSteps.filter(row=>row.step_type==='wait').length})
+    if(!preview.deadline || Date.now()>=Date.parse(preview.deadline)) {
+      await holdRemaining(args.startPosition,preview.reason)
+      return
+    }
+    if(preview.prioritizeEssential && args.startPosition>3) {
+      const importantWaits = new Set([4,31,48,51,53])
+      const omitted=executionSteps.filter(row=>!ESSENTIAL_POSITIONS.has(row.position)&&!importantWaits.has(row.position))
+      results.push(...omitted.map(row=>({step_id:row.id,step_type:row.step_type,status:'skipped' as const,
+        detail:'Plazo insuficiente: priorizar malla, certificación, beneficios, pago y cierre'})))
+      executionSteps=executionSteps.filter(row=>!omitted.includes(row))
+    }
+  }
+
+  const captionTailStep=():AutomationStep|null=>{
+    const tail=args.context.commercial_caption_tail
+    return tail?.automation_id===args.automation.id?{
+      id:`${tail.step_id}:caption`,automation_id:args.automation.id,parent_step_id:null,position:tail.position,
+      step_type:'send_message',step_config:{text:tail.text},created_at:new Date().toISOString(),
+    }:null
+  }
+  const pendingTail=captionTailStep()
+  if(pendingTail)executionSteps.unshift(pendingTail)
   for (const [index, step] of executionSteps.entries()) {
     // An adviser can reply while a block is waiting for delivery or while
     // this loop is advancing. Keep the exact next step instead of sending
     // over the adviser or losing the remaining sequence.
     if (args.context.conversation_id) {
       const { data: conversation, error: pauseError } = await db.from('conversations')
-        .select('last_human_message_at,automation_enabled')
+        .select('last_human_message_at,automation_enabled,last_customer_message_at')
         .eq('id', args.context.conversation_id)
         .eq('account_id', args.automation.account_id)
         .maybeSingle()
       if (pauseError) throw pauseError
+      if(completeCourse) {
+        const last=conversation?.last_customer_message_at??''
+        const window=planCommercialWait({now:Date.now(),lastCustomerAt:last,
+          startedAt:args.context.commercial_started_at?.[args.automation.id]??'',position:step.position,
+          remainingWaits:executionSteps.slice(index).filter(row=>row.step_type==='wait').length})
+        args.context.commercial_schedule={version:COMMERCIAL_SCHEDULE_VERSION,timezone:COMMERCIAL_TIMEZONE,
+          deadline:window.deadline,last_customer_at:last}
+        if(!window.deadline || Date.now()>=Date.parse(window.deadline)) {
+          await holdRemaining(step.position,window.reason)
+          return
+        }
+      }
       if (conversation?.automation_enabled === false) {
         const payload = {
           automation_id: args.automation.id,
@@ -1004,7 +1130,15 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     if (step.step_type === 'wait') {
       const cfg = step.step_config as WaitStepConfig & { resume_previous_course?: boolean }
       const ms = waitMs(cfg)
-      const dueAt = new Date(Date.now() + ms).toISOString()
+      const planned = completeCourse ? planCommercialWait({now:Date.now(),
+        lastCustomerAt:args.context.commercial_schedule?.last_customer_at??'',
+        startedAt:args.context.commercial_started_at?.[args.automation.id]??'',position:step.position,
+        remainingWaits:executionSteps.slice(index+1).filter(row=>row.step_type==='wait').length}) : null
+      if(planned && !planned.runAt) {
+        await holdRemaining(step.position,planned.reason)
+        return
+      }
+      const dueAt = planned?.runAt ?? new Date(Date.now() + ms).toISOString()
       const {error: waitError} = await db.from('automation_pending_executions').insert({
         automation_id: args.automation.id,
         // Tenancy: account_id required NOT NULL post-017.
@@ -1034,7 +1168,8 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         step_id: step.id,
         step_type: step.step_type,
         status: 'success',
-        detail: `waiting ${cfg.amount} ${cfg.unit}`,
+        detail: planned ? `${COMMERCIAL_SCHEDULE_VERSION}; ${COMMERCIAL_TIMEZONE}; ${planned.reason}; run_at=${dueAt}; deadline=${planned.deadline}`
+          : `waiting ${cfg.amount} ${cfg.unit}`,
       })
       status = 'partial'
       await appendResults(args.logId, results, status, errorMessage)
@@ -1063,7 +1198,40 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         continue
       }
 
-      const outcome = await runStep(step, args)
+      let sendStep = step
+      if(completeCourse && step.position===50 && step.step_type==='send_buttons' && args.context.conversation_id) {
+        const allPolicy = cadence!.steps
+        const {data:allRoots,error:rootError}=await db.from('automation_steps').select('*')
+          .eq('automation_id',args.automation.id).is('parent_step_id',null)
+        if(rootError) throw rootError
+        const roots=applyCommercialCadence(allRoots as AutomationStep[],cadence!)
+        const urls=roots.filter(row=>row.step_type==='send_media').map(row=>String((row.step_config as Record<string,unknown>).url??''))
+        const {data:delivered,error:deliveredError}=await db.from('messages').select('media_url')
+          .eq('conversation_id',args.context.conversation_id).neq('sender_type','customer')
+          .gte('created_at',args.context.commercial_started_at![args.automation.id])
+          .in('status',['delivered','read']).in('media_url',urls)
+        if(deliveredError) throw deliveredError
+        const deliveredUrls=new Set((delivered??[]).map(row=>row.media_url))
+        const countedUrls=new Set<string>()
+        const groups=INFORMATION_GROUP_POSITIONS.filter(group=>group.some(position=>{
+          const row=roots.find(root=>root.position===position && allPolicy.some(p=>p.id===root.id))
+          const url=String((row?.step_config as Record<string,unknown>|undefined)?.url??'')
+          if(!url || !deliveredUrls.has(url) || countedUrls.has(url))return false
+          countedUrls.add(url);return true
+        })).length
+        if(groups>=10) {
+          const cfg=step.step_config as SendButtonsStepConfig
+          if(cfg.kind==='buttons' && cfg.buttons.length<3 && !cfg.buttons.some(button=>button.id==='commercial_human'))
+            sendStep={...step,step_config:{...cfg,buttons:[...cfg.buttons,{id:'commercial_human',title:'💬 Atención personal'}]}}
+        }
+      }
+      const outcome = await runStep(sendStep, args)
+      if(step.id===`${args.context.commercial_caption_tail?.step_id}:caption`) {
+        args.context.commercial_caption_tail=undefined
+      } else if(args.context.commercial_caption_tail?.step_id===step.id) {
+        const tail=captionTailStep()
+        if(tail)executionSteps.splice(index+1,0,tail)
+      }
       const detail = typeof outcome === 'string' ? outcome : outcome.detail
       results.push({
         step_id: step.id,
@@ -1132,6 +1300,13 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   }
 
   if (args.parentStepId === null) {
+    if (status === 'success') {
+      const detourError=await completeCourseDetour(args)
+      if (detourError) {
+        status = 'failed'
+        errorMessage = detourError
+      }
+    }
     await appendResults(args.logId, results, status, errorMessage)
   } else {
     // Nested branch — just append results; parent scope decides final status.
@@ -1250,6 +1425,8 @@ case 'send_media': {
     config: step.step_config as Record<string, unknown>, url: mediaUrl,
     writtenText: args.writtenOfferText,
   }) : undefined
+  const split=args.context.commercial_cadences?.[args.automation.id]?.version===COMPLETE_CADENCE_VERSION
+    && mediaType!=='audio'?splitCommercialCaption(rawCfg.caption??''):null
   const { whatsapp_message_id } = await engineSendMedia({
     accountId: args.automation.account_id,
     userId: args.automation.user_id,
@@ -1257,12 +1434,14 @@ case 'send_media': {
     contactId: args.contactId,
     mediaType,
     mediaUrl,
-    caption: rawCfg.caption,
+    caption: split?.caption??rawCfg.caption,
     filename: rawCfg.filename,
     transcript,
     keywordOpeningFallback: args.context.billing_unknown_keyword_fallback === true,
   })
   rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId, 90_000)
+  if(split?.continuation)args.context.commercial_caption_tail={automation_id:args.automation.id,
+    step_id:step.id,position:step.position+1,text:split.continuation}
 
   if (mediaType === 'image' && rawCfg.caption) {
     args.writtenOfferText = [args.writtenOfferText, rawCfg.caption].filter(Boolean).join('\n')
@@ -1429,6 +1608,30 @@ case 'send_media': {
         throw new Error('run_automation: target is unavailable or inactive')
       }
 
+      let responseEnd: number | undefined
+      if (hasRange && isCourseDetour(args.automation)
+          && (args.automation.trigger_config as Record<string,unknown>)?.course_response_only === true) {
+        // Answer only the requested material, then restore the exact saved cursor.
+        // Never launch the remainder of a course as a second independent journey.
+        const checkpoint = args.context.course_checkpoint
+        if (checkpoint?.pending_ids.length) {
+          const { data: saved, error: savedError } = await db.from('automation_pending_executions')
+            .select('automation_id,context').eq('account_id', args.automation.account_id)
+            .eq('contact_id', args.contactId!).in('id', checkpoint.pending_ids)
+          if (savedError) throw savedError
+          if (!saved?.some(row => row.automation_id === targetId && row.context?.conversation_id === args.context.conversation_id))
+            throw new Error('La respuesta solicitada no corresponde al curso guardado')
+        }
+        const { data: responseSteps, error: responseError } = await db.from('automation_steps')
+          .select('position,step_type').eq('automation_id', targetId).is('parent_step_id', null)
+          .gte('position', (cfg.start_step ?? 1) - 1).lte('position', (cfg.end_step ?? 1) - 1)
+          .order('position', { ascending: true })
+        if (responseError || !responseSteps?.length) throw new Error('No se pudo comprobar el bloque solicitado')
+        const firstWait = responseSteps.find(row => row.step_type === 'wait')
+        responseEnd = firstWait ? firstWait.position - 1 : (cfg.end_step ?? 1) - 1
+        if (responseEnd < (cfg.start_step ?? 1) - 1) return 'Respuesta enviada; conservar la posición guardada del curso'
+      }
+
       if (hasRange) {
         const { data: bounds, error: boundsError } = await db.from('automation_steps')
           .select('position').eq('automation_id', targetId).is('parent_step_id', null)
@@ -1498,7 +1701,7 @@ case 'send_media': {
           context: args.context,
         },
         'automation_link',
-        hasRange ? { startPosition: (cfg.start_step ?? 1) - 1, endPosition: (cfg.end_step ?? 1) - 1,
+        hasRange ? { startPosition: (cfg.start_step ?? 1) - 1, endPosition: responseEnd ?? (cfg.end_step ?? 1) - 1,
           terminalReentry } : undefined,
       )
       if (!childLogId) throw new Error('run_automation: target did not start')

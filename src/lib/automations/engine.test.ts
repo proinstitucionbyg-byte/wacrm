@@ -189,12 +189,12 @@ import { resumeDeliveredMessage, resumePendingExecution, runAutomationById, runA
 import { engineSendInteractive, engineSendMedia, engineSendText } from './meta-send';
 import { INITIAL_GREETING_ID, RETURN_GREETING_ID } from './greeting-continuity';
 import type { Automation } from "@/types";
-import { COMMERCIAL_CADENCE_VERSION } from './commercial-cadence';
+import { COMMERCIAL_CADENCE_VERSION, type CommercialCadence } from './commercial-cadence';
 
 const ACCOUNT = "acct-1";
 
 describe('versioned commercial cadence integration', () => {
-  const policy = { version: COMMERCIAL_CADENCE_VERSION, steps: [
+  const policy: CommercialCadence = { version: COMMERCIAL_CADENCE_VERSION, steps: [
     { id: 'intro' }, { id: 'later-wait', config: { amount: 20, unit: 'minutes' } }, { id: 'followup' },
   ] };
   function setup() {
@@ -412,6 +412,40 @@ describe('WhatsApp delivery order', () => {
         payment_resume_pending_id:'prior-course',payment_resume_previous:true}})
     expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'pending',run_at:expect.any(String)}))
     expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'done'}))
+    expect(engineSendInteractive).not.toHaveBeenCalled()
+  })
+  it.each(['Sí', 'Ok', 'Gracias', '¿Cuál es el horario?'])('returns to the exact course after %s without repeating payment messages', async () => {
+    h.state.automations = [
+      {...automationWithUpdateStep(), id:'payment', name:'YAPE O PLIN'},
+      {...automationWithUpdateStep(), id:'course', name:'NUTRICION 19.90'},
+    ]
+    h.state.pendingRows = [{id:'saved',automation_id:'course',status:'cancelled',context:{conversation_id:'chat'}}]
+    h.state.newerCustomer = true
+    await resumePendingExecution({id:'reminder',automation_id:'payment',account_id:ACCOUNT,
+      user_id:'u1',contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,next_step_position:3,
+      context:{conversation_id:'chat',payment_activation_at:'2026-10-18T16:00:00Z',payment_resume_pending_id:'saved'}})
+    expect(h.state.pendingUpdates).toContainEqual(expect.objectContaining({status:'pending',run_at:expect.any(String)}))
+    expect(h.state.pendingUpdates).toContainEqual({status:'done'})
+    expect(engineSendInteractive).not.toHaveBeenCalled()
+    expect(engineSendMedia).not.toHaveBeenCalled()
+    expect(h.state.pendingInserts).toHaveLength(0)
+  })
+  it.each(['payment', 'other course', 'different chat', 'inactive course', 'human', 'disabled'])('does not restore over %s', async (reason) => {
+    h.state.automations = [
+      {...automationWithUpdateStep(), id:'payment', name:'YAPE O PLIN'},
+      {...automationWithUpdateStep(), id:'course', name:'NUTRICION 19.90'},
+    ]
+    h.state.pendingRows = [{id:'saved',automation_id:'course',status:'cancelled',context:{conversation_id:reason==='different chat'?'other':'chat'}}]
+    h.state.newerCustomer = true
+    if(reason==='payment') h.state.paymentPending = true
+    if(reason==='other course') h.state.pendingRows.push({id:'other',status:'pending',context:{conversation_id:'chat'}})
+    if(reason==='inactive course') h.state.automations[1].is_active = false
+    if(reason==='human') h.state.conversationState!.last_human_message_at = new Date().toISOString()
+    if(reason==='disabled') h.state.conversationState!.automation_enabled = false
+    await resumePendingExecution({id:'reminder',automation_id:'payment',account_id:ACCOUNT,
+      user_id:'u1',contact_id:'c1',log_id:'log1',parent_step_id:null,branch:null,next_step_position:3,
+      context:{conversation_id:'chat',payment_activation_at:'2026-10-18T16:00:00Z',payment_resume_pending_id:'saved'}})
+    expect(h.state.pendingUpdates.some(row=>row.status==='pending')).toBe(false)
     expect(engineSendInteractive).not.toHaveBeenCalled()
   })
   it('keeps the exact pending position when an adviser is still active', async () => {

@@ -8,7 +8,8 @@ export function explicitlyWantsHuman(raw: string, replyId?: string | null): bool
   const text = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .replace(/\brecursos humanos\b/g, 'recursos')
   if (/\bno (?:quiero|necesito|deseo) (?:un |una )?(?:asesor|asesora|persona|humano)/.test(text)) return false
-  return /\b(?:quiero|necesito|deseo|quisiera|podria|puedo|puede|puedes|pasame|pasen|comunicarme|hablar|contactar|atenderme)\b.{0,70}\b(?:asesora?|persona|humano|humana|alguien)\b/.test(text)
+  return /^\s*(?:un |una )?asesora?(?: por favor| porfa)?[.!?¿¡\s]*$/.test(text)
+    || /\b(?:quiero|necesito|deseo|quisiera|podria|puedo|puede|puedes|pasame|pasen|comunicarme|hablar|contactar|atenderme)\b.{0,70}\b(?:asesora?|persona|humano|humana|alguien)\b/.test(text)
     || /\b(?:asesora?|persona) (?:real|humana|humano)\b|\b(?:eres|pareces|parece|son|puras) (?:un |una )?(?:bot|robot|maquina|maquinas)\b/.test(text)
 }
 
