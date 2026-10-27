@@ -40,3 +40,16 @@ Creado y confirmado ACTIVE: `verificar-flujos-y-continuar-prioridades-wacrm`, ca
 - Nuevos permisos externos o del teléfono cuando sean indispensables; no repetir los ya concedidos.
 
 Continuar mientras se esperan respuestas o ejecuciones de Google. Ninguna de estas dependencias detiene todos los demás pendientes.
+
+## Ampliaciones de la recuperación excepcional, misma fecha
+
+El propietario aclaró después que también deben recuperarse los recorridos antiguos y las derivaciones humanas automáticas, excluyendo pagos y aperturas sin keyword. No repetir el lote inicial ni contactos que ya tengan el marcador nuevo.
+
+- `owner_no_flow_2026-10-27_once`: un prospecto de Nutrición, previamente excluido mientras esperaba entrega. Reinicio iniciado y dos primeros envíos aceptados por Meta, seguido de su espera inicial.
+- `owner_legacy_recover_2026-10-27_once`: dos prospectos de Recursos Humanos; sus entregas pendientes antiguas estaban confirmadas delivered/read. Se sustituyeron únicamente sus pendientes antiguos por el recorrido nuevo. Ambos iniciaron sin errores.
+- `owner_human_recover_2026-10-27_once`: el propietario autorizó expresamente reactivar los siete casos clasificados como humanos, siempre con keyword válido. Tres cumplieron: Administrativo uno y Nutrición dos. Se retiró la pausa para esos tres dentro de la operación autorizada y se cancelaron sus pendientes anteriores. Los tres iniciaron sin errores. Los otros cuatro no coincidieron con keywords activos; no se enviaron.
+- Corte de la revisión completa: 27 chats con ventana abierta; 22 incorporados al recorrido nuevo después de estas operaciones, uno pagado excluido y cuatro sin keyword válido excluidos. No llamar a esto 22 ventas ni 22 recorridos terminados. No usar la coincidencia de palabras aproximada para inventar un keyword.
+
+Corrección de prioridad 6 publicada separadamente en `2ac1790`: respaldo de teléfono/curso desde matrícula registrada si falta en el contacto, conservando datos actuales y conflictos. En Google Apps Script se corrigió únicamente la coincidencia singular/plural de Recursos Humanos, se guardó y se comprobó después de recargar. La hoja ya muestra Recursos Humanos en la fila del caso nuevo. No se cambiaron permisos: la base general mantiene únicamente al propietario. Evidencia visual: `output/sales-workbook-2026-10/recursos-humanos-correccion-2026-10-27.png`.
+
+Dos nuevas correcciones solicitadas están comprobándose localmente antes de publicar: relectura de origen a los diez minutos para aperturas con keyword activo (sin origen confirmado queda POR CONFIRMAR, sin forzar envío pagado); texto largo de la introducción como un mensaje completo después de la imagen y antes del audio, sin una frase final suelta. No regenerar ni reenviar la introducción de Jun por la corrección visual.

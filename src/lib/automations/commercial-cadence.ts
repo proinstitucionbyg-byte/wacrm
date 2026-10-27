@@ -37,13 +37,10 @@ export function buildCompleteCommercialCadence(steps: AutomationStep[]): Commerc
 export const INFORMATION_GROUP_POSITIONS = [[0,1],[5,6],[11],[14],[17],[20],[23],[26,27],[32,33],[36],[43],[46],[49],[52]]
 export const ESSENTIAL_POSITIONS = new Set([0,1,2,3,5,6,32,33,34,49,50,52,54])
 
-/** Preserve every character; split only at transport boundaries, never rewrite copy. */
+/** Long copy is one complete text after the image, never a detached final phrase. */
 export function splitCommercialCaption(caption:string):{caption:string;continuation:string} {
   if(caption.length<=1024)return {caption,continuation:''}
-  const paragraph=caption.lastIndexOf('\n\n',1024)
-  let cut=paragraph>=512?paragraph:1024
-  if(cut===1024 && /[\uD800-\uDBFF]/.test(caption[cut-1]))cut--
-  return {caption:caption.slice(0,cut),continuation:caption.slice(cut)}
+  return {caption:'',continuation:caption}
 }
 
 /** Existing UUIDs and positions remain intact for every bounded button return. */

@@ -54,7 +54,7 @@ export async function GET(request: Request) {
       staleNullClaimError ?? staleTimedClaimError,
     );
   // First-message keyword openings use a separate durable queue because
-  // they must wait one minute for late Meta referral evidence before any
+  // they wait ten minutes for late Meta referral evidence before any
   // flow/automation is allowed to send.
   const processedKeywordOpenings = await drainDeferredKeywordOpenings(admin);
   // Resume promised automation steps before the slower routing and followup

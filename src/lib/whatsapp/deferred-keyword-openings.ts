@@ -6,7 +6,7 @@ import { gateAutomaticWhatsAppConversation } from './billing-runtime'
 import { isConfirmedClickToWhatsAppReferral } from './billing'
 import { hasConfiguredOpeningKeyword } from './opening-keywords'
 
-export const KEYWORD_OPENING_META_WAIT_MS = 60_000
+export const KEYWORD_OPENING_META_WAIT_MS = 10 * 60_000
 const QUEUE = 'whatsapp_keyword_openings'
 
 /** Keep subsequent customer messages quiet while a first keyword waits for
@@ -98,7 +98,7 @@ export async function resumeDeferredKeywordOpening(
   }
 
   const { data: conversation, error: conversationError } = await db.from('conversations')
-    .select('automation_enabled,last_human_message_at,first_ad_referral,first_ad_referral_at')
+    .select('automation_enabled,last_human_message_at,last_customer_message_at,first_ad_referral,first_ad_referral_at')
     .eq('id', row.conversation_id).eq('account_id', row.account_id).maybeSingle()
   if (conversationError || !conversation) {
     await markQueueRow(db, row, 'failed', 'conversation_lookup_failed', null, conversationError?.message ?? 'Conversation not found')
@@ -113,9 +113,30 @@ export async function resumeDeferredKeywordOpening(
     await markQueueRow(db, row, 'cancelled', 'adviser_replied_while_waiting')
     return
   }
+  const lastInboundAt = Date.parse(conversation.last_customer_message_at ?? row.received_at)
+  if (!Number.isFinite(lastInboundAt) || Date.now() >= lastInboundAt + 24 * 60 * 60_000) {
+    await markQueueRow(db, row, 'cancelled', 'service_window_expired')
+    return
+  }
+
+  const [payments, active] = await Promise.all([
+    db.from('payment_reviews').select('id').eq('account_id',row.account_id)
+      .eq('conversation_id',row.conversation_id).in('status',['pending','validated']).limit(1),
+    db.from('automation_pending_executions').select('id').eq('account_id',row.account_id)
+      .eq('contact_id',row.contact_id).eq('context->>conversation_id',row.conversation_id)
+      .in('status',['pending','running','paused']).limit(1),
+  ])
+  if (payments.error || active.error) {
+    await markQueueRow(db,row,'failed','recheck_eligibility_failed',null,'No se pudo comprobar pago o recorrido vigente')
+    return
+  }
+  if (payments.data?.length || active.data?.length) {
+    await markQueueRow(db,row,'cancelled',payments.data?.length?'payment_received_while_waiting':'existing_automation_preserved')
+    return
+  }
 
   const { data: originalMessage, error: originalMessageError } = await db.from('messages')
-    .select('id').eq('conversation_id', row.conversation_id).eq('message_id', row.meta_message_id)
+    .select('id,source_referral').eq('conversation_id', row.conversation_id).eq('message_id', row.meta_message_id)
     .eq('sender_type', 'customer').maybeSingle()
   if (originalMessageError || !originalMessage) {
     await markQueueRow(db, row, 'failed', 'original_inbound_not_found', null, originalMessageError?.message ?? 'Inbound message not found')
@@ -142,6 +163,28 @@ export async function resumeDeferredKeywordOpening(
   }
 
   const referralConfirmed = isConfirmedClickToWhatsAppReferral(conversation.first_ad_referral)
+    || isConfirmedClickToWhatsAppReferral(originalMessage.source_referral)
+  if (!referralConfirmed) {
+    // The owner now requires a ten-minute evidence recheck, not a paid launch
+    // just because the opening text resembles an advertisement.
+    await markQueueRow(db,row,'done','ad_origin_unconfirmed_after_10m','por_confirmar')
+    return
+  }
+  if (!isConfirmedClickToWhatsAppReferral(conversation.first_ad_referral)) {
+    if (conversation.first_ad_referral) {
+      await markQueueRow(db,row,'failed','conflicting_ad_origin_evidence',null,'Conservar la primera referencia y revisar la discrepancia')
+      return
+    }
+    // Reuse actual evidence already stored on this signed inbound. Never
+    // synthesize an ad identifier or refresh the window from the retry time.
+    const {error:saveError}=await db.from('conversations').update({
+      first_ad_referral:originalMessage.source_referral,first_ad_referral_at:row.received_at,
+    }).eq('id',row.conversation_id).eq('account_id',row.account_id).is('first_ad_referral',null)
+    if(saveError) {
+      await markQueueRow(db,row,'failed','late_ad_evidence_save_failed',null,saveError.message)
+      return
+    }
+  }
   const keywordOpeningFallback = !referralConfirmed
   const context = {
     message_text: row.message_text,

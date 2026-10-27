@@ -117,6 +117,15 @@ describe('complete course journey: real catalog, local dispatch → waits → de
     expect(h.sends[0].caption+(h.sends[1].text??'')).toBe((c.steps[0].step_config as Row).caption)
     expect(nextPending().run_at).toBe('2026-10-27T11:00:00.000Z')
   })
+  it('keeps the entire long introduction and its closing phrase in one text, before the audio',async()=>{
+    const c=setup(0);await start(c.id);await tick();
+    const original=(c.steps[0].step_config as Row).caption;
+    expect(original.length).toBeGreaterThan(1024);
+    expect(h.sends[0].caption).toBe('');
+    expect(h.sends[1].text).toBe(original);
+    expect(h.sends[2].mediaType).toBe('audio');
+    expect(h.sends.filter(s=>s.text&&String(s.text).trim()==='🔥 ÚLTIMAS VACANTES 🔥')).toHaveLength(0);
+  })
   it('includes the human button only late and after ten delivered groups',async()=>{
     const c=setup();await start(c.id);await finish()
     const human=h.sends.filter(s=>s.payload?.buttons?.some((b:Row)=>b.id==='commercial_human'))

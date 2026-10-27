@@ -65,7 +65,7 @@ const HUMAN_ASSISTANCE_TAG = 'ASESOR URGENTE'
 type FirstInboundDisposition = 'continue' | 'deferred' | 'human'
 
 /** Match a first inbound against real, active configurations. A matched
- * keyword with missing ad evidence waits one durable minute; no keyword
+ * keyword with missing ad evidence waits ten durable minutes; no keyword
  * match goes straight to the human queue. */
 async function pauseUnknownFirstInboundForHuman(args: {
   accountId: string
@@ -127,7 +127,7 @@ async function pauseUnknownFirstInboundForHuman(args: {
       })
       return 'deferred'
     } catch (error) {
-      console.error('[webhook] could not schedule the one-minute keyword wait:', error)
+      console.error('[webhook] could not schedule the ten-minute keyword recheck:', error)
     }
   }
 
