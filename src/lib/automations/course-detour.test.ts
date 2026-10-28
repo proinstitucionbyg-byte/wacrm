@@ -71,6 +71,15 @@ describe('saved course detours',()=>{
   expect(await currentCourseCheckpoint(db,'a','c','chat')).toEqual(checkpoint)
   expect((await captureCourseCheckpoint(db,'a','c','chat')).checkpoint).toEqual(checkpoint)
  })
+ it('retains the original course when a second question interrupts a named course detour',async()=>{
+  const {db,state}=fixture()
+  state.automations[0].name='PARA QUE ESTUDIAR ASISTENTE ADMINISTRATIVO (49.90)'
+  state.automations[0].trigger_config={course_detour:true,course_response_only:true}
+  state.automation_pending_executions=[{id:'parent',account_id:'a',contact_id:'c',automation_id:'aux',
+   status:'pending',run_at:'2026-10-19T17:50:00Z',context:{conversation_id:'chat',course_checkpoint:checkpoint}}]
+  expect((await captureCourseCheckpoint(db,'a','c','chat')).checkpoint).toEqual(checkpoint)
+  expect(state.updates).toHaveLength(0)
+ })
  it('restores all positions and never advances a future wait',async()=>{
   const {state,restore}=fixture();expect(await restore()).toBe('restored')
   expect(state.automation_pending_executions.map(r=>r.next_step_position)).toEqual([3,29])

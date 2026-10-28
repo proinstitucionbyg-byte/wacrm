@@ -36,8 +36,12 @@ export async function captureCourseCheckpoint(db: SupabaseClient, account: strin
   const { data: flows, error: flowError } = rows.length ? await db.from('automations').select('id,name,trigger_config')
     .eq('account_id', account).in('id', [...new Set(rows.map(row => row.automation_id))]) : { data: [], error: null }
   if (flowError) throw flowError
-  const courses = new Set((flows ?? []).filter(flow => isSavedCourseName(flow.name) || flow.name === 'YAPE O PLIN'
-    || flow.trigger_config?.payment_followup === true).map(flow => flow.id))
+  // A material-answer route can contain the course name too. Its inherited
+  // checkpoint owns the actual course; capturing the route itself loses it
+  // when the customer asks for another material before the route finishes.
+  const courses = new Set((flows ?? []).filter(flow => !isCourseDetour(flow)
+    && (isSavedCourseName(flow.name) || flow.name === 'YAPE O PLIN'
+      || flow.trigger_config?.payment_followup === true)).map(flow => flow.id))
   const courseRows = rows.filter(row => courses.has(row.automation_id))
   // Generic button automations may not mention the course in their name.
   // Keep a parent only when it is waiting for this actual saved child log.
