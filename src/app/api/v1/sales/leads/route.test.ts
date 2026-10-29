@@ -41,7 +41,8 @@ describe('commercial base export', () => {
   });
   it('keeps the current contact identifier and explicit course interests over an older registration', async () => {
     const c=contact('current');
-    h.rows.contacts=[{...c,conversations:[{id:'chat',messages:[{id:'message',sender_type:'customer',content_text:'Quiero Farmacia',interactive_reply_id:null,created_at:'2026-10-27T10:00:00Z'}]}]}];
+    h.rows.contacts=[{...c,conversations:[{id:'chat',conversation_sales_routes:null}]}];
+    h.rows.messages=[{id:'message',conversation_id:'chat',sender_type:'customer',content_text:'Quiero Farmacia',interactive_reply_id:null,created_at:'2026-10-27T10:00:00Z',source_referral:null,status:'delivered',content_type:'text'}];
     const paid=payment('current');
     Object.assign(paid.enrollments.data,{course:'RECURSOS HUMANOS',phone1:'999000111'});
     h.rows.payment_reviews=[paid];
@@ -95,7 +96,10 @@ describe('commercial base export', () => {
     expect(result.data.every((row: {student_folder_url: string}) => row.student_folder_url.endsWith('/student'))).toBe(true);
   });
   it('keeps human-validated enrollment sales after moving to Fidelización without changing tags', async () => {
-    h.rows.contacts = [contact('paid', ['PAGO VALIDADO', 'AREA FIDELIZACION']), contact('prospect')];
+    h.rows.contacts = [
+      {...contact('paid', ['PAGO VALIDADO', 'AREA FIDELIZACION']),conversations:[{id:'chat',conversation_sales_routes:null}]},
+      contact('prospect'),
+    ];
     h.rows.payment_reviews = [payment('paid')];
     const result = await (await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
     expect(result.data).toHaveLength(2);
@@ -104,6 +108,7 @@ describe('commercial base export', () => {
     expect(h.key).toHaveBeenCalledWith(expect.any(Request),'sales:read');
     expect(h.calls).toContainEqual(['payment_reviews', 'eq', ['account_id', 'account-a']]);
     expect(h.calls).toContainEqual(['payment_reviews', 'eq', ['status', 'validated']]);
+    expect(h.calls).toContainEqual(['messages', 'in', ['conversation_id', ['chat']]]);
   });
   it('excludes tuition, other payments, unfinished unclassified payments and the known enrollment test', async () => {
     h.rows.contacts = [contact('tuition', []), contact('other', []), contact('unknown', []), contact('test', [], '+51 987 020 644'), contact('legacy', [])];

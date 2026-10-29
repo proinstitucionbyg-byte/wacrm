@@ -44,7 +44,6 @@ type RawConversation = {
     created_at: string;
     lease_expires_at: string | null;
   }> | null;
-  messages: RawMessage[];
 };
 
 type RawContact = {
@@ -86,8 +85,7 @@ export async function GET(request: Request) {
         conversations(
           id, status, assigned_agent_id, created_at, last_message_at, last_message_text,
           unread_count, automation_enabled, ai_enabled,
-          conversation_sales_routes(agent_id,state,created_at,lease_expires_at),
-          messages(id,sender_type,content_text,created_at,status,source_referral,interactive_reply_id,content_type)
+          conversation_sales_routes(agent_id,state,created_at,lease_expires_at)
         )
       `)
       .eq('account_id', ctx.accountId)
@@ -95,8 +93,6 @@ export async function GET(request: Request) {
       .order('id', { ascending: false })
       .order('created_at', { referencedTable: 'conversations', ascending: false })
       .limit(1, { referencedTable: 'conversations' })
-      .eq('conversations.messages.sender_type', 'customer')
-      .order('created_at', { referencedTable: 'conversations.messages', ascending: false })
       .limit(limit + 1);
 
     const cursorFilter = keysetFilter(cursor);
@@ -145,6 +141,39 @@ export async function GET(request: Request) {
     if (profileError) throw profileError;
     const profileById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
 
+    // Load message history only for contacts that will actually be exported.
+    // Fetching the nested messages relation for every contact made each page
+    // grow with unrelated chat history and caused intermittent Apps Script
+    // timeouts while paging the sales workbook.
+    const exportContacts = page.items.filter((contact) => {
+      if ((contact.phone_normalized || contact.phone || '').replace(/\D/g, '').replace(/^51(?=\d{9}$)/, '') === '987020644') return false;
+      const tags = contact.contact_tags.map((item) => item.tag?.name ?? '').filter(Boolean);
+      const conversation = contact.conversations[0];
+      const route = conversation ? newestRoute(conversation.conversation_sales_routes) : null;
+      const assignedAgentId = conversation?.assigned_agent_id ?? route?.agent_id ?? null;
+      const assignedProfile = assignedAgentId ? profileById.get(assignedAgentId) : null;
+      return !!stateByContact.get(contact.id) || !!saleByContact.get(contact.id) ||
+        tags.some((tag) => SALES_TAGS.has(tag)) || assignedProfile?.area?.toLowerCase() === 'ventas';
+    });
+    const exportConversationIds = [...new Set(exportContacts
+      .map((contact) => contact.conversations[0]?.id)
+      .filter((id): id is string => !!id))];
+    const { data: customerMessages, error: messagesError } = exportConversationIds.length
+      ? await ctx.supabase.from('messages')
+          .select('id,conversation_id,sender_type,content_text,created_at,status,source_referral,interactive_reply_id,content_type,conversations!inner(account_id)')
+          .eq('conversations.account_id', ctx.accountId)
+          .eq('sender_type', 'customer')
+          .in('conversation_id', exportConversationIds)
+          .order('created_at', { ascending: true })
+      : { data: [], error: null };
+    if (messagesError) throw messagesError;
+    const messagesByConversation = new Map<string, RawMessage[]>();
+    for (const message of (customerMessages ?? []) as Array<RawMessage & { conversation_id: string }>) {
+      const messages = messagesByConversation.get(message.conversation_id) ?? [];
+      messages.push(message);
+      messagesByConversation.set(message.conversation_id, messages);
+    }
+
     const salesContacts = page.items.flatMap((contact) => {
       if ((contact.phone_normalized || contact.phone || '').replace(/\D/g, '').replace(/^51(?=\d{9}$)/, '') === '987020644') return [];
       const tags = contact.contact_tags
@@ -155,7 +184,7 @@ export async function GET(request: Request) {
         .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
 
       const conversation = contact.conversations[0] ?? null;
-      const messages = conversation?.messages ?? [];
+      const messages = conversation ? messagesByConversation.get(conversation.id) ?? [] : [];
       const route = conversation ? newestRoute(conversation.conversation_sales_routes) : null;
       const assignedAgentId = conversation?.assigned_agent_id ?? route?.agent_id ?? null;
       const assignedProfile = assignedAgentId ? profileById.get(assignedAgentId) : null;
