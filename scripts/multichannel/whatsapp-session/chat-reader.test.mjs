@@ -10,7 +10,8 @@ function fixture(){
   return {reader,chat,chats,setReady:x=>{ready=x;},calls:()=>calls,limit:()=>messageLimit};
 }
 test('lists only existing unlocked individual/group chats with a bounded page',async()=>{
-  const x=fixture(),page=await x.reader.list({limit:1});assert.equal(page.total,2);assert.equal(page.chats.length,1);assert.equal(page.chats[0].name,'FICTICIO');
+  const x=fixture(),page=await x.reader.list({limit:1});assert.equal(page.total,2);assert.equal(page.chats.length,1);assert.equal(page.chats[0].name,'FICTICIO');assert.equal(page.chats[0].phone,'51900000002');
+  const groups=await x.reader.list({kind:'groups'});assert.equal(groups.chats[0].phone,null);
 });
 test('disconnected session does not read or disclose cached history',async()=>{
   const x=fixture();x.setReady(false);await assert.rejects(x.reader.list());assert.equal(x.calls(),0);
@@ -22,8 +23,17 @@ test('locked chats are not readable through a direct URL',async()=>{
   const x=fixture();await assert.rejects(x.reader.messages('51900000003@c.us'),/no disponible/);
 });
 test('history is limited to forty messages and returns text as data',async()=>{
-  const x=fixture(),history=await x.reader.messages('51900000002@c.us');assert.equal(x.limit(),40);assert.equal(history.group,false);
+  const x=fixture(),history=await x.reader.messages('51900000002@c.us');assert.equal(x.limit(),40);assert.equal(history.group,false);assert.equal(history.phone,'51900000002');
   assert.equal(history.messages[0].text,'<script>no ejecutar</script>');assert.equal(history.messages[0].own,false);
+});
+test('shows a LID phone only when the WhatsApp contact lookup resolves it',async()=>{
+  const lid={id:{_serialized:'123456789012345@lid'},name:'LID contact',isGroup:false,fetchMessages:async()=>[]};
+  const resolvePhone=async id=>id===lid.id._serialized?'51900000002':null;
+  const reader=createChatReader({client:{getChats:async()=>[lid]},isReady:async()=>true,resolvePhone});
+  assert.equal((await reader.list()).chats[0].phone,'51900000002');
+  assert.equal((await reader.messages(lid.id._serialized)).phone,'51900000002');
+  const unresolved=createChatReader({client:{getChats:async()=>[lid]},isReady:async()=>true,resolvePhone:async()=>null});
+  assert.equal((await unresolved.list()).chats[0].phone,null);
 });
 test('manual sending is allowed only to a currently listed unlocked chat or group',async()=>{
   const x=fixture();assert.deepEqual(await x.reader.assertSendable('51900000002@c.us'),{group:false,name:'FICTICIO'});

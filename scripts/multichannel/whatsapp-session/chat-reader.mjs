@@ -6,7 +6,7 @@ async function bounded(promise) {
   try { return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('La lectura de WhatsApp tardó demasiado.')),12_000);})]); }
   finally { clearTimeout(timer); }
 }
-export function createChatReader({client,isReady}) {
+export function createChatReader({client,isReady,resolvePhone}) {
   if(!client?.getChats||!isReady)throw Error('Falta la sesión de lectura.');
   let known=new Map();
   const check=async()=>{if(!await isReady())throw Error('La sesión todavía no está lista.');};
@@ -17,27 +17,39 @@ export function createChatReader({client,isReady}) {
     known=new Map(chats.filter(c=>chatIdPattern.test(c.id?._serialized??'')&&!c.isLocked).map(c=>[c.id._serialized,c]));
     return [...known.values()].sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));
   }
+  async function phoneFor(chat) {
+    if(chat.isGroup===true)return null;
+    const id=chat.id._serialized;
+    const direct=/^(\d{7,15})@c\.us$/.exec(id);
+    if(direct)return direct[1];
+    if(!id.endsWith('@lid')||typeof resolvePhone!=='function')return null;
+    try { const phone=await bounded(resolvePhone(id));return /^\d{7,15}$/.test(phone??'')?phone:null; }
+    catch { return null; }
+  }
   return Object.freeze({
     async list({offset=0,limit=20,search='',kind='all'}={}) {
       if(!Number.isInteger(offset)||offset<0||offset>50000||!Number.isInteger(limit)||limit<1||limit>50)throw Error('Página inválida.');
       if(typeof search!=='string'||search.length>100||!['all','groups'].includes(kind))throw Error('Filtro inválido.');
       const needle=search.trim().toLocaleLowerCase();
       const all=(await load()).filter(c=>(kind!=='groups'||c.isGroup===true)&&(!needle||String(c.name||'').toLocaleLowerCase().includes(needle)||c.id._serialized.includes(needle)));
-      return {total:all.length,offset,limit,chats:all.slice(offset,offset+limit).map(c=>({
+      const chats=await Promise.all(all.slice(offset,offset+limit).map(async c=>({
         id:c.id._serialized,name:String(c.name||'Conversación sin nombre').slice(0,160),group:c.isGroup===true,
+        phone:await phoneFor(c),
         unread:Number.isSafeInteger(c.unreadCount)&&c.unreadCount>0?c.unreadCount:0,
         timestamp:Number.isFinite(c.timestamp)?c.timestamp*1000:null,
         preview:typeof c.lastMessage?.body==='string'?c.lastMessage.body.slice(0,200):'',
-      }))};
+      })));
+      return {total:all.length,offset,limit,chats};
     },
     async messages(chatId) {
       if(!chatIdPattern.test(chatId??''))throw Error('Conversación inválida.');
       await load(); // Refresh membership/lock state before each explicit read.
       const chat=known.get(chatId);
       if(!chat||chat.isLocked)throw Error('Conversación no disponible en esta sesión.');
-      const messages=await bounded(chat.fetchMessages({limit:40}));
+      const [messages,phone]=await Promise.all([bounded(chat.fetchMessages({limit:40})),phoneFor(chat)]);
       await check();
       return {id:chatId,name:String(chat.name||'Conversación sin nombre').slice(0,160),group:chat.isGroup===true,
+        phone,
         messages:messages.map(m=>({id:String(m.id?._serialized||'').slice(0,1024),own:m.fromMe===true||m.id?.fromMe===true,
           text:typeof m.body==='string'?m.body.slice(0,65536):'',type:String(m.type||'unknown').slice(0,32),
           hasMedia:m.hasMedia===true,timestamp:Number.isFinite(m.timestamp)?m.timestamp*1000:null,

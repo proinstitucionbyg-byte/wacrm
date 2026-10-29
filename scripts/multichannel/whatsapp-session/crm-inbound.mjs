@@ -16,8 +16,11 @@ export function createCrmInboundSync({ origin, token, fetchImpl = fetch, timeout
   }
 
   return async function syncInbound(event) {
+    const directPhone = /^([0-9]{7,15})@c\.us$/.exec(event?.chatId ?? '')?.[1] ?? null;
+    const senderPhone = event?.senderPhone ?? directPhone;
     if (!event || !PHONE.test(event.linkedPhone ?? '') || typeof event.lineKey !== 'string' ||
-        typeof event.id !== 'string' || !event.id || typeof event.chatId !== 'string' ||
+        typeof event.id !== 'string' || !event.id || !/^\d{5,25}@(c\.us|lid)$/.test(event.chatId ?? '') ||
+        !PHONE.test(senderPhone ?? '') ||
         !Number.isFinite(event.timestamp)) return { state: 'needs_contact_resolution' };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -27,6 +30,7 @@ export function createCrmInboundSync({ origin, token, fetchImpl = fetch, timeout
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           line_key: event.lineKey, linked_phone: event.linkedPhone,
+          sender_phone: senderPhone,
           provider_message_id: event.id, chat_id: event.chatId,
           occurred_at: new Date(event.timestamp).toISOString(), type: event.type, text: event.text ?? '',
         }),

@@ -14,6 +14,7 @@ import { createCachedChatSource } from './cached-chat-source.mjs';
 import { openLineManager } from './line-manager.mjs';
 import { createCrmInboundSync } from './crm-inbound.mjs';
 import { createCrmOutboundClient, startCrmOutboundPoller } from './crm-outbound.mjs';
+import { createSessionPhoneResolver } from './phone-resolver.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const privateRoot = join(root, 'output', 'multichannel-private', 'whatsapp-session');
@@ -74,10 +75,11 @@ async function main() {
       webVersionCache: { type: 'none' },
       takeoverOnConflict: false, qrMaxRetries: 0,
     });
+    const resolvePhone=createSessionPhoneResolver({client});
     adapter = createSessionAdapter({ accountId, lineKey, store, client, enabled: true,
       repliesEnabled: Boolean(outboundClient), authorizeReply: outboundClient?.authorizeReply,
-      onInbound, expectedPhone });
-    const chatReader=createChatReader({client:createCachedChatSource(client),isReady:async()=>{await adapter.refreshConnection();return adapter.status().status==='ready';}});
+      onInbound, resolveSenderPhone:resolvePhone, expectedPhone });
+    const chatReader=createChatReader({client:createCachedChatSource(client),isReady:async()=>{await adapter.refreshConnection();return adapter.status().status==='ready';},resolvePhone});
     void adapter.start();
     if (outboundClient) outboundPoller = startCrmOutboundPoller({ adapter, client: outboundClient,
       onError: () => console.error('Cola de respuestas CRM temporalmente no disponible.') });

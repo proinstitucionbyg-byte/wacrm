@@ -56,6 +56,18 @@ describe('WhatsApp session inbound route', () => {
       isFirstInboundMessage: true, contactCreated: true, hasConfirmedAdOrigin: false,
     }))
     expect(db.rpc).toHaveBeenCalledOnce()
+    expect(db.rpc).toHaveBeenCalledWith('record_whatsapp_session_inbound', expect.objectContaining({ p_sender_phone: '51922222222' }))
+  })
+
+  it('accepts a LID only with its verified phone mapping from the worker', async () => {
+    const db = mockDb()
+    const resolved = await POST(request({ ...event, chat_id: '123456789012345@lid', sender_phone: '51922222222' }))
+    expect(resolved.status).toBe(200)
+    expect(db.rpc).toHaveBeenCalledWith('record_whatsapp_session_inbound', expect.objectContaining({ p_sender_phone: '51922222222' }))
+
+    const unresolved = await POST(request({ ...event, chat_id: '123456789012345@lid' }))
+    expect(unresolved.status).toBe(422)
+    expect(db.rpc).toHaveBeenCalledOnce()
   })
 
   it('persists non-text events without starting text automations', async () => {

@@ -19,7 +19,11 @@ try {
       $status=Invoke-RestMethod -Uri ($panel.origin+'/api/status') -Headers @{Authorization=('Bearer '+$panel.token)} -TimeoutSec 3
       if($status.accountId -eq $config.accountId -and $status.lineKey -eq $config.lineKey){Write-Output 'El ejecutor local ya está activo.';exit 0}
     }catch{ }
-    if(Get-Process -Id ([int]$panel.pid) -ErrorAction SilentlyContinue){throw 'El proceso anterior todavía existe. Comprueba su estado antes de iniciar otra copia.'}
+    $previousPid=[int]$panel.pid
+    # If Windows reused the old worker PID for this PowerShell recovery process,
+    # Get-Process would match this script itself. The profile-specific browser
+    # check below remains mandatory before releasing the lock.
+    if($previousPid -ne $PID -and (Get-Process -Id $previousPid -ErrorAction SilentlyContinue)){throw 'El proceso anterior todavía existe. Comprueba su estado antes de iniciar otra copia.'}
   }
   $lockPath=[System.IO.Path]::GetFullPath((Join-Path $scopeDir 'worker.lock'))
   if(Test-Path -LiteralPath $lockPath){

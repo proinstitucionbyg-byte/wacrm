@@ -10,7 +10,7 @@ function message(id='inbound-one', own=false, chat=chatId) {
   return {id:{_serialized:id,fromMe:own},fromMe:own,from:own?phone+'@c.us':chat,to:own?chat:phone+'@c.us',
     body:'Mensaje ficticio',type:'chat',timestamp:Math.floor(Date.now()/1000)};
 }
-function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,onInbound}={}) {
+function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,onInbound,resolveSenderPhone}={}) {
   const records=structuredClone(rows), client=new EventEmitter(); client.info={wid:{user:phone}};
   let sent=0,destroyed=0;
   client.initialize=async()=>{}; client.destroy=async()=>{destroyed++;};
@@ -21,7 +21,7 @@ function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,on
   let permitCalls=0;
   const authorizeReply=async job=>{permitCalls++;return policy?policy(job,permitCalls):{
     allowed:true,paused:false,permissionConfirmed:true,...job,expiresAt:Date.now()+5000};};
-  const adapter=createSessionAdapter({accountId,lineKey,client,store,enabled,repliesEnabled,authorizeReply,onInbound,expectedPhone});
+  const adapter=createSessionAdapter({accountId,lineKey,client,store,enabled,repliesEnabled,authorizeReply,onInbound,resolveSenderPhone,expectedPhone});
   return {adapter,client,store,records,sent:()=>sent,destroyed:()=>destroyed,permitCalls:()=>permitCalls};
 }
 async function ready(s){await s.adapter.start();s.client.emit('ready');await s.adapter.idle();}
@@ -52,9 +52,29 @@ test('groups, broadcasts and duplicate events never become reply targets',async(
   await inbound(s,'group','120000@g.us');await inbound(s,'status','status@broadcast');
   assert.equal(s.adapter.status().received,1);assert.equal(s.records.filter(r=>r.kind==='inbound').length,1);
 });
+test('the inbound message event is journaled and de-duplicated against message_create',async()=>{
+  const s=setup();await ready(s);const incoming=message('message-event');
+  s.client.emit('message',incoming);s.client.emit('message_create',incoming);await s.adapter.idle();
+  assert.equal(s.adapter.status().received,1);
+  assert.equal(s.records.filter(r=>r.kind==='inbound').length,1);
+});
 test('opaque LID is preserved without inventing a phone',async()=>{
   const s=setup();await ready(s);await inbound(s,'lid','123456789012345@lid');
   assert.equal(s.adapter.status().recent[0].chatId,'123456789012345@lid');
+});
+test('verified LID mapping reaches CRM and authorizes the matching phone-addressed reply',async()=>{
+  const lid='123456789012345@lid';let received;
+  const s=setup({resolveSenderPhone:async id=>id===lid?'51900000002':null,onInbound:async event=>{received=event;return {state:'synced'};}});
+  await ready(s);await inbound(s,'lid-inbound',lid);
+  assert.equal(received.senderPhone,'51900000002');
+  assert.equal(s.records.find(r=>r.kind==='inbound').payload.senderPhone,'51900000002');
+  const result=await s.adapter.dispatch({...job('lid-reply'),chatId:'51900000002@c.us',inboundId:'lid-inbound'});
+  assert.equal(result.state,'accepted');assert.equal(s.sent(),1);
+});
+test('unresolved LID remains local and cannot be matched to a guessed phone',async()=>{
+  const s=setup({resolveSenderPhone:async()=>null,onInbound:async()=>({state:'synced'})});await ready(s);await inbound(s,'unresolved','123456789012345@lid');
+  assert.equal(s.records.find(r=>r.kind==='inbound').payload.senderPhone,undefined);
+  assert.equal(s.adapter.status().centralSync.needsContactResolution,1);
 });
 test('incoming message alone cannot send any automatic response',async()=>{
   const s=setup();await ready(s);await inbound(s);assert.equal(s.sent(),0);
@@ -69,6 +89,15 @@ test('manual agent can send to an existing one-to-one chat or group; a human pau
   assert.equal(group.state,'accepted');assert.equal(s.sent(),2);await s.adapter.idle();
   assert.equal(s.records.filter(r=>r.kind==='human').some(r=>r.payload.chatId==='123456789@g.us'),true);
   assert.equal(s.adapter.status().received,1); // Group messages never enter customer automation.
+});
+test('manual target validation can refresh the connection without deadlocking the send queue',async()=>{
+  const s=setup();await ready(s);
+  const result=await Promise.race([
+    s.adapter.sendManual({requestId:randomUUID(),chatId,body:'Respuesta humana',
+      authorizeTarget:async target=>{await s.adapter.refreshConnection();return target===chatId;}}),
+    new Promise(resolve=>setTimeout(()=>resolve({state:'timed_out'}),500)),
+  ]);
+  assert.equal(result.state,'accepted');assert.equal(s.sent(),1);
 });
 test('manual send is idempotent and an uncertain outcome must be reviewed without retry',async()=>{
   const s=setup({repliesEnabled:false});await ready(s);const requestId=randomUUID(),input={requestId,chatId,body:'Mensaje humano',authorizeTarget:async()=>true};

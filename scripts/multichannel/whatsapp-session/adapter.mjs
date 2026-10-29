@@ -22,7 +22,7 @@ function snapshot(message, now) {
 /** Real client adapter. No automatic rule/AI response or Cloud API fallback.
  * A send requires an injected, fresh CRM policy; the CLI supplies none. */
 export function createSessionAdapter({ accountId, lineKey, client, store, enabled = false,
-  repliesEnabled = false, authorizeReply, onInbound, expectedPhone, now = Date.now, startupTimeoutMs = 90_000 }) {
+  repliesEnabled = false, authorizeReply, onInbound, resolveSenderPhone, expectedPhone, now = Date.now, startupTimeoutMs = 90_000 }) {
   if (store?.scope !== sessionScope(accountId, lineKey) || !client?.on || !client?.initialize || !client?.sendMessage) {
     throw Error('Falta la sesión aislada y su cliente.');
   }
@@ -31,8 +31,13 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   let status = 'stopped', connectionReason = null, qr = null, binding = null, tail = Promise.resolve(), started = false, stopping = false;
   let readySignalSeen = false, socketState = null;
   const incoming = new Map(), seen = new Set(), paused = new Set(), attempts = new Map(), manualAttempts = new Map(), bots = new Map(), pendingHuman = new Map();
-  const crmSync = new Map(), crmSyncInFlight = new Map();
+  const crmSync = new Map(), crmSyncPhones = new Map(), phoneByChat = new Map(), crmSyncInFlight = new Map();
   let crmSyncTail = Promise.resolve();
+  function canonicalChatId(chatId) {
+    if (chatId?.endsWith('@c.us')) return chatId;
+    const phone = phoneByChat.get(chatId);
+    return phone ? `${phone}@c.us` : chatId;
+  }
   function apply(record) {
     const p = record.payload;
     if (record.kind === 'binding') {
@@ -41,11 +46,20 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     } else if (record.kind === 'inbound' || record.kind === 'human') {
       if (!idValid(p.id) || !manualChatPattern.test(p.chatId ?? '') || typeof p.text !== 'string') throw Error('Historial de mensajes inválido.');
       seen.add(p.id);
-      if (record.kind === 'inbound') incoming.set(p.id, p);
+      if (record.kind === 'inbound') {
+        incoming.set(p.id, p);
+        if (/^\d{7,15}$/.test(p.senderPhone ?? '')) phoneByChat.set(p.chatId, p.senderPhone);
+      }
       else paused.add(p.chatId);
     } else if (record.kind === 'crm_sync') {
-      if (!idValid(p.id) || !['synced', 'retry', 'needs_contact_resolution'].includes(p.state)) throw Error('Acuse CRM inválido.');
+      if (!idValid(p.id) || !['synced', 'retry', 'needs_contact_resolution'].includes(p.state) ||
+          (p.senderPhone !== undefined && !/^\d{7,15}$/.test(p.senderPhone))) throw Error('Acuse CRM inválido.');
       crmSync.set(p.id, p.state);
+      if (p.senderPhone) {
+        crmSyncPhones.set(p.id, p.senderPhone);
+        const event = incoming.get(p.id);
+        if (event) { incoming.set(p.id, { ...event, senderPhone: p.senderPhone }); phoneByChat.set(event.chatId, p.senderPhone); }
+      }
     } else if (record.kind === 'attempt') {
       if (!idValid(p.key) || !replyChatPattern.test(p.chatId ?? '')) throw Error('Intento persistido inválido.');
       attempts.set(p.key, { ...p, state: 'needs_review' });
@@ -80,11 +94,21 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     if (crmSyncInFlight.has(event.id)) return crmSyncInFlight.get(event.id);
     const task = (async () => {
       let state = 'retry';
+      let senderPhone = event.senderPhone ?? crmSyncPhones.get(event.id) ?? (/^(\d{7,15})@c\.us$/.exec(event.chatId)?.[1] ?? null);
       try {
-        const result = await onInbound({ ...event, lineKey, linkedPhone: binding });
-        if (['synced', 'needs_contact_resolution'].includes(result?.state)) state = result.state;
+        if (!senderPhone && event.chatId.endsWith('@lid') && typeof resolveSenderPhone === 'function') {
+          senderPhone = await resolveSenderPhone(event.chatId);
+        }
+        if (!/^\d{7,15}$/.test(senderPhone ?? '')) state = 'needs_contact_resolution';
+        else {
+          const enriched = { ...event, senderPhone };
+          incoming.set(event.id, enriched);
+          phoneByChat.set(event.chatId, senderPhone);
+          const result = await onInbound({ ...enriched, lineKey, linkedPhone: binding });
+          if (['synced', 'needs_contact_resolution'].includes(result?.state)) state = result.state;
+        }
       } catch { /* A lost response is retried idempotently after the next start. */ }
-      try { await enqueue(() => persist('crm_sync', { id: event.id, state })); }
+      try { await enqueue(() => persist('crm_sync', { id: event.id, state, ...(senderPhone ? { senderPhone } : {}) })); }
       catch { /* The inbound remains in the durable local journal for review. */ }
     })();
     crmSyncInFlight.set(event.id, task);
@@ -146,12 +170,21 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if (stopping || status === 'storage_error') return;
         if (bots.has(event.id)) { pendingHuman.delete(event.id); return null; }
         if (seen.has(event.id)) return null;
-        await persist(event.own ? 'human' : 'inbound', event);
-        return event.own ? null : event;
+        let stored=event;
+        if (!event.own) {
+          let senderPhone=/^(\d{7,15})@c\.us$/.exec(event.chatId)?.[1] ?? null;
+          if (!senderPhone && event.chatId.endsWith('@lid') && typeof resolveSenderPhone === 'function') {
+            try { senderPhone=await resolveSenderPhone(event.chatId); } catch { /* CRM sync retries this lookup from the journal. */ }
+          }
+          if (/^\d{7,15}$/.test(senderPhone ?? '')) stored={...event,senderPhone};
+        }
+        await persist(event.own ? 'human' : 'inbound', stored);
+        return event.own ? null : stored;
       }).then(saved => {
         if (saved) void scheduleCrmSync(saved);
       }).catch(() => {});
     },
+    message(message) { handlers.message_create(message); },
     message_ack(message, ack) {
       const providerId = message?.id?._serialized;
       void enqueue(async () => {
@@ -166,7 +199,9 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   };
   for (const [event, handler] of Object.entries(handlers)) client.on(event, handler);
   function blocked(chatId) {
-    return status !== 'ready' || client.info?.wid?.user !== binding || stopping || paused.has(chatId) || [...pendingHuman.values()].includes(chatId);
+    const target=canonicalChatId(chatId);
+    return status !== 'ready' || client.info?.wid?.user !== binding || stopping ||
+      [...paused].some(value=>canonicalChatId(value)===target) || [...pendingHuman.values()].some(value=>canonicalChatId(value)===target);
   }
   async function permitted(job) {
     if (blocked(job.chatId) || !authorizeReply) return false;
@@ -223,15 +258,21 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if (previous.chatId !== job.chatId || previous.bodyHash !== bodyHash) return Promise.resolve({ state: 'request_conflict' });
         return Promise.resolve({ state: 'already_attempted', previous: previous.state, providerId: previous.providerId ?? null });
       }
+      if (status !== 'ready' || client.info?.wid?.user !== binding || stopping) return Promise.resolve({ state: 'disabled' });
       const pendingKey = `manual:${job.requestId}`;
       pendingHuman.set(pendingKey, job.chatId);
-      return enqueue(async () => {
+      return (async () => {
         try {
-          if (manualAttempts.has(job.requestId)) { const prior=manualAttempts.get(job.requestId); return { state: 'already_attempted', previous: prior.state, providerId: prior.providerId ?? null }; }
-          if (status !== 'ready' || client.info?.wid?.user !== binding || stopping) return { state: 'disabled' };
+          // Target validation can refresh connection state, which itself uses
+          // the adapter queue. Keep it outside that queue to avoid waiting on
+          // a task that is queued behind itself.
           let allowed = false;
           try { allowed = await job.authorizeTarget(job.chatId) === true; } catch { allowed = false; }
-          if (!allowed || status !== 'ready' || client.info?.wid?.user !== binding || stopping) return { state: 'blocked' };
+          if (!allowed) return { state: 'blocked' };
+          return await enqueue(async () => {
+          if (manualAttempts.has(job.requestId)) { const prior=manualAttempts.get(job.requestId); return { state: 'already_attempted', previous: prior.state, providerId: prior.providerId ?? null }; }
+          if (status !== 'ready' || client.info?.wid?.user !== binding || stopping) return { state: 'disabled' };
+          if (status !== 'ready' || client.info?.wid?.user !== binding || stopping) return { state: 'blocked' };
           await persist('manual_attempt', { key: job.requestId, chatId: job.chatId, bodyHash });
           // Pause automation immediately after an explicit human send request.
           await persist('human', { id: pendingKey, chatId: job.chatId, text: job.body });
@@ -245,8 +286,9 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
           } catch { /* A manual send with an unknown outcome is never replayed. */ }
           await persist('manual_result', { key: job.requestId, state, providerId });
           return { state, providerId };
+          });
         } finally { pendingHuman.delete(pendingKey); }
-      });
+      })();
     },
     dispatch(input) {
       const job = structuredClone(input);
@@ -257,7 +299,8 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       return enqueue(async () => {
         if (!repliesEnabled) return { state: 'disabled' };
         if (attempts.has(job.key)) return { state: 'already_attempted', previous: attempts.get(job.key).state };
-        if (incoming.get(job.inboundId)?.chatId !== job.chatId || !await permitted(job)) return { state: 'blocked' };
+        const inbound=incoming.get(job.inboundId);
+        if (!inbound || canonicalChatId(inbound.chatId)!==canonicalChatId(job.chatId) || !await permitted(job)) return { state: 'blocked' };
         await persist('attempt', { key: job.key, chatId: job.chatId, inboundId: job.inboundId, bodyHash: replyBodyHash(job.body) });
         if (!await permitted(job)) { await persist('result', { key: job.key, state: 'blocked' }); return { state: 'blocked' }; }
         let state = 'needs_review', providerId = null;

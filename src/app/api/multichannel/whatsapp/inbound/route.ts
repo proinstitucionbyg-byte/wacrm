@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   }
   const parsed = whatsappSessionInboundSchema.safeParse(await readBoundedJson(request));
   if (!parsed.success) return NextResponse.json({ error: 'Evento entrante inválido.' }, { status: 400 });
-  const senderPhone = sessionSenderPhone(parsed.data.chat_id);
+  const senderPhone = sessionSenderPhone(parsed.data.chat_id, parsed.data.sender_phone);
   if (!senderPhone) {
     // A LID is an opaque WhatsApp identity, not a phone number. Preserve it
     // in the local session until a verified contact-resolution path exists.
