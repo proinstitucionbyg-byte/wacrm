@@ -1,5 +1,5 @@
 const TOKEN = /^wcm_[a-f0-9]{64}$/;
-const LINE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const LINE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function createCrmOutboundClient({ origin, token, lineKey, fetchImpl = fetch, timeoutMs = 8000 }) {

@@ -10,15 +10,15 @@ const claimToken = '33333333-3333-4333-8333-333333333333';
 test('outbound client validates private config and claims only its configured line', async () => {
   assert.throws(() => createCrmOutboundClient({ origin: 'http://example.test', token, lineKey: 'main' }));
   let sent;
-  const client = createCrmOutboundClient({ origin: 'https://crm.example.test', token, lineKey: 'main',
+  const client = createCrmOutboundClient({ origin: 'https://crm.example.test', token, lineKey: 'WA-bot-2',
     fetchImpl: async (_url, init) => {
       sent = JSON.parse(init.body);
-      return Response.json({ job: { id: jobId, accountId, claimToken, lineKey: 'main', chatId: '51999999999@c.us',
+      return Response.json({ job: { id: jobId, accountId, claimToken, lineKey: 'WA-bot-2', chatId: '51999999999@c.us',
         inboundId: 'inbound-1', body: 'Hola' } });
     } });
   const job = await client.claim();
   assert.equal(job.id, jobId);
-  assert.equal(sent.line_key, 'main');
+  assert.equal(sent.line_key, 'WA-bot-2');
   assert.equal(sent.action, 'claim');
 });
 
