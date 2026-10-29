@@ -14,6 +14,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { enqueueSessionTextIfRequired, rejectUnsupportedSessionTransport } from '@/lib/whatsapp/session-transport-guard'
 import { sendSocialMessage } from '@/lib/social/send'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import {
@@ -46,6 +47,7 @@ interface SendTextArgs {
   text: string
   aiGenerated?: boolean
   keywordOpeningFallback?: boolean
+  idempotencyKey?: string
 }
 
 interface SendTemplateArgs {
@@ -62,6 +64,8 @@ interface SendTemplateArgs {
 export async function engineSendText(
   args: SendTextArgs,
 ): Promise<{ whatsapp_message_id: string }> {
+  const queued = await enqueueSessionTextIfRequired(supabaseAdmin(), args)
+  if (queued) return queued
   return sendViaMeta({ ...args, kind: 'text' })
 }
 
@@ -69,6 +73,7 @@ export async function engineSendText(
 export async function engineSendTemplate(
   args: SendTemplateArgs,
 ): Promise<{ whatsapp_message_id: string }> {
+  await rejectUnsupportedSessionTransport(supabaseAdmin(), args.conversationId, 'template')
   return sendViaMeta({ ...args, kind: 'template' })
 }
 
@@ -109,6 +114,7 @@ interface SendMediaArgs {
 export async function engineSendMedia(
   args: SendMediaArgs,
 ): Promise<{ whatsapp_message_id: string }> {
+  await rejectUnsupportedSessionTransport(supabaseAdmin(), args.conversationId, 'media')
   return sendViaMeta({ ...args, kind: 'media' })
 }
 export async function engineSendInteractive(

@@ -482,6 +482,14 @@ className={cn(
             isAgent ? "justify-end" : "justify-start",
           )}
         >
+          {!isAgent && message.whatsapp_session_line_key && (
+            <span
+              className="inline-flex items-center rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-medium leading-none text-emerald-700 light:text-emerald-800"
+              title="Mensaje recibido por esta sesión de WhatsApp"
+            >
+              WhatsApp · {message.whatsapp_session_line_key}
+            </span>
+          )}
           {/* AI badge — only on replies the auto-reply bot generated
               (always outbound, so it sits on the primary fill). Lets
               agents tell an AI reply from their own / a Flow's at a
@@ -493,6 +501,22 @@ className={cn(
             >
               <Sparkles className="h-2.5 w-2.5" />
               {t("aiBadge")}
+            </span>
+          )}
+          {isAgent && message.status !== 'failed' && message.billing_status && (
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-px text-[9px] font-semibold leading-none",
+                message.billing_status === 'free'
+                  ? 'bg-emerald-500/20 text-emerald-50'
+                  : message.billing_status === 'paid'
+                    ? 'bg-rose-500/20 text-rose-50'
+                    : 'bg-amber-500/20 text-amber-50',
+              )}
+              title={message.billing_confirmed_at ? `Confirmado por Meta: ${message.billing_category ?? 'categoría sin dato'}` : 'Facturación pendiente de confirmar por Meta'}
+            >
+              {message.billing_status === 'free' ? 'GRATIS' : message.billing_status === 'paid' ? 'PAGO' : 'POR CONFIRMAR'}
+              {message.billing_estimated_cost != null && ` · ${message.billing_estimated_cost} ${message.billing_currency ?? ''}`}
             </span>
           )}
           <span

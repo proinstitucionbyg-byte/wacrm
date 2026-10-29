@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   CONVERSATION_SELECT,
+  isUnassignedActiveConversation,
   matchesContactFilters,
   normalizeConversations,
 } from '@/lib/inbox/conversations';
@@ -58,7 +59,7 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
   closed: 'bg-muted-foreground',
 };
 
-type InboxFilter = ConversationStatus | 'all' | 'unread';
+type InboxFilter = ConversationStatus | 'all' | 'unread' | 'unassigned';
 const CONVERSATION_RENDER_BATCH = 150;
 
 export function ConversationList({
@@ -69,6 +70,7 @@ export function ConversationList({
   resyncToken = 0,
 }: ConversationListProps) {
   const t = useTranslations('Inbox.conversationList');
+  const canAssign = useCan('inbox.assign');
 
   const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = useMemo(
     () => [
@@ -77,8 +79,9 @@ export function ConversationList({
       { label: t('filterOpen'), value: 'open' },
       { label: t('filterPending'), value: 'pending' },
       { label: t('filterClosed'), value: 'closed' },
+      ...(canAssign ? [{ label: t('filterUnassigned'), value: 'unassigned' as const }] : []),
     ],
-    [t]
+    [t, canAssign]
   );
 
   const [search, setSearch] = useState('');
@@ -217,6 +220,8 @@ export function ConversationList({
 
     if (filter === 'unread') {
       result = result.filter((c) => c.unread_count > 0);
+    } else if (filter === 'unassigned') {
+      result = result.filter(isUnassignedActiveConversation);
     } else if (filter !== 'all') {
       result = result.filter((c) => c.status === filter);
     }

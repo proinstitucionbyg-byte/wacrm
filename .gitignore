@@ -42,3 +42,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Isolated WhatsApp worker dependencies and private linked-device sessions
+/scripts/multichannel/whatsapp-session/node_modules/
+/output/multichannel-private/
+.wwebjs_auth/
+.wwebjs_cache/
+/output/correcciones-listas-whatsapp-2026-10-28/*.png

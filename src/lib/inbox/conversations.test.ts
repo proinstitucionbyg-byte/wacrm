@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   matchesContactFilters,
   normalizeConversation,
+  isUnassignedActiveConversation,
 } from "./conversations";
 import type { Conversation } from "@/types";
 
@@ -141,5 +142,14 @@ describe("normalizeConversation", () => {
     };
     // A contactless row passes through untouched (consumers use `?.`).
     expect(normalizeConversation(raw).contact).toBeNull();
+  });
+});
+
+describe('isUnassignedActiveConversation', () => {
+  it('includes active unassigned chats and excludes assigned or closed chats', () => {
+    expect(isUnassignedActiveConversation({ status: 'open' })).toBe(true);
+    expect(isUnassignedActiveConversation({ status: 'pending' })).toBe(true);
+    expect(isUnassignedActiveConversation({ status: 'open', assigned_agent_id: 'agent-1' })).toBe(false);
+    expect(isUnassignedActiveConversation({ status: 'closed' })).toBe(false);
   });
 });

@@ -42,6 +42,13 @@ export function normalizeConversations(
   return rows.map(normalizeConversation);
 }
 
+/** Active chats without an assigned adviser; visible only inside the viewer's existing Inbox access. */
+export function isUnassignedActiveConversation(
+  conversation: Pick<Conversation, 'assigned_agent_id' | 'status'>,
+): boolean {
+  return !conversation.assigned_agent_id && conversation.status !== 'closed';
+}
+
 export interface ContactFilters {
   /** Tag ids; a conversation matches if its contact has ANY of them (OR). */
   tagIds: string[];

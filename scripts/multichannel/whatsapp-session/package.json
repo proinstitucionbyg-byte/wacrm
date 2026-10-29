@@ -1,0 +1,16 @@
+{
+  "name": "wacrm-whatsapp-session-worker",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "doctor": "node cli.mjs doctor",
+    "connect": "node cli.mjs connect"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4",
+    "whatsapp-web.js": "1.34.7"
+  }
+}

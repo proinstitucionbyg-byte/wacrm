@@ -50,6 +50,7 @@ import {
 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import { enqueueSessionManualText, getSessionOriginLineForConversation } from '@/lib/whatsapp/session-transport-guard';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -275,6 +276,41 @@ export async function sendMessageToConversation(
 
   if (convError || !conversation) {
     throw new SendMessageError('not_found', 'Conversation not found', 404);
+  }
+
+  let sessionOriginLine: string | null;
+  try {
+    sessionOriginLine = await getSessionOriginLineForConversation(db, conversationId);
+  } catch {
+    throw new SendMessageError('channel_check_failed', 'No se pudo confirmar el canal del chat. No se envió ningún mensaje.', 503);
+  }
+  if (sessionOriginLine) {
+    if (messageType !== 'text') {
+      throw new SendMessageError(
+        'session_transport_unsupported',
+        `Este chat pertenece a la sesión ${sessionOriginLine}. Por ahora solo se pueden responder textos desde el CRM; no se enviará por otro número.`,
+        409,
+      );
+    }
+    if (!params.senderId) {
+      throw new SendMessageError('session_sender_required', 'La respuesta desde una sesión WhatsApp requiere una asesora autenticada.', 403);
+    }
+    if (contentText && contentText.length > 4000) {
+      throw new SendMessageError('session_text_too_long', 'El texto supera el límite de 4000 caracteres de la sesión WhatsApp.', 400);
+    }
+    try {
+      const queued = await enqueueSessionManualText(supabaseAdmin(), {
+        accountId, conversationId, senderId: params.senderId,
+        lineKey: sessionOriginLine, text: contentText ?? '',
+      });
+      return queued;
+    } catch (error) {
+      throw new SendMessageError(
+        'session_enqueue_failed',
+        error instanceof Error ? error.message : 'No se pudo guardar la respuesta para su línea WhatsApp.',
+        503,
+      );
+    }
   }
 
   const contact = conversation.contact;

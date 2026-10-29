@@ -14,6 +14,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { enqueueSessionTextIfRequired, rejectUnsupportedSessionTransport } from '@/lib/whatsapp/session-transport-guard'
 import { sendSocialMessage } from '@/lib/social/send'
 import {
   assertAutomaticWhatsAppSendIsFree,
@@ -52,6 +53,7 @@ interface SendTextEngineArgs {
    *  deterministic Flow/automation sends leave it false. */
   aiGenerated?: boolean
   keywordOpeningFallback?: boolean
+  idempotencyKey?: string
 }
 
 /**
@@ -70,6 +72,8 @@ export async function engineSendText(
   args: SendTextEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  const queued = await enqueueSessionTextIfRequired(db, args)
+  if (queued) return queued
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')
@@ -188,6 +192,7 @@ export async function engineSendMedia(
   args: SendMediaEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  await rejectUnsupportedSessionTransport(db, args.conversationId, 'media')
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')
@@ -346,6 +351,7 @@ async function sendInteractiveViaMeta(
   input: SendInput,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  await rejectUnsupportedSessionTransport(db, input.conversationId, 'interactive')
 
   // Scope the contact + whatsapp_config lookups by account_id —
   // same defense-in-depth rationale as automations/meta-send.ts.

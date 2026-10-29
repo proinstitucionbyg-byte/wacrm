@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getSessionOriginLineForConversation } from './session-transport-guard'
 import {
   getWhatsAppBillingPreflight,
   type WhatsAppBillingPreflight,
@@ -154,6 +155,10 @@ export async function assertAutomaticWhatsAppSendIsFree(
     messageCategory?: 'service' | 'template'
   },
 ): Promise<WhatsAppAutomaticSendPermit> {
+  const sessionOriginLine = await getSessionOriginLineForConversation(db, args.conversationId)
+  if (sessionOriginLine) {
+    throw new Error(`La conversación pertenece a la sesión ${sessionOriginLine}; no se enviará por Meta Cloud.`)
+  }
   const preflight = await readConversationBillingPreflight(db, args.accountId, args.conversationId)
   // Economic coverage is not permission to send free-form content. Even an
   // eligible 72-hour ad window cannot bypass the owner's strict 24-hour rule.

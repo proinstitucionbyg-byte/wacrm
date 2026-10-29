@@ -8,33 +8,15 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { findContactByBsuid } from '@/lib/contacts/dedupe'
 import { isBsuid } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
-import { resumeDeliveredMessage, runAutomationsForTrigger } from '@/lib/automations/engine'
-import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
-import { isExplicitSalesDecline } from '@/lib/ai/sales-decline'
-import { handleExplicitHumanRequest } from '@/lib/ai/explicit-human-request'
-import { canAutoReplyToInboundImage } from '@/lib/ai/inbound-image-routing'
-import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
-import { dispatchInboundToFlows } from '@/lib/flows/engine'
-import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
-import { handleTeacherInbound } from '@/lib/matriculas/teachers'
-import { routeInboundSales } from '@/lib/ai/sales-routing'
-import { tagCommercialInquiry } from '@/lib/sales/attribution'
+import { resumeDeliveredMessage } from '@/lib/automations/engine'
 import { transcribeInboundAudio } from '@/lib/ai/transcribe'
-import { inboundRoutingText } from '@/lib/automations/routing-text'
 import { analyzeInboundImage, type ImageAnalysis } from '@/lib/ai/analyze-image'
 import { startEnrollmentSequence } from '@/lib/matriculas/sequence'
 import { collectConversationEnrollments } from '@/lib/matriculas/collect'
 import { logAiUsage } from '@/lib/ai/usage'
 import { parseReferral } from '@/lib/inbox/referral'
 import { isConfirmedClickToWhatsAppReferral } from '@/lib/whatsapp/billing'
-import { gateAutomaticWhatsAppConversation } from '@/lib/whatsapp/billing-runtime'
-import { enqueueDeferredKeywordOpening, hasPendingDeferredKeywordOpening } from '@/lib/whatsapp/deferred-keyword-openings'
-import {
-  decideFirstInboundKeywordRouting,
-  hasConfiguredOpeningKeyword,
-  type OpeningKeywordConfig,
-} from '@/lib/whatsapp/opening-keywords'
-import { handleIdleFollowupReply } from '@/lib/ai/followup'
+import { dispatchInboundThroughCrm } from '@/lib/whatsapp/inbound-dispatch'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -58,122 +40,6 @@ function supabaseAdmin() {
     )
   }
   return _adminClient
-}
-
-const HUMAN_ASSISTANCE_TAG = 'ASESOR URGENTE'
-
-type FirstInboundDisposition = 'continue' | 'deferred' | 'human'
-
-/** Match a first inbound against real, active configurations. A matched
- * keyword with missing ad evidence waits ten durable minutes; no keyword
- * match goes straight to the human queue. */
-async function pauseUnknownFirstInboundForHuman(args: {
-  accountId: string
-  conversationId: string
-  contactId: string
-  userId: string
-  isFirstInboundMessage: boolean
-  text: string
-  hasConfirmedAdOrigin: boolean
-  metaMessageId: string
-  receivedAt: string
-  contactCreated: boolean
-}): Promise<FirstInboundDisposition> {
-  const text = args.text.trim()
-  if (!args.isFirstInboundMessage) return 'continue'
-
-  const db = supabaseAdmin()
-  const [automationsResult, flowsResult] = await Promise.all([
-    db.from('automations')
-      .select('trigger_config')
-      .eq('account_id', args.accountId)
-      .eq('trigger_type', 'keyword_match')
-      .eq('is_active', true),
-    db.from('flows')
-      .select('trigger_config')
-      .eq('account_id', args.accountId)
-      .eq('trigger_type', 'keyword')
-      .eq('status', 'active'),
-  ])
-
-  const lookupFailed = !!automationsResult.error || !!flowsResult.error
-  if (automationsResult.error) console.error('[webhook] initial keyword automation lookup failed:', automationsResult.error)
-  if (flowsResult.error) console.error('[webhook] initial keyword flow lookup failed:', flowsResult.error)
-  const keywordMatch = !lookupFailed && hasConfiguredOpeningKeyword(
-    text,
-    (automationsResult.data ?? []).map((row: { trigger_config: OpeningKeywordConfig | null }) => row.trigger_config),
-    (flowsResult.data ?? []).map((row: { trigger_config: OpeningKeywordConfig | null }) => row.trigger_config),
-  )
-  const decision = decideFirstInboundKeywordRouting({
-    firstInbound: args.isFirstInboundMessage,
-    keywordMatch,
-    lookupSucceeded: !lookupFailed,
-    adOriginConfirmed: args.hasConfirmedAdOrigin,
-  })
-  if (decision === 'continue') return 'continue'
-  if (decision === 'human') {
-    // Fall through to the immediate pause + human assistance label below.
-  } else {
-    try {
-      await enqueueDeferredKeywordOpening(supabaseAdmin(), {
-        account_id: args.accountId,
-        user_id: args.userId,
-        contact_id: args.contactId,
-        conversation_id: args.conversationId,
-        meta_message_id: args.metaMessageId,
-        message_text: text,
-        received_at: args.receivedAt,
-        contact_created: args.contactCreated,
-      })
-      return 'deferred'
-    } catch (error) {
-      console.error('[webhook] could not schedule the ten-minute keyword recheck:', error)
-    }
-  }
-
-  const disabledAt = new Date().toISOString()
-  const { error: pauseError } = await db.from('conversations')
-    .update({ ai_enabled: false, automation_enabled: false, automation_disabled_at: disabledAt })
-    .eq('id', args.conversationId)
-    .eq('account_id', args.accountId)
-  if (pauseError) console.error('[webhook] could not persist unknown-inbound pause:', pauseError)
-
-  try {
-    const { data: existingTag, error: tagLookupError } = await db.from('tags')
-      .select('id')
-      .eq('account_id', args.accountId)
-      .eq('name', HUMAN_ASSISTANCE_TAG)
-      .limit(1)
-      .maybeSingle()
-    if (tagLookupError) throw tagLookupError
-
-    let tagId = existingTag?.id as string | undefined
-    if (!tagId) {
-      const { data: createdTag, error: createTagError } = await db.from('tags').insert({
-        user_id: args.userId,
-        account_id: args.accountId,
-        name: HUMAN_ASSISTANCE_TAG,
-        color: '#f97316',
-        kind: 'access',
-        audience: { users: [], areas: ['VENTAS'], roles: ['owner', 'admin', 'coordinator'] },
-      }).select('id').single()
-      if (createTagError) throw createTagError
-      tagId = createdTag?.id as string | undefined
-    }
-    if (!tagId) throw new Error('No se pudo resolver la etiqueta de asistencia humana')
-
-    const { error: attachError } = await db.from('contact_tags').upsert(
-      { contact_id: args.contactId, tag_id: tagId },
-      { onConflict: 'contact_id,tag_id', ignoreDuplicates: true },
-    )
-    if (attachError) throw attachError
-  } catch (error) {
-    console.error('[webhook] could not tag unknown first inbound for human assistance:', error)
-  }
-
-  // If reading the configured routes failed, fail closed: leave this chat
-  // paused for a person rather than guess which automation should answer.
-  return 'human'
 }
 
 interface WhatsAppMessage {
@@ -376,7 +242,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const value = change.value
 
-      const phoneNumberId = value.metadata.phone_number_id
+      const phoneNumberId = value.metadata?.phone_number_id
+      if (!phoneNumberId) continue
       // Status-only webhook deliveries also need the phone/account lookup so
       // billing evidence can never be applied across WhatsApp numbers.
       if (!value.statuses?.length && !value.messages?.length) continue
@@ -998,201 +865,25 @@ async function processMessage(
   // ============================================================
     
 
-  // Semáforo: ¿la asesora escribió hace menos de 5 minutos?
-  // Si sí, la automatización y la IA se quedan quietas.
-  
-  // Semáforo: pausa IA y automatización durante 5 minutos después
-// de que una asesora haya enviado un mensaje.
-const lastHuman = conversation.last_human_message_at
-  ? new Date(conversation.last_human_message_at).getTime()
-  : 0
-const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
-const inboundText = inboundRoutingText(contentText ?? message.text?.body ?? null, audioTranscript)
-const confirmedAdReferral = isConfirmedClickToWhatsAppReferral(parseReferral(message.referral))
-await tagCommercialInquiry(supabaseAdmin(), {
-  accountId,
-  contactId: contactRecord.id,
-  userId: configOwnerUserId,
-  text: inboundText,
-  firstInbound: isFirstInboundMessage,
-  hasAdReferral: confirmedAdReferral,
-})
-const automatedInbound = isLikelyAutomatedInbound(inboundText)
-const firstInboundDisposition = await pauseUnknownFirstInboundForHuman({
-  accountId,
-  conversationId: conversation.id,
-  contactId: contactRecord.id,
-  userId: configOwnerUserId,
-  isFirstInboundMessage,
-  text: inboundText,
-  hasConfirmedAdOrigin: confirmedAdReferral,
-  metaMessageId: message.id,
-  receivedAt: inboundAt,
-  contactCreated: contactOutcome.wasCreated,
-})
-const unknownFirstInboundNeedsHuman = firstInboundDisposition === 'human'
-const keywordOpeningDeferred = firstInboundDisposition === 'deferred'
-  || (!isFirstInboundMessage && await hasPendingDeferredKeywordOpening(
-    supabaseAdmin(), accountId, conversation.id,
-  ))
-const salesDeclined = !automatedInbound && isExplicitSalesDecline(inboundText)
-const explicitHumanRequested = !automatedInbound && await handleExplicitHumanRequest(supabaseAdmin(), {
-  accountId, conversationId: conversation.id, contactId: contactRecord.id,
-  userId: configOwnerUserId, text: inboundText, replyId: interactiveReplyId,
-})
-if (salesDeclined) {
-  const db = supabaseAdmin()
-  const { error: disableError } = await db.from('conversations')
-    .update({ ai_enabled: false, automation_enabled: false, automation_disabled_at: new Date().toISOString() })
-    .eq('id', conversation.id).eq('account_id', accountId)
-  if (disableError) throw disableError
-  // Keep each course position for audit, but never resume a sales wait after
-  // the student has explicitly declined. Enrollment welcomes are independent.
-  const { error: cancelError } = await db.from('automation_pending_executions')
-    .update({ status: 'cancelled' })
-    .eq('account_id', accountId).eq('contact_id', contactRecord.id)
-    .eq('status', 'pending')
-    .is('context->>enrollment_sequence_id', null)
-    .is('context->>manual_agent_id', null)
-  if (cancelError) throw cancelError
-}
-let billingBlockedForThisInbound = false
-if (!explicitHumanRequested && !unknownFirstInboundNeedsHuman && !keywordOpeningDeferred && !salesDeclined && (conversation.ai_enabled !== false || conversation.automation_enabled !== false)) {
-  const billingGate = await gateAutomaticWhatsAppConversation(supabaseAdmin(), {
-    accountId,
-    conversationId: conversation.id,
-    contactId: contactRecord.id,
-  })
-  billingBlockedForThisInbound = !billingGate.allowed
-}
-const allAutomaticRepliesDisabled = explicitHumanRequested || unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || (conversation.ai_enabled === false && conversation.automation_enabled === false)
-
-const followupReplyHandled = !allAutomaticRepliesDisabled && interactiveReplyId
-  ? await handleIdleFollowupReply({
-      accountId,
-      userId: configOwnerUserId,
-      contactId: contactRecord.id,
-      conversationId: conversation.id,
-      replyId: interactiveReplyId,
-    })
-  : false
-
-// Academic cancellation notices must not launch the sales funnel.
-let teacherHandled = false
-try {
-  if (!allAutomaticRepliesDisabled) teacherHandled = await handleTeacherInbound(supabaseAdmin(), { accountId, conversationId: conversation.id, contactId: contactRecord.id, userId: configOwnerUserId, messageId: message.id, text: inboundText, humanRecentlyActive })
-} catch (error) { console.error('[teacher] cancellation requires review', error) }
-// Assignment makes the lead available to an adviser. It does not consume the
-// inbound or pause the existing flow/AI; human replies use their own pause.
-if (!allAutomaticRepliesDisabled && !automatedInbound && !teacherHandled && !humanRecentlyActive && !followupReplyHandled) {
-  await routeInboundSales({accountId,conversationId:conversation.id,messageId:message.id})
-}
-const automationPaused =
-  explicitHumanRequested || unknownFirstInboundNeedsHuman || keywordOpeningDeferred || salesDeclined || billingBlockedForThisInbound || conversation.automation_enabled === false || automatedInbound || humanRecentlyActive || followupReplyHandled || teacherHandled
-  let automationMatched = false
-  let flowConsumed = explicitHumanRequested || unknownFirstInboundNeedsHuman || keywordOpeningDeferred || automatedInbound || followupReplyHandled || teacherHandled
-
-if (!automationPaused) {
-  const flowResult = await dispatchInboundToFlows({
+  await dispatchInboundThroughCrm({
+    db: supabaseAdmin(),
+    channel: 'cloud',
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
-    message:
-      interactiveReplyId
-        ? {
-            kind: 'interactive_reply',
-            reply_id: interactiveReplyId,
-            reply_title: contentText ?? '',
-            meta_message_id: message.id,
-          }
-        : {
-            kind: 'text',
-            text: inboundText,
-            meta_message_id: message.id,
-          },
+    messageId: message.id,
+    contentText: contentText ?? message.text?.body ?? null,
+    audioTranscript,
+    imageAnalysis,
     isFirstInboundMessage,
+    previousInboundAt,
+    inboundAt,
+    contactCreated: contactOutcome.wasCreated,
+    hasConfirmedAdOrigin: isConfirmedClickToWhatsAppReferral(parseReferral(message.referral)),
+    interactiveReplyId,
+    conversation,
   })
-
-  flowConsumed = flowResult.consumed
-}
-
-
-    // Fire automations only when they are not paused by a human agent.
-  const automationTriggers: (
-    | 'new_contact_created'
-    | 'first_inbound_message'
-    | 'new_message_received'
-    | 'keyword_match'
-    | 'interactive_reply'
-  )[] = []
-
-  if (!automationPaused) {
-    if (!flowConsumed) {
-      automationTriggers.push('new_message_received', 'keyword_match')
-
-      if (interactiveReplyId) {
-        automationTriggers.push('interactive_reply')
-      }
-    }
-
-    if (contactOutcome.wasCreated) {
-      automationTriggers.unshift('new_contact_created')
-    }
-
-    if (isFirstInboundMessage) {
-      automationTriggers.unshift('first_inbound_message')
-    }
-
-
-for (const triggerType of automationTriggers) {
-  const matched = await runAutomationsForTrigger({
-    accountId,
-    triggerType,
-    contactId: contactRecord.id,
-    context: {
-      message_text: inboundText,
-      conversation_id: conversation.id,
-      interactive_reply_id: interactiveReplyId ?? undefined,
-      previous_inbound_at: previousInboundAt,
-      inbound_at: inboundAt,
-      inbound_message_id: message.id,
-    },
-})
-
-  if (matched) {
-    automationMatched = true
-  }
-}
-  // Runs only for plain-text inbound the deterministic
-  // flow runner did NOT consume (flows win over the LLM), and only when
-  // the account has enabled it. Awaited inside `after()` (same reason as
-  // the webhook dispatch below); `dispatchInboundToAiReply` owns its
-  // eligibility gates + try/catch and never throws.
-  if (
-  conversation.ai_enabled !== false &&
-  !explicitHumanRequested &&
-  !salesDeclined &&
-  !humanRecentlyActive &&
-  !flowConsumed &&
-    !automationMatched &&
-  // Payment follow-up buttons are intentionally handled by the AI: they
-  // describe the student's current payment status and have no fixed
-  // automation branch. Other interactive replies remain flow-owned.
-  (!interactiveReplyId || interactiveReplyId.startsWith('payment_followup_')) &&
-  canAutoReplyToInboundImage(imageAnalysis) &&
-  (inboundText.trim() || imageAnalysis !== null)
-) {
-    // An AI answer to an unrelated question is not a route change. Existing
-    // scheduled steps continue until an explicit automation or adviser takes over.
-  await dispatchInboundToAiReply({
-    accountId,
-    conversationId: conversation.id,
-    contactId: contactRecord.id,
-    configOwnerUserId,
-  })
-}
-
   // message.received webhook (public API). Awaited — not fire-and-forget
   // — because we're inside the route's `after()` block, which only keeps
   // the function alive for promises it can see; a detached promise could
@@ -1504,5 +1195,4 @@ async function findOrCreateConversation(
   }
 
   return { conversation: newConv, created: true }
-}
 }

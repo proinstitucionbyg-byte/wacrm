@@ -247,6 +247,10 @@ export interface Message {
   status: MessageStatus;
   created_at: string;
   reply_to_message_id?: string;
+  /** Signed outgoing echo from the linked WhatsApp Business application. */
+  whatsapp_origin?: 'business_app' | null;
+  /** Source session line for inbound WhatsApp Web messages; not a Meta API number. */
+  whatsapp_session_line_key?: string | null;
   /**
    * Only set when `content_type === 'interactive'` — the stable id of
    * the button or list row the customer tapped. The Flows engine uses

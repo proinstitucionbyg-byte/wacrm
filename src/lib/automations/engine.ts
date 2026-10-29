@@ -1331,6 +1331,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string 
         contactId: args.contactId,
         text,
         keywordOpeningFallback: args.context.billing_unknown_keyword_fallback === true,
+        idempotencyKey: `automation:${args.logId}:${step.id}`,
       })
       rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId)
       args.writtenOfferText = [args.writtenOfferText, text].filter(Boolean).join('\n')
