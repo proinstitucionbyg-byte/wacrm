@@ -21,6 +21,10 @@ export async function pauseUnknownFirstInboundForHuman(db: SupabaseClient, args:
 }): Promise<FirstInboundDisposition> {
   const text = args.text.trim()
   if (!args.isFirstInboundMessage) return 'continue'
+  // Owner-linked WhatsApp Web lines accept direct contacts by design; they do
+  // not have to prove a Meta ad click or match an opening keyword before the
+  // shared CRM Flows, automations, sales/support routing, and AI can respond.
+  if (args.channel === 'session') return 'continue'
 
   const [automationsResult, flowsResult] = await Promise.all([
     db.from('automations').select('trigger_config').eq('account_id', args.accountId)
@@ -40,11 +44,8 @@ export async function pauseUnknownFirstInboundForHuman(db: SupabaseClient, args:
     firstInbound: true,
     keywordMatch,
     lookupSucceeded: !lookupFailed,
-    // WhatsApp Web has no Meta click-to-WhatsApp signal or Cloud billing
-    // window to wait for. A configured opening keyword can enter the shared
-    // CRM branches directly on that channel; unknown first contacts remain
-    // assigned to a person as before.
-    adOriginConfirmed: args.hasConfirmedAdOrigin || args.channel === 'session',
+    // Cloud keeps the Meta click-to-WhatsApp and billing-window rules.
+    adOriginConfirmed: args.hasConfirmedAdOrigin,
   })
   if (decision === 'continue') return 'continue'
   if (decision === 'wait_for_meta') {
