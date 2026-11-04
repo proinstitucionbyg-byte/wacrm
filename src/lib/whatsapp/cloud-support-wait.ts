@@ -36,7 +36,14 @@ export async function drainSupportWaits(db:SupabaseClient){
    const args={db,channel:'cloud' as const,accountId:row.account_id,userId:conv.data.user_id,contactId:conv.data.contact_id,conversationId:row.conversation_id,messageId:source.data.message_id,
     contentText:source.data.content_text,inboundAt:source.data.created_at,isFirstInboundMessage:row.first_inbound,contactCreated:row.contact_created,interactiveReplyId:source.data.interactive_reply_id,
     hasConfirmedAdOrigin:isConfirmedClickToWhatsAppReferral(conv.data.first_ad_referral)||isConfirmedClickToWhatsAppReferral(source.data.source_referral),conversation:conv.data};
-   if(args.hasConfirmedAdOrigin){const {dispatchInboundThroughCrm}=await import('./inbound-dispatch');await dispatchInboundThroughCrm(args);await finish('done','campaign_confirmed_preserved');}
+   if(args.hasConfirmedAdOrigin){
+    // Release only this confirmed classification before the existing billing
+    // gate runs. Preserve the signed referral and its original timestamp.
+    const patch={whatsapp_support_wait_until:null,...(!isConfirmedClickToWhatsAppReferral(conv.data.first_ad_referral)&&isConfirmedClickToWhatsAppReferral(source.data.source_referral)?{first_ad_referral:source.data.source_referral,first_ad_referral_at:source.data.created_at}:{})};
+    const released=await db.from('conversations').update(patch).eq('id',row.conversation_id).eq('account_id',row.account_id).eq('whatsapp_support_wait_until',row.run_at);
+    if(released.error)throw Error('Could not release confirmed campaign');
+    const {dispatchInboundThroughCrm}=await import('./inbound-dispatch');await dispatchInboundThroughCrm(args);await finish('done','campaign_confirmed_preserved');
+   }
    else{const {routeCloudSupportOpening}=await import('./cloud-support');const handled=await routeCloudSupportOpening(db,{...args,metaWaitExpired:true});await finish(handled?'done':'cancelled',handled?'support_after_three_minutes':'commercial_continuity_preserved');}
   }catch{await finish('needs_review','classification_or_delivery_requires_review');}
  }));
