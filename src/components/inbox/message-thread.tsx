@@ -242,7 +242,7 @@ export function MessageThread({
   >([]);
   const canAssign = useCan('inbox.assign');
   const canHideMessages = useCan('inbox_management.messages');
-  const sessionOriginLine = useMemo(() => latestSessionOrigin(messages), [messages]);
+  const sessionOriginLine = useMemo(() => latestSessionOrigin(messages,conversation?.whatsapp_support_line_key), [messages,conversation?.whatsapp_support_line_key]);
 
   useEffect(() => {
     let cancelled = false;

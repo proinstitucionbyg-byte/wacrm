@@ -50,6 +50,7 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104162106_whatsapp_cloud_support_handoff.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104172431_whatsapp_session_outgoing_echo.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104174332_phone_echo_preserve_reactivation.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104181629_sticky_support_conversation.sql', import.meta.url), 'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -73,6 +74,19 @@ async function cloudSource(){
  await db.query('update public.multichannel_whatsapp_session_lines set support_ready_at=now() where account_id=$1',[accountId]);return conversation;
 }
 async function supportOpening(conversation){return(await db.query('select public.enqueue_cloud_support_opening($1,$2,$3,$4,$5::jsonb)as result',[accountId,conversation,'wamid.cloud-test','Hola, ¿en qué podemos ayudarte?\n1. Cursos',JSON.stringify([{id:'existing-id',title:'Cursos'}])])).rows[0].result;}
+
+test('manual replies remain on support after Cloud opening without inventing a session receipt',async()=>{
+ const conversation=await cloudSource();await supportOpening(conversation);const opening=await step('claim');await step('authorize',opening);await step('record',opening,'accepted','real-support-opening');
+ assert.equal((await db.query('select whatsapp_support_line_key from conversations where id=$1',[conversation])).rows[0].whatsapp_support_line_key,lineKey);
+ const response=(await db.query('select enqueue_whatsapp_session_manual_text($1,$2,$3,$4,$5,$6) result',[accountId,conversation,lineKey,ownerId,'Seguimos por soporte','manual-sticky'])).rows[0].result;
+ const manual=await step('claim');assert.equal(manual.id,response.job_id);assert.equal(manual.sender_type,'agent');
+ const permit=await step('authorize',manual);assert.equal(permit.allowed,true);assert.equal(permit.inbound_source,'cloud_support');assert.equal(permit.sender_type,'agent');
+ const message=(await db.query('select whatsapp_session_phone from messages where id=$1',[response.message_row_id])).rows[0];assert.equal(message.whatsapp_session_phone,'51911111111');
+ assert.equal((await db.query('select count(*)::int n from whatsapp_session_inbound_receipts')).rows[0].n,0);
+ await step('record',manual,'accepted','real-support-manual');
+ await db.query('update multichannel_whatsapp_session_lines set paused=true where line_key=$1',[lineKey]);
+ await assert.rejects(db.query('select enqueue_whatsapp_session_manual_text($1,$2,$3,$4,$5,$6)',[accountId,conversation,lineKey,ownerId,'No usar Cloud','offline-sticky']),/unavailable/);
+});
 test('Cloud first contact is sent through an available owner line without inventing a session inbound or billing reservation',async()=>{
  const conversation=await cloudSource(),first=await supportOpening(conversation),again=await supportOpening(conversation);assert.equal(first.state,'queued');assert.equal(first.job_id,again.job_id);
  assert.equal((await db.query('select count(*)::int as n from public.whatsapp_session_inbound_receipts')).rows[0].n,0);

@@ -84,6 +84,7 @@ export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError
   const loop = (async () => {
     while (!stopped) {
       try {
+        await adapter.refreshReplyAcknowledgements?.();
         if(client.ack)for(const ack of adapter.replyAcknowledgements?.()??[]){const key=ack.id+':'+ack.providerId+':'+ack.state;if(!acknowledged.has(key)){await client.ack(ack);acknowledged.add(key);}}
         const status=adapter.status();
         if(client.heartbeat&&/^\d{7,15}$/.test(status.linkedPhone??''))await client.heartbeat(status.status==='ready'&&!status.automationPaused,status.linkedPhone);

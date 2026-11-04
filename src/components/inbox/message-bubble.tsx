@@ -43,9 +43,9 @@ function StatusIcon({ status }: { status: Message["status"] }) {
     case "sent":
       return <span title="Enviado; aún sin confirmación de entrega"><Check className="h-3.5 w-3.5 text-white/80 light:text-slate-500" /></span>;
     case "delivered":
-      return <span title="Entregado"><CheckCheck className="h-3.5 w-3.5 text-emerald-300 light:text-emerald-700" /></span>;
+      return <span title="Entregado"><CheckCheck className="h-4 w-4 text-[#39ff14] drop-shadow-[0_0_2px_#103b08]" strokeWidth={3} /></span>;
     case "read":
-      return <span title="Leído"><CheckCheck className="h-3.5 w-3.5 text-cyan-200 light:text-blue-700" /></span>;
+      return <span title="Leído"><CheckCheck className="h-4 w-4 text-[#39ff14] drop-shadow-[0_0_2px_#103b08]" strokeWidth={3} /></span>;
     case "failed":
       return <XCircle className="h-3 w-3 text-red-400" />;
     default:
@@ -478,16 +478,16 @@ className={cn(
 />
         <div
           className={cn(
-            "mt-1 flex items-center gap-1",
+            "mt-1 flex flex-wrap items-center gap-1",
             isAgent ? "justify-end" : "justify-start",
           )}
         >
-          {!isAgent && message.whatsapp_session_line_key && (
+          {message.whatsapp_session_line_key && (
             <span
-              className="inline-flex items-center rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-medium leading-none text-emerald-700 light:text-emerald-800"
-              title="Mensaje recibido por esta sesión de WhatsApp"
+              className={cn('inline-flex max-w-full items-center truncate rounded-full px-1.5 py-px text-[10px] font-medium leading-tight',isAgent?'bg-black/15 text-white':'bg-emerald-500/15 text-emerald-700 light:text-emerald-800')}
+              title={`${isAgent?'Enviado':'Recibido'} por WhatsApp ${message.whatsapp_session_phone?'+'+message.whatsapp_session_phone:message.whatsapp_session_line_key}`}
             >
-              WhatsApp · {message.whatsapp_session_line_key}
+              WhatsApp · {message.whatsapp_session_phone?'+'+message.whatsapp_session_phone:'vinculado'}
             </span>
           )}
           {/* AI badge — only on replies the auto-reply bot generated

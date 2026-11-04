@@ -16,7 +16,9 @@ import {
   Plus,
   MessageSquareDashed,
   Zap,
+  Smile,
 } from 'lucide-react';
+import {Popover,PopoverContent,PopoverTrigger} from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { GatedButton } from '@/components/ui/gated-button';
 import {
@@ -787,6 +789,23 @@ export function MessageComposer({
         </div>
       ) : (
         <div className="bg-card sticky bottom-0 z-10 flex min-w-0 items-end gap-1.5 pt-1 lg:static lg:gap-2 lg:pt-0">
+          <Popover>
+            <PopoverTrigger disabled={inputsDisabled||busy} aria-label="Elegir emoji" title="Emojis" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 lg:h-9 lg:w-9">
+              <Smile className="h-5 w-5" />
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" aria-label="Emojis para el mensaje">
+              <span className="text-xs font-medium">Emojis</span>
+              <div className="grid grid-cols-8 gap-1">
+                {['😊','😄','😂','🥰','😍','🤗','😉','😎','👍','👏','🙌','🙏','💪','🤝','👌','✍️','💙','❤️','💚','🤍','🎉','✨','🌟','🔥','🎓','📚','📝','📅','🕐','🎥','📎','📍','✅','❌','⚠️','❓','💬','📞','💳','💰'].map(emoji=>(
+                  <button key={emoji} type="button" aria-label={`Insertar ${emoji}`} className="flex h-8 w-8 items-center justify-center rounded text-xl hover:bg-muted focus-visible:outline focus-visible:outline-primary" onClick={()=>{
+                    const input=textareaRef.current,start=input?.selectionStart??text.length,end=input?.selectionEnd??start;
+                    setText(text.slice(0,start)+emoji+text.slice(end));setSelectedBlock(null);
+                    requestAnimationFrame(()=>{input?.focus();input?.setSelectionRange(start+emoji.length,start+emoji.length);});
+                  }}>{emoji}</button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
           {/* Attach menu — photo / video / document / voice. */}
           <DropdownMenu>
             <DropdownMenuTrigger

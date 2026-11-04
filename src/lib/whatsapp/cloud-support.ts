@@ -3,9 +3,11 @@ import {INITIAL_GREETING_ID} from '@/lib/automations/greeting-continuity';
 import {renderSessionTextMenu} from './session-text-menu';
 import {isConfirmedClickToWhatsAppReferral} from './billing';
 import type {InteractiveMessagePayload} from './interactive';
+import {isSalesInquiry} from '@/lib/sales/attribution';
+import {readConversationBillingPreflight} from './billing-runtime';
 
 /** A Cloud customer message stays a Cloud source. Only its reply changes line. */
-export async function routeCloudSupportOpening(db:SupabaseClient,args:{accountId:string;conversationId:string;contactId:string;userId:string;messageId:string;hasConfirmedAdOrigin:boolean}):Promise<boolean>{
+export async function routeCloudSupportOpening(db:SupabaseClient,args:{accountId:string;conversationId:string;contactId:string;userId:string;messageId:string;hasConfirmedAdOrigin:boolean;contentText?:string|null;interactiveReplyId?:string|null}):Promise<boolean>{
  if(process.env.MULTICHANNEL_CLOUD_SUPPORT_ENABLED!=='true'||args.hasConfirmedAdOrigin)return false;
  const policy=await db.from('whatsapp_support_routes').select('enabled').eq('account_id',args.accountId).maybeSingle();
  if(policy.error)throw Error('No se pudo verificar la ruta de soporte; no se enviará por Cloud.');
@@ -13,6 +15,18 @@ export async function routeCloudSupportOpening(db:SupabaseClient,args:{accountId
  const conversation=await db.from('conversations').select('first_ad_referral').eq('id',args.conversationId).eq('account_id',args.accountId).maybeSingle();
  if(conversation.error||!conversation.data)throw Error('No se pudo verificar el origen del contacto.');
  if(isConfirmedClickToWhatsAppReferral(conversation.data.first_ad_referral))return false;
+ // Absence of a referral is not proof that an ongoing commercial journey
+ // should change phone. Preserve its original buttons/flow while Cloud permits it.
+ const paid=await db.from('contact_tags').select('tags!inner(name)').eq('contact_id',args.contactId).eq('tags.account_id',args.accountId).eq('tags.name','PAGO VALIDADO');
+ if(paid.error)throw Error('No se pudo verificar si el contacto ya está matriculado.');
+ const recent=await db.from('messages').select('id').eq('conversation_id',args.conversationId).eq('sender_type','bot').is('whatsapp_session_line_key',null)
+  .in('status',['sent','delivered','read']).not('interactive_payload','is',null).gte('created_at',new Date(Date.now()-86400000).toISOString()).limit(1).maybeSingle();
+ if(recent.error)throw Error('No se pudo verificar la continuidad comercial.');
+ const commercial=!paid.data?.length&&(!!args.interactiveReplyId||isSalesInquiry(args.contentText??'')||!!recent.data);
+ if(commercial){
+  const billing=await readConversationBillingPreflight(db,args.accountId,args.conversationId);
+  if(billing.automatic_send_allowed)return false;
+ }
  const automation=await db.from('automations').select('id').eq('id',INITIAL_GREETING_ID).eq('account_id',args.accountId).eq('is_active',true).maybeSingle();
  if(automation.error||!automation.data)throw Error('La bienvenida de soporte no está disponible.');
  const steps=await db.from('automation_steps').select('step_type,step_config,position').eq('automation_id',automation.data.id).is('parent_step_id',null).order('position');

@@ -30,6 +30,13 @@ async function ready(s){await s.adapter.start();s.client.emit('ready');await s.a
 async function inbound(s,id='inbound-one',chat=chatId){s.client.emit('message_create',message(id,false,chat));await s.adapter.idle();}
 const job=(key='job-one')=>({key,accountId,lineKey,chatId,inboundId:'inbound-one',body:'Respuesta ficticia'});
 const campaignJob=()=>({id:'campaign-job',key:'campaign:campaign-job',campaignId:'campaign-1',accountId,lineKey,chatId,body:'Campaña ficticia'});
+
+test('a missed delivery event is recovered by reading the actual provider message, without resending',async()=>{
+ const s=setup();await ready(s);await inbound(s);const key=randomUUID();const result=await s.adapter.dispatch(job(key));assert.equal(result.state,'accepted');
+ s.client.getMessageById=async id=>({...message(id,true),ack:2});
+ await s.adapter.refreshReplyAcknowledgements();
+ assert.deepEqual(s.adapter.replyAcknowledgements(),[{id:key,providerId:result.providerId,state:'delivered'}]);assert.equal(s.sent(),1);await s.adapter.stop();
+});
 test('a Cloud support opening needs an explicit server permit and never fabricates a local inbound',async()=>{
  const s=setup({policy:j=>({allowed:true,paused:false,permissionConfirmed:true,...j,inboundSource:undefined,expiresAt:Date.now()+5000})});await ready(s);const j={...job('cloud-opening'),inboundSource:'cloud_support'};
  assert.equal((await s.adapter.dispatch(j)).state,'blocked');assert.equal(s.sent(),0);await s.adapter.stop();

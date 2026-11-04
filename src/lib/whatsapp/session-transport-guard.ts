@@ -23,7 +23,10 @@ export async function getSessionOriginLineForConversation(
     .maybeSingle();
 
   if (error) throw new Error('No se pudo verificar con seguridad el canal de esta conversación.');
-  return data?.whatsapp_session_line_key ?? null;
+  if(data?.whatsapp_session_line_key)return data.whatsapp_session_line_key;
+  const support=await db.from('conversations').select('whatsapp_support_line_key').eq('id',conversationId).maybeSingle();
+  if(support.error)throw Error('No se pudo verificar la derivación a soporte; no se usará Cloud.');
+  return support.data?.whatsapp_support_line_key??null;
 }
 
 /** Refuse unsupported CRM payloads on a session line instead of using Meta Cloud. */
@@ -49,7 +52,7 @@ export async function enqueueSessionTextIfRequired(
   const pinned=currentSessionInbound(args.conversationId);
   if(pinned&&pinned.accountId!==args.accountId)throw Error('El origen de esta respuesta pertenece a otra cuenta.');
   let sourceQuery=db.from('messages')
-    .select('id,whatsapp_session_line_key')
+    .select('id,message_id,whatsapp_session_line_key')
     .eq('conversation_id', args.conversationId).eq('sender_type', 'customer');
   if(pinned)sourceQuery=sourceQuery.eq('id',pinned.messageRowId).eq('whatsapp_session_line_key',pinned.lineKey);
   const { data: source, error: sourceError } = await sourceQuery
@@ -57,7 +60,15 @@ export async function enqueueSessionTextIfRequired(
   if (sourceError) throw new Error('No se pudo verificar con seguridad el canal de esta conversación.');
   if(pinned&&(!source||source.id!==pinned.messageRowId||source.whatsapp_session_line_key!==pinned.lineKey))throw Error('No se pudo comprobar el origen exacto de la consulta.');
   const lineKey = source?.whatsapp_session_line_key;
-  if (!lineKey) return null;
+  if (!lineKey) {
+    const supportLine=await getSessionOriginLineForConversation(db,args.conversationId);
+    if(!supportLine)return null;
+    if(!source?.message_id)throw Error('No se confirmó la consulta original para soporte.');
+    const dedupKey=createHash('sha256').update(args.idempotencyKey??`${source.message_id}\0${args.text}\0${JSON.stringify(args.menuOptions??null)}`).digest('hex');
+    const {data,error}=await db.rpc('enqueue_cloud_support_reply',{p_account_id:args.accountId,p_conversation_id:args.conversationId,p_line_key:supportLine,p_provider_id:source.message_id,p_body:args.text,p_dedup_key:dedupKey,p_sender_id:null,p_options:args.menuOptions??null});
+    if(error||typeof data?.message_id!=='string')throw Error('No se pudo guardar la respuesta por soporte; no se enviará por Cloud.');
+    return {whatsapp_message_id:data.message_id};
+  }
   if (process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED !== 'true') {
     throw new Error(`La conversación pertenece a la sesión ${lineKey}; la salida aún no está habilitada.`);
   }

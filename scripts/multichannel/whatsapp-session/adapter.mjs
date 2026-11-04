@@ -65,6 +65,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   function automationPaused(){try{return getAutomationPaused()!==false;}catch{return true;}}
   const incoming = new Map(), humanMessages=new Map(), seen = new Set(), paused = new Set(), attempts = new Map(), manualAttempts = new Map(), bots = new Map(), pendingHuman = new Map();
   const crmSync = new Map(), crmSyncPhones = new Map(), phoneByChat = new Map(), crmSyncInFlight = new Map();
+  const ackCheckedAt=new Map();
   let crmSyncTail = Promise.resolve(), crmRetryTimer = null, crmRetryDelayMs = crmRetryInitialMs, crmRetryBusy = false;
   function canonicalChatId(chatId) {
     if (chatId?.endsWith('@c.us')) return chatId;
@@ -382,6 +383,18 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     refreshConnection() { return confirmConnection(); },
     async syncPending() { await crmSyncTail; await retryPendingCrmSync(); await crmSyncTail; schedulePendingCrmRetry(); },
     async idle() { await tail; await Promise.resolve(); await crmSyncTail; },
+    async refreshReplyAcknowledgements(){
+      if(status!=='ready'||stopping||typeof client.getMessageById!=='function')return;
+      const pending=[...attempts].filter(([key,p])=>requestIdPattern.test(key)&&['accepted','delivered'].includes(p.state)&&idValid(p.providerId)&&now()-(ackCheckedAt.get(key)??0)>=15000).slice(0,3);
+      for(const [key,p] of pending){
+        ackCheckedAt.set(key,now());
+        let timeout;
+        try{const message=await Promise.race([client.getMessageById(p.providerId),new Promise(resolve=>{timeout=setTimeout(()=>resolve(null),1500);})]);
+          if(message?.id?._serialized===p.providerId&&(message.fromMe===true||message.id.fromMe===true)&&Number.isInteger(message.ack))handlers.message_ack(message,message.ack);
+        }catch{/* Read-only reconciliation never resends a message. */}finally{clearTimeout(timeout);}
+      }
+      await tail;
+    },
     sendManual(input) {
       const job = input && { requestId: input.requestId, chatId: input.chatId, body: input.body, authorizeTarget: input.authorizeTarget };
       if (!job || !requestIdPattern.test(job.requestId ?? '') || !manualChatPattern.test(job.chatId ?? '') ||

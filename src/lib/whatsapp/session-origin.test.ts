@@ -2,6 +2,10 @@ import {describe,it,expect} from 'vitest';
 import {latestSessionOrigin} from './session-origin';
 describe('latest customer transport',()=>{
   const row=(id:string,key:string|null,date='2026-11-04T10:00:00Z')=>({id,sender_type:'customer' as const,created_at:date,whatsapp_session_line_key:key});
+  it('keeps the explicit support handoff when a customer still writes to Cloud',()=>{
+    expect(latestSessionOrigin([row('1',null)],'WA-support')).toBe('WA-support');
+    expect(latestSessionOrigin([row('1','WA-other')],'WA-support')).toBe('WA-other');
+  });
   it('recognizes the session line despite a newer outgoing message',()=>{
     expect(latestSessionOrigin([row('1','WA-support'),{...row('2',null),sender_type:'agent'}])).toBe('WA-support');
   });

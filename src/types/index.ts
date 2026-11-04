@@ -162,6 +162,7 @@ export interface ContactNote {
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
 export interface Conversation {
+  whatsapp_support_line_key?: string | null;
   inbox_cleared_at?: string | null;
   id: string;
   user_id: string;
@@ -251,6 +252,7 @@ export interface Message {
   whatsapp_origin?: 'business_app' | null;
   /** Source session line for inbound WhatsApp Web messages; not a Meta API number. */
   whatsapp_session_line_key?: string | null;
+  whatsapp_session_phone?: string | null;
   /**
    * Only set when `content_type === 'interactive'` — the stable id of
    * the button or list row the customer tapped. The Flows engine uses
