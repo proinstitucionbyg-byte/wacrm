@@ -24,8 +24,9 @@ export async function getSessionOriginLineForConversation(
 
   if (error) throw new Error('No se pudo verificar con seguridad el canal de esta conversación.');
   if(data?.whatsapp_session_line_key)return data.whatsapp_session_line_key;
-  const support=await db.from('conversations').select('whatsapp_support_line_key').eq('id',conversationId).maybeSingle();
+  const support=await db.from('conversations').select('whatsapp_support_line_key,whatsapp_support_wait_until').eq('id',conversationId).maybeSingle();
   if(support.error)throw Error('No se pudo verificar la derivación a soporte; no se usará Cloud.');
+  if(support.data?.whatsapp_support_wait_until&&!support.data.whatsapp_support_line_key)throw Error('Se está comprobando el origen de Meta antes de responder. La espera inicial es de tres minutos; si ya pasó, revisa la derivación antes de enviar.');
   return support.data?.whatsapp_support_line_key??null;
 }
 

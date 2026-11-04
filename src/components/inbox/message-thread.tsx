@@ -1655,6 +1655,7 @@ export function MessageThread({
 
       {/* Composer */}
       <EnrollmentWelcomeCheck conversationId={conversation.id} />
+      {conversation?.whatsapp_support_wait_until&&!sessionOriginLine&&<div role="status" className="mx-3 mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200 light:text-amber-900">⏳ Verificando el origen de Meta durante tres minutos antes de elegir el número de respuesta. Puedes preparar tu texto; el envío queda protegido hasta completar la verificación.</div>}
       <MessageComposer
         key={conversation.id}
         assignmentAt={conversation.inbox_assignment_at}

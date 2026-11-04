@@ -51,6 +51,7 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104172431_whatsapp_session_outgoing_echo.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104174332_phone_echo_preserve_reactivation.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104181629_sticky_support_conversation.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104185557_support_meta_wait.sql', import.meta.url), 'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -61,6 +62,7 @@ before(async () => {
 after(() => db.close());
 beforeEach(async () => {
   await db.exec(`reset role; delete from public.whatsapp_session_outbound_jobs; delete from public.whatsapp_session_inbound_receipts;
+    delete from public.whatsapp_support_waits;
     delete from public.messages; delete from public.conversations; delete from public.contacts;
     delete from public.whatsapp_support_routes;
     update public.multichannel_whatsapp_session_lines set paused=false,support_ready_at=null;`);
@@ -74,6 +76,19 @@ async function cloudSource(){
  await db.query('update public.multichannel_whatsapp_session_lines set support_ready_at=now() where account_id=$1',[accountId]);return conversation;
 }
 async function supportOpening(conversation){return(await db.query('select public.enqueue_cloud_support_opening($1,$2,$3,$4,$5::jsonb)as result',[accountId,conversation,'wamid.cloud-test','Hola, ¿en qué podemos ayudarte?\n1. Cursos',JSON.stringify([{id:'existing-id',title:'Cursos'}])])).rows[0].result;}
+
+test('Meta wait is three minutes from the real inbound, survives repeated messages and cannot be claimed twice',async()=>{
+ const conversation=await cloudSource();
+ const wait=()=>db.query('select enqueue_whatsapp_support_wait($1,$2,$3,true,true) result',[accountId,conversation,'wamid.cloud-test']);
+ await wait();await wait();
+ assert.equal((await db.query('select count(*)::int n from whatsapp_support_waits')).rows[0].n,1);
+ const timing=(await db.query('select extract(epoch from(w.run_at-m.created_at))::int seconds from whatsapp_support_waits w join messages m on m.id=w.source_message_id')).rows[0];assert.equal(timing.seconds,180);
+ assert.equal((await db.query('select * from claim_whatsapp_support_waits()')).rows.length,0);
+ await db.exec("update whatsapp_support_waits set run_at=now()-interval '1 second'");
+ assert.equal((await db.query('select * from claim_whatsapp_support_waits()')).rows.length,1);
+ assert.equal((await db.query('select * from claim_whatsapp_support_waits()')).rows.length,0);
+ await db.exec('set role authenticated');try{await assert.rejects(db.query('select * from claim_whatsapp_support_waits()'),/permission denied/);}finally{await db.exec('reset role');}
+});
 
 test('manual replies remain on support after Cloud opening without inventing a session receipt',async()=>{
  const conversation=await cloudSource();await supportOpening(conversation);const opening=await step('claim');await step('authorize',opening);await step('record',opening,'accepted','real-support-opening');

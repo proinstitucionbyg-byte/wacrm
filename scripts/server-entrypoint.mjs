@@ -31,18 +31,19 @@ export function startServer() {
   let stopping = false;
   const secret = process.env.AUTOMATION_CRON_SECRET;
   const port = process.env.PORT || '3000';
-  const schedule = (path, delay) => {
+  const schedule = (path, delay, interval=60_000) => {
     const timer = setTimeout(async () => {
       timers.delete(timer);
       if (stopping) return;
       await sweep(path, { secret, port });
-      if (!stopping) schedule(path, 60_000);
+      if (!stopping) schedule(path, interval, interval);
     }, delay);
     timers.add(timer);
   };
   if (secret) {
     schedule('/api/automations/cron', 15_000);
     schedule('/api/flows/cron', 20_000);
+    schedule('/api/multichannel/support/cron', 5_000, 5_000);
     console.info(
       '[scheduler] enabled: automations and flows, every minute after each completed cycle'
     );

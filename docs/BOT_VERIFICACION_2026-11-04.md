@@ -2,6 +2,14 @@
 
 Este corte complementa `BOT_ALCANCE_VIGENTE.md` y prevalece sobre sus estados antiguos de publicación. No declara terminado todo el bot.
 
+## Corte posterior: espera de Meta y recuperación
+
+- `ab86486` publicado con Success en EasyPanel el 04/11 a las 13:49 Lima; `/api/inbox/pending-count` responde 401 sin sesión. Incluye contador, número en mensajes, checks fosforescentes, emojis, fijación de soporte y protección de continuidad comercial. Las derivaciones nuevas siguen pausadas hasta comprobar el incremento siguiente.
+- Orden posterior del propietario: esperar hasta tres minutos antes de derivar un contacto sin evidencia de pauta. Implementación preparada: cola persistente con vencimiento desde la entrada real, sin reiniciar el plazo por mensajes adicionales; relectura de pauta al vencer; exclusión de casos ya respondidos o pausados; tarea independiente del navegador. Un primer número sin pauta pasa a Soporte aunque pregunte por cursos; la continuidad comercial previamente abierta conserva Cloud cuando su ventana lo permite.
+- Durante esa espera, la salida manual no puede caer a Cloud por falta temporal de evidencia. Una fila `needs_review` conserva el bloqueo para revisión; no se repite automáticamente una ejecución incierta.
+- Migración `20261104185557_support_meta_wait.sql` aplicada. 22 pruebas SQL, 24 Vitest y lint sin errores del incremento. Todavía requiere publicación/verificación de la tarea en el contenedor y prueba física con número nuevo.
+- Acceso `ABRIR_BOT.cmd` y `docs/BOT_GUIA_OPERATIVA.md`. Sintaxis de PowerShell revisada; `start.ps1 -PreferredSupport` comprobó el ejecutor existente sin abrir otro perfil ni reconectar Principal. El botón que abre navegador lo ejecuta el propietario; no afirmar prueba visual de ese lanzamiento.
+
 ## Comprobado en producción
 
 - `285251a` publicado: compilación EasyPanel correcta, controlador de soporte responde 401 sin sesión. Migraciones de soporte inicial, eco de mensajes y conservación de reactivaciones aplicadas.

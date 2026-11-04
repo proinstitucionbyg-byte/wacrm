@@ -163,6 +163,7 @@ export type ConversationStatus = 'open' | 'pending' | 'closed';
 
 export interface Conversation {
   whatsapp_support_line_key?: string | null;
+  whatsapp_support_wait_until?: string | null;
   inbox_cleared_at?: string | null;
   id: string;
   user_id: string;

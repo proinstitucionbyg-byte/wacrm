@@ -66,6 +66,11 @@ describe('enqueueSessionTextIfRequired', () => {
 });
 
 describe('getSessionOriginLineForConversation', () => {
+  it('blocks Cloud fallback while the durable Meta classification is pending',async()=>{
+    process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED='true';
+    const db=dbWith({data:{whatsapp_session_line_key:null,whatsapp_support_wait_until:'2026-11-04T18:03:00Z'},error:null});
+    await expect(getSessionOriginLineForConversation(db as never,'conversation')).rejects.toThrow('origen de Meta');
+  });
   it('does not query the new column while the bridge is disabled', async () => {
     delete process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED;
     const db = dbWith({ data: null, error: null });
