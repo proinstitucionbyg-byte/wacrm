@@ -20,6 +20,7 @@ import { createCampaignClient, startCampaignPoller } from './campaign-client.mjs
 import {openAutomationControl} from './automation-control.mjs';
 import {openHistoryArchive,createArchivedReader,archiveJournalMessage} from './history-archive.mjs';
 import{retainingLocalAuth}from'./retaining-local-auth.mjs';
+import {startCrmManagement} from './crm-management.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const privateRoot = join(root, 'output', 'multichannel-private', 'whatsapp-session');
@@ -70,7 +71,7 @@ async function main() {
   const port = Number(values.port ?? 8788);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('Puerto inválido.');
   const automationControl=await openAutomationControl({accountId,path:join(privateRoot,'accounts',accountId,'automation-control.json')});
-  let primary,lineManager,panel;
+  let primary,lineManager,panel,management;
   const createRuntime=async({accountId,lineKey,expectedPhone})=>{
     startupStage='open_session_store';
     const store=await openSessionStore({baseDir:privateRoot,accountId,lineKey});
@@ -139,13 +140,16 @@ async function main() {
       createOfflineReader:async({accountId,lineKey})=>createArchivedReader({archive:await openHistoryArchive({accountId,lineKey,path:join(privateRoot,sessionScope(accountId,lineKey),'history.jsonl'),readOnly:true}),isReady:async()=>false})});
     let stopTask;
     const stop = () => stopTask ??= (async () => {
-      await panel.close(); await lineManager.close(); process.exitCode = 0;
+      await panel.close(); await management?.stop(); await lineManager.close(); process.exitCode = 0;
     })();
     startupStage='start_private_panel';
     panel = await startSessionPanel({ adapter:primary.adapter, port, onStop: stop, chatReader:primary.chatReader,lineManager,automationControl, qrToSvg: qr => QRCode.toString(qr, { type: 'svg' }) });
     startupStage='save_panel_access';
     const access=JSON.stringify({ url: panel.url, origin: panel.origin, token: panel.token, pid: process.pid });
     await writeFile(join(privateRoot, sessionScope(accountId,lineKey), 'panel-access.json'), access, { mode: 0o600 });
+    if(ownerConfig.accountId===accountId&&ownerConfig.crmOutbound?.enabled===true){
+      management=startCrmManagement({accountId,origin:ownerConfig.crmOutbound.origin,token:ownerConfig.crmOutbound.token,manager:lineManager,qrToDataUrl:qr=>QRCode.toDataURL(qr),onError:()=>console.error('Gestión de WhatsApp desde CRM temporalmente no disponible.')});
+    }
     // Existing local launchers locate the panel through the configured bootstrap line.
     if(ownerConfig.accountId===accountId&&ownerConfig.lineKey&&ownerConfig.lineKey!==lineKey){
       await writeFile(join(privateRoot,sessionScope(accountId,ownerConfig.lineKey),'panel-access.json'),access,{mode:0o600});
@@ -156,6 +160,7 @@ async function main() {
     process.once('SIGTERM', signalStop);
   } catch (error) {
     if (panel) await panel.close();
+    await management?.stop();
     if(lineManager)await lineManager.close();else if(primary)await primary.stop();
     throw error;
   }

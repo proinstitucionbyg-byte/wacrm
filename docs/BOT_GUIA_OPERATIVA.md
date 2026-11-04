@@ -2,6 +2,20 @@
 
 ## Abrir y empezar a trabajar
 
+### Gestión unificada desde el CRM
+
+El punto de entrada es **CRM → Bot multicanal → Mis WhatsApps**. La computadora conserva las sesiones, pero el propietario gestiona el vínculo desde el CRM por HTTPS; no debe copiar tokens ni vínculos. Si la computadora aparece sin conexión, ejecutar **ABRIR_BOT.cmd** en el Escritorio/wacrm y regresar al CRM. Mantenerla encendida hasta migrar el ejecutor a Contabo.
+
+1. En una línea sin teléfono, pulsar **Vincular y mostrar QR**. Para crear otra pestaña, **Vincular otro WhatsApp**, poner nombre y pulsar **Crear y mostrar QR**.
+2. En el celular: WhatsApp → Dispositivos vinculados → Vincular dispositivo. Escanear el QR dentro del CRM y comprobar el número mostrado.
+3. El número confirmado se registra automáticamente **en pausa**. Pulsar **Habilitar automatizaciones** en su tarjeta. No basta con escanear.
+4. En el orden de atención, añadir el número como respaldo y guardar. Mantener 933691668 primero mientras sea la prioridad elegida por el propietario.
+5. **Detener sin desvincular** conserva vínculo e historial; **Desvincular** exige confirmar el teléfono y revoca ese vínculo; **Cambiar número con QR nuevo** conserva el historial anterior en otra identidad.
+
+Los QR se muestran solo al propietario, desaparecen cuando el ejecutor pierde actualidad y no se copian perfiles ni claves de sesión a la base. Una acción con resultado incierto requiere revisión, sin ejecutarse otra vez automáticamente. Los ejecutores anteriores conservan su instalación manual en un apartado avanzado de compatibilidad.
+
+### Acceso local de recuperación / compatibilidad
+
 1. En la carpeta `wacrm`, haz doble clic en **ABRIR_BOT.cmd**. Abre el panel privado de tu computadora; si el ejecutor ya estaba activo, reutiliza esa instancia. No cambia ni borra los perfiles.
 2. Selecciona **Soporte** y comprueba el teléfono **933691668** y el estado **Conectado**. Si el vínculo sigue vigente, se recupera sin otro QR.
 3. Entra al CRM → **Bot multicanal**. En el orden de atención, Soporte debe ser el primero; después, los respaldos que habilitaste.
@@ -47,3 +61,5 @@ Los tres minutos son el plazo configurado para clasificar. La ejecución y la en
 ## Prueba de aceptación pendiente
 
 Un teléfono nuevo autorizado escribe sin pauta al API → se registra la espera → se comprueba la evidencia de Meta → llega una sola apertura desde 933691668 → el teléfono responde una opción → continúa la rama existente → la asesora contesta desde CRM → el mismo WhatsApp entrega la respuesta. Comprobar teléfono de salida, acuse, visibilidad y ausencia de consumo/respuesta por API para ese recorrido de soporte. No dar por cerrado el recorrido solo por ver una bienvenida.
+
+Las respuestas numéricas se resuelven contra el menú entregado de esa conversación y línea; se conservan el ID y el título originales para las automatizaciones y Flows. No crear palabras clave globales «1», «2» o «3».

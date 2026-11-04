@@ -3,6 +3,7 @@
 import {useState} from 'react';
 import type {FormEvent} from 'react';
 import {SupportRoutingManager} from './support-routing-manager';
+import {WhatsappConnectionManager} from './whatsapp-connection-manager';
 
 type Line={line_key:string;linked_phone:string;worker_id:string;paused:boolean};
 type Worker={id:string;name:string;enabled:boolean};
@@ -34,7 +35,7 @@ export function SessionLineManager(){
  async function pause(line:Line){
   setBusy(true);setMessage('');try{await request({action:'pause_line',line_key:line.line_key,value:!line.paused});await refresh();setMessage(line.paused?'Automatizaciones habilitadas para esta línea. El teléfono debe permanecer conectado.':'Automatizaciones pausadas para esta línea.');}catch(error){setMessage(error instanceof Error?error.message:'No se pudo guardar.');}finally{setBusy(false);}
  }
- return <div className="space-y-4"><SupportRoutingManager/><section className="space-y-4 rounded-xl border border-border p-4">
+ return <div className="space-y-4"><WhatsappConnectionManager/><SupportRoutingManager/><details><summary className="cursor-pointer text-sm text-muted-foreground">Instalación avanzada y compatibilidad con ejecutores anteriores</summary><section className="mt-3 space-y-4 rounded-xl border border-border p-4">
   <h2 className="text-lg font-semibold">Mis números de WhatsApp y sus automatizaciones</h2>
   <p className="text-sm text-muted-foreground">Puedes abrir hasta diez números en el panel local. Primero vincula cada teléfono con su QR. Después copia su vínculo y regístralo aquí para que utilice las automatizaciones e IA del CRM.</p>
   <button className={buttonClass} type="button" disabled={busy} onClick={load}>{loaded?'Actualizar números':'Ver y activar mis números'}</button>
@@ -50,5 +51,5 @@ export function SessionLineManager(){
     <button className={buttonClass} disabled={busy||!worker||!link.trim()} type="submit">Registrar este número en el CRM</button>
    </form>
   </>}
- </section></div>;
+ </section></details></div>;
 }

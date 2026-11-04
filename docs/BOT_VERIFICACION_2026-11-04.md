@@ -4,6 +4,14 @@ Este corte complementa `BOT_ALCANCE_VIGENTE.md` y prevalece sobre sus estados an
 
 ## Corte posterior: espera de Meta y recuperación
 
+### Panel unificado y contador de publicidad
+
+- Entrada real del +51 969383871 a las 17:38:50; apertura desde 933 a las 17:41:54.799, entregada y confirmada físicamente por el propietario. Sin respuesta Cloud durante la espera. La respuesta manual de prueba desde Inbox a las 17:59 también quedó entregada por 933; otro «listo» manual quedó registrado/entregado a las 18:03.
+- El «1» se consumía correctamente contra el menú original, pero el motor recibía el dígito en lugar del título que esperan las automatizaciones comerciales antiguas. `09862dc` conserva el número escrito en el historial y pasa al motor ID+título verificados del menú. 25 pruebas SQL y 9 Vitest pasaron; falta comprobar la continuación comercial física completa después del arreglo. No volver a solicitar el mensaje inicial ni crear una entrada ficticia.
+- Error del contador confirmado: las 292 reservas activas de noviembre no tenían `source_message_row_id`; 96 conservaban evidencia de Meta `billable:false` con entrada gratuita publicitaria. La corrección anterior solo enlazaba por aquella columna antigua y no las encontraba. Migración `meta_free_entry_quota_reconciliation` aplicada: 96 filas marcadas `exempt`, sin borrar auditoría; 195 entregadas + 1 reservada = 196 consumidas en ese corte. Triggers corrigen confirmaciones tardías y evitan que otro acuse vuelva a contarlas. Un servicio gratuito ordinario no se excluye solo por `billable:false`; requiere evidencia de entrada publicitaria. Prueba SQL aprobada incluyendo corrección de Meta y separación de cuentas.
+- Gestión unificada implementada en `Mis WhatsApps`: comandos del propietario a su ejecutor por HTTPS, QR dentro del CRM, registro automático en pausa de un teléfono confirmado, habilitar/pausar bot, conectar/detener/desvincular/cambiar/recuperar. Migración `whatsapp_owner_management` aplicada; perfiles/tokens locales no se envían. QR efímero accesible solo al propietario. 30 pruebas Node/SQL + 9 Vitest, lint sin errores y tipos de producción aprobados. En publicación; verificar despliegue y reiniciar conservando líneas listas antes de darla por operativa.
+- Medios de campañas: WhatsApp y futuro chat del aula requieren secuencias ordenadas de texto/imagen/audio/video; SMS solo texto/emojis, sin adjuntos. Mantener programación manual y contrato para fechas de hojas/aula aún en construcción. Esta especificación no equivale a medios ni SMS físicos terminados.
+
 ### Recuperación de las 17:36 Lima
 
 - La publicación `3d45626` estaba bloqueada desde las 14:08 por una descarga truncada de GitHub (`gzip: unexpected end of file`), antes de compilar. Se canceló solamente esa acción de despliegue y se volvió a publicar el mismo código. EasyPanel confirmó **Success a las 17:30:14 Lima**; `/api/multichannel/support/cron` pasó de 404 a 401 sin credenciales.

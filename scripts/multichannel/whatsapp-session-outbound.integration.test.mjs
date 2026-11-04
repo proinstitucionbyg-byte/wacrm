@@ -54,6 +54,7 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104185557_support_meta_wait.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104223100_close_unstarted_whatsapp_reply.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104225000_session_menu_reply_title.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104232000_whatsapp_owner_management.sql', import.meta.url), 'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -63,6 +64,7 @@ before(async () => {
 
 after(() => db.close());
 beforeEach(async () => {
+  await db.exec('reset role;delete from public.whatsapp_management_commands;delete from public.whatsapp_management_state;');
   await db.exec(`reset role; delete from public.whatsapp_session_outbound_jobs; delete from public.whatsapp_session_inbound_receipts;
     delete from public.whatsapp_support_waits;
     delete from public.messages; delete from public.conversations; delete from public.contacts;
@@ -78,6 +80,22 @@ async function cloudSource(){
  await db.query('update public.multichannel_whatsapp_session_lines set support_ready_at=now() where account_id=$1',[accountId]);return conversation;
 }
 async function supportOpening(conversation){return(await db.query('select public.enqueue_cloud_support_opening($1,$2,$3,$4,$5::jsonb)as result',[accountId,conversation,'wamid.cloud-test','Hola, ¿en qué podemos ayudarte?\n1. Cursos',JSON.stringify([{id:'existing-id',title:'Cursos'}])])).rows[0].result;}
+
+test('owner management claims are isolated by worker and an uncertain action is never replayed',async()=>{
+ await db.query("insert into whatsapp_management_commands(account_id,worker_id,operation,line_key)values($1,$2,'connect',$3)",[accountId,workerId,lineKey]);
+ const claim=()=>db.query('select claim_whatsapp_management_command($1) result',[workerId]);
+ const first=(await claim()).rows[0].result;assert.equal(first.status,'running');assert.equal((await claim()).rows[0].result,null);
+ await db.query("update whatsapp_management_commands set lease_until=now()-interval '1 second' where id=$1",[first.id]);
+ assert.equal((await claim()).rows[0].result,null);
+ assert.equal((await db.query('select status from whatsapp_management_commands where id=$1',[first.id])).rows[0].status,'needs_review');
+ await assert.rejects(db.query('select claim_whatsapp_management_command($1)',[randomUUID()]),/Worker unavailable/);
+});
+
+test('QR snapshots and management commands are not accessible through browser database roles',async()=>{
+ await db.exec('set role authenticated');
+ try{await assert.rejects(db.query('select * from whatsapp_management_state'),/permission denied/);await assert.rejects(db.query('select * from whatsapp_management_commands'),/permission denied/);await assert.rejects(db.query('select claim_whatsapp_management_command($1)',[workerId]),/permission denied/);}
+ finally{await db.exec('reset role');}
+});
 
 test('a locally blocked unstarted reply releases the worker for the next reply without pretending delivery',async()=>{
  const conversation=await setupInbound();await enqueue(conversation,'blocked-first');await enqueue(conversation,'second-reply');
