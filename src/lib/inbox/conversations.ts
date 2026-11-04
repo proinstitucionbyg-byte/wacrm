@@ -1,5 +1,22 @@
 import type { Conversation, Contact, Tag } from "@/types";
 
+/** Formatting is ignored for phone searches; names and message text stay searchable. */
+export function matchesConversationSearch(conversation: Conversation, search: string): boolean {
+  const query = search.trim().toLowerCase();
+  if (!query) return true;
+  const contact = conversation.contact;
+  if (contact?.name?.toLowerCase().includes(query) || conversation.last_message_text?.toLowerCase().includes(query)) return true;
+  const phone = contact?.phone ?? '';
+  if (phone.toLowerCase().includes(query)) return true;
+  if (!/^[+\d\s().-]+$/.test(query)) return false;
+  const digits = query.replace(/\D/g, '');
+  if (!digits) return false;
+  const stored = phone.replace(/\D/g, '');
+  if (stored.includes(digits)) return true;
+  // Existing local Peruvian contacts may omit 51. Keep partial searches usable.
+  return /^9\d{8}$/.test(stored) && digits.startsWith('51') && digits.length > 2 && stored.includes(digits.slice(2));
+}
+
 /**
  * Conversation select that embeds the contact plus its tags, so the Inbox
  * can filter conversations by contact tag without a second round-trip.

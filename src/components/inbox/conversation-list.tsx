@@ -6,6 +6,7 @@ import {
   CONVERSATION_SELECT,
   isUnassignedActiveConversation,
   matchesContactFilters,
+  matchesConversationSearch,
   normalizeConversations,
 } from '@/lib/inbox/conversations';
 import { cn } from '@/lib/utils';
@@ -103,6 +104,16 @@ export function ConversationList({
     [managerOpen, setManagerOpen] = useState(false),
     [tagBusy, setTagBusy] = useState(false),
     [labelsRevision, setLabelsRevision] = useState(0);
+  useEffect(() => {
+    if (!checkedChats.length && !labelOpen) return;
+    const exitSelection = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing) return;
+      setLabelOpen(false);
+      setCheckedChats([]);
+    };
+    document.addEventListener('keydown', exitSelection, true);
+    return () => document.removeEventListener('keydown', exitSelection, true);
+  }, [checkedChats.length, labelOpen]);
   async function applyLabel(remove: boolean, tag: string) {
     setTagBusy(true);
     try {
@@ -237,13 +248,7 @@ export function ConversationList({
     }
 
     if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter((c) => {
-        const name = c.contact?.name?.toLowerCase() ?? '';
-        const phone = c.contact?.phone?.toLowerCase() ?? '';
-        const lastMsg = c.last_message_text?.toLowerCase() ?? '';
-        return name.includes(q) || phone.includes(q) || lastMsg.includes(q);
-      });
+      result = result.filter((c) => matchesConversationSearch(c, search));
     }
 
     return result.sort((a, b) =>
@@ -295,6 +300,7 @@ export function ConversationList({
   const handleSelect = useCallback(
     (conv: Conversation) => {
       onSelect(conv);
+      setSearch('');
     },
     [onSelect]
   );

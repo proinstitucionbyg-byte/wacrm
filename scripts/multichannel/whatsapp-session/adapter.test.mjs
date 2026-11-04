@@ -10,7 +10,7 @@ function message(id='inbound-one', own=false, chat=chatId) {
   return {id:{_serialized:id,fromMe:own},fromMe:own,from:own?phone+'@c.us':chat,to:own?chat:phone+'@c.us',
     body:'Mensaje ficticio',type:'chat',timestamp:Math.floor(Date.now()/1000)};
 }
-function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,onInbound,resolveSenderPhone,crmRetryInitialMs,campaignsEnabled=false,campaignPolicy,getAutomationPaused}={}) {
+function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,authorizePhone,onInbound,resolveSenderPhone,crmRetryInitialMs,campaignsEnabled=false,campaignPolicy,getAutomationPaused}={}) {
   const records=structuredClone(rows), client=new EventEmitter(); client.info={wid:{user:phone}};
   let sent=0,destroyed=0;
   client.initialize=async()=>{}; client.destroy=async()=>{destroyed++;};
@@ -23,13 +23,17 @@ function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,on
     allowed:true,paused:false,permissionConfirmed:true,...job,expiresAt:Date.now()+5000};};
   let campaignCalls=0;
   const authorizeCampaign=async job=>{campaignCalls++;return campaignPolicy?campaignPolicy(job,campaignCalls):{allowed:true,paused:false,permissionConfirmed:true,accountId,lineKey,sessionPhone:phone,jobId:job.id,campaignId:job.campaignId,chatId:job.chatId,bodyHash:job.bodyHash,expiresAt:Date.now()+5000};};
-  const adapter=createSessionAdapter({accountId,lineKey,client,store,enabled,repliesEnabled,authorizeReply,onInbound,resolveSenderPhone,expectedPhone,crmRetryInitialMs,campaignsEnabled,authorizeCampaign,getAutomationPaused});
+  const adapter=createSessionAdapter({accountId,lineKey,client,store,enabled,repliesEnabled,authorizeReply,onInbound,resolveSenderPhone,expectedPhone,authorizePhone,crmRetryInitialMs,campaignsEnabled,authorizeCampaign,getAutomationPaused});
   return {adapter,client,store,records,sent:()=>sent,destroyed:()=>destroyed,permitCalls:()=>permitCalls};
 }
 async function ready(s){await s.adapter.start();s.client.emit('ready');await s.adapter.idle();}
 async function inbound(s,id='inbound-one',chat=chatId){s.client.emit('message_create',message(id,false,chat));await s.adapter.idle();}
 const job=(key='job-one')=>({key,accountId,lineKey,chatId,inboundId:'inbound-one',body:'Respuesta ficticia'});
 const campaignJob=()=>({id:'campaign-job',key:'campaign:campaign-job',campaignId:'campaign-1',accountId,lineKey,chatId,body:'Campaña ficticia'});
+test('a duplicate linked phone cannot receive or send on another line',async()=>{
+ const s=setup({authorizePhone:async()=>false});await ready(s);assert.equal(s.adapter.status().status,'duplicate_number');
+ await inbound(s);assert.equal(s.adapter.status().received,0);assert.equal(s.records.some(r=>r.kind==='binding'),false);assert.equal(s.destroyed(),1);await s.adapter.stop();
+});
 
 test('campaign transport is disabled by default even with a policy callback',async()=>{
  const s=setup();await ready(s);assert.equal((await s.adapter.dispatchCampaign(campaignJob())).state,'disabled');assert.equal(s.sent(),0);await s.adapter.stop();

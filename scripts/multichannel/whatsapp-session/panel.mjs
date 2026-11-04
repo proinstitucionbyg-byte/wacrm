@@ -46,7 +46,7 @@ export async function startSessionPanel({ adapter, qrToSvg, port = 8788, onStop,
       }
       if(url.pathname==='/api/lines'&&request.method==='GET'){
         const state=adapter.status();
-        return send(200,JSON.stringify({defaultLine:state.lineKey,canManage:!!lineManager,automation:automationControl?.status()??null,capacity:lineManager?.capacity?.()??{limit:1,active:1},lines:lineManager?.list()??[{lineKey:state.lineKey,label:state.lineKey,status:state.status,active:true}]}));
+        return send(200,JSON.stringify({defaultLine:lineManager?.defaultLine?.()??state.lineKey,canManage:!!lineManager,automation:automationControl?.status()??null,capacity:lineManager?.capacity?.()??{limit:1,active:1},lines:lineManager?.list()??[{lineKey:state.lineKey,label:state.lineKey,status:state.status,active:true}]}));
       }
       if(lineManager&&request.method==='POST'&&url.pathname==='/api/lines'){
         if(request.headers['content-type']!=='application/json')return send(415,'{}');
@@ -63,6 +63,14 @@ export async function startSessionPanel({ adapter, qrToSvg, port = 8788, onStop,
       if(lineManager&&request.method==='POST'&&/^\/api\/lines\/[^/]+\/stop$/.test(url.pathname)){
         try{return send(200,JSON.stringify(await lineManager.disconnect(decodeURIComponent(url.pathname.split('/')[3]))));}
         catch{return send(409,JSON.stringify({error:'No se confirmó el cierre de esa línea. Se conserva su perfil.'}));}
+      }
+      if(lineManager&&request.method==='POST'&&/^\/api\/lines\/[^/]+\/replace$/.test(url.pathname)){
+        if(request.headers['content-type']!=='application/json')return send(415,'{}');
+        let size=0;const chunks=[];for await(const chunk of request){size+=chunk.length;if(size>256)return send(413,'{}');chunks.push(chunk);}
+        let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{return send(400,'{}');}
+        if(body?.confirmed!==true)return send(400,JSON.stringify({error:'Confirma el cambio de número.'}));
+        try{return send(201,JSON.stringify(await lineManager.replace(decodeURIComponent(url.pathname.split('/')[3]))));}
+        catch{return send(409,JSON.stringify({error:'No se completó el cambio. Revisa las líneas; el historial anterior se conserva.'}));}
       }
       if(lineManager&&request.method==='POST'&&/^\/api\/lines\/[^/]+\/unlink$/.test(url.pathname)){
         if(request.headers['content-type']!=='application/json')return send(415,'{}');

@@ -52,7 +52,9 @@ async function main() {
     try { saved = JSON.parse(await readFile(join(privateRoot, 'worker-config.json'), 'utf8')); }
     catch { throw Error('Falta seleccionar cuenta y línea mediante --account y --line.'); }
   }
-  const accountId = values.account ?? saved.accountId, lineKey = values.line ?? saved.lineKey;
+  const accountId = values.account ?? saved.accountId;
+  let lineKey=values.line??saved.lineKey;
+  if(!values.line){try{const registry=JSON.parse(await readFile(join(privateRoot,'accounts',accountId,'lines.json'),'utf8'));if(registry.accountId===accountId&&registry.defaultLine)lineKey=registry.defaultLine;}catch(error){if(error.code!=='ENOENT')throw error;}}
   startupStage='validate_session_scope';
   sessionScope(accountId, lineKey);
   let ownerConfig = {};
@@ -68,6 +70,7 @@ async function main() {
   const port = Number(values.port ?? 8788);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('Puerto inválido.');
   const automationControl=await openAutomationControl({accountId,path:join(privateRoot,'accounts',accountId,'automation-control.json')});
+  let primary,lineManager,panel;
   const createRuntime=async({accountId,lineKey,expectedPhone})=>{
     startupStage='open_session_store';
     const store=await openSessionStore({baseDir:privateRoot,accountId,lineKey});
@@ -97,6 +100,7 @@ async function main() {
     adapter = createSessionAdapter({ accountId, lineKey, store, client, enabled: true,
       repliesEnabled: Boolean(outboundClient), authorizeReply: outboundClient?.authorizeReply,
       onInbound, resolveSenderPhone:resolvePhone, getInboundPollerStatus:()=>inboundPoller?.status()??null, expectedPhone,
+      authorizePhone:phone=>lineManager?lineManager.claimPhone(lineKey,phone):false,
       campaignsEnabled:!!campaignClient,authorizeCampaign:campaignClient?.authorize,getAutomationPaused:()=>automationControl.isPaused(lineKey),onArchiveMessage:event=>archiveJournalMessage(archive,event) });
     const chatSource=createCachedChatSource(client);
     const isReady=async()=>{await adapter.refreshConnection();return adapter.status().status==='ready';};
@@ -118,13 +122,19 @@ async function main() {
     }};
     }catch(error){clearInterval(historyTimer);if(inboundPoller)inboundPoller.stop();if(campaignPoller)await campaignPoller.stop();if(outboundPoller)await outboundPoller.stop();await chatReader?.close();if(adapter)await adapter.stop();else await store.close();throw error;}
   };
-  let primary,lineManager,panel;
   try {
     startupStage='start_whatsapp_adapter';
     primary=await createRuntime({accountId,lineKey,expectedPhone:values['expected-phone']});
     startupStage='open_line_manager';
     lineManager=await openLineManager({accountId,primary:{lineKey,runtime:primary},createRuntime,
       registryPath:join(privateRoot,'accounts',accountId,'lines.json'),
+      readBoundPhone:async key=>{
+        let journal;try{journal=await readFile(join(privateRoot,sessionScope(accountId,key),'events.jsonl'),'utf8');}catch(error){if(error.code==='ENOENT')return null;throw error;}
+        const bindings=journal.split('\n').filter(Boolean).map(row=>JSON.parse(row)).filter(row=>row.kind==='binding');
+        const phones=[...new Set(bindings.map(row=>row.payload?.phone))];
+        if(phones.length>1||phones.some(phone=>!/^\d{7,15}$/.test(phone??'')))throw Error('Identidad guardada inválida.');
+        return phones[0]??null;
+      },
       createOfflineReader:async({accountId,lineKey})=>createArchivedReader({archive:await openHistoryArchive({accountId,lineKey,path:join(privateRoot,sessionScope(accountId,lineKey),'history.jsonl'),readOnly:true}),isReady:async()=>false})});
     let stopTask;
     const stop = () => stopTask ??= (async () => {
@@ -133,7 +143,12 @@ async function main() {
     startupStage='start_private_panel';
     panel = await startSessionPanel({ adapter:primary.adapter, port, onStop: stop, chatReader:primary.chatReader,lineManager,automationControl, qrToSvg: qr => QRCode.toString(qr, { type: 'svg' }) });
     startupStage='save_panel_access';
-    await writeFile(join(privateRoot, sessionScope(accountId,lineKey), 'panel-access.json'), JSON.stringify({ url: panel.url, origin: panel.origin, token: panel.token, pid: process.pid }), { mode: 0o600 });
+    const access=JSON.stringify({ url: panel.url, origin: panel.origin, token: panel.token, pid: process.pid });
+    await writeFile(join(privateRoot, sessionScope(accountId,lineKey), 'panel-access.json'), access, { mode: 0o600 });
+    // Existing local launchers locate the panel through the configured bootstrap line.
+    if(ownerConfig.accountId===accountId&&ownerConfig.lineKey&&ownerConfig.lineKey!==lineKey){
+      await writeFile(join(privateRoot,sessionScope(accountId,ownerConfig.lineKey),'panel-access.json'),access,{mode:0o600});
+    }
     console.log('Panel privado local (solo recepción): ' + panel.url);
     const signalStop = () => { void stop().catch(() => { console.error('No se pudo confirmar el cierre del ejecutor.'); process.exitCode = 1; }); };
     process.once('SIGINT', signalStop);

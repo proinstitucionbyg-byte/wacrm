@@ -44,7 +44,7 @@ function snapshot(message, now) {
 /** Real client adapter. No automatic rule/AI response or Cloud API fallback.
  * A send requires an injected, fresh CRM policy; the CLI supplies none. */
 export function createSessionAdapter({ accountId, lineKey, client, store, enabled = false,
-  repliesEnabled = false, authorizeReply, onInbound, resolveSenderPhone, getInboundPollerStatus, expectedPhone, now = Date.now, startupTimeoutMs = 90_000,
+  repliesEnabled = false, authorizeReply, onInbound, resolveSenderPhone, getInboundPollerStatus, expectedPhone, authorizePhone, now = Date.now, startupTimeoutMs = 90_000,
   crmRetryInitialMs = 5_000, crmRetryMaxMs = 60_000, campaignsEnabled = false, authorizeCampaign, getAutomationPaused = () => false, onArchiveMessage }) {
   if (store?.scope !== sessionScope(accountId, lineKey) || !client?.on || !client?.initialize || !client?.sendMessage) {
     throw Error('Falta la sesión aislada y su cliente.');
@@ -196,7 +196,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   function confirmConnection() {
     let becameReady = false;
     return enqueue(async () => {
-      if (!readySignalSeen || stopping || ['wrong_number', 'storage_error', 'auth_failure'].includes(status)) return;
+      if (!readySignalSeen || stopping || ['wrong_number', 'duplicate_number', 'storage_error', 'auth_failure'].includes(status)) return;
       try { socketState = await client.getState(); } catch { socketState = null; return; }
       if (socketState !== 'CONNECTED') {
         if (status === 'ready') { status = 'disconnected'; qr = null; }
@@ -209,6 +209,9 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       }
       if ((binding && binding !== phone) || (expectedPhone && expectedPhone !== phone)) {
         status = 'wrong_number'; qr = null; await client.destroy(); return;
+      }
+      if(authorizePhone&&await authorizePhone(phone)!==true){
+        status='duplicate_number';connectionReason='number_already_registered';qr=null;await client.destroy();return;
       }
       if (!binding) await persist('binding', { phone });
       becameReady = status !== 'ready';
@@ -233,7 +236,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     },
     auth_failure() { if (!stopping) { status = 'auth_failure'; qr = null; } },
     session_error() { if (!stopping) { status = 'connection_error'; connectionReason = 'navigation_interrupted'; qr = null; } },
-    disconnected() { if (!['wrong_number', 'storage_error'].includes(status)) status = 'disconnected'; qr = null; },
+    disconnected() { if (!['wrong_number', 'duplicate_number', 'storage_error'].includes(status)) status = 'disconnected'; qr = null; },
     message_create(message) {
       if (status !== 'ready' || stopping) return;
       const event = snapshot(message, now());

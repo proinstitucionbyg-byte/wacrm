@@ -113,6 +113,17 @@ test('stop requires the private token and invokes only the supplied local close 
     await new Promise(resolve=>setTimeout(resolve,100));assert.equal(called,1);
   } finally {await p.close();}
 });
+test('replacement requires the private token and explicit confirmation',async()=>{
+ let replaced=0;const adapter={status:()=>({lineKey:'WA-primary'}),qr:()=>null};
+ const lineManager={replace:async key=>{assert.equal(key,'WA-primary');replaced++;return{lineKey:'WA-new'};}};
+ const p=await startSessionPanel({adapter,lineManager,port:0,qrToSvg:async x=>x});
+ const post={method:'POST',headers:{...headers(p),'Content-Type':'application/json'},body:'{"confirmed":true}'};
+ try{
+  assert.equal((await fetch(p.origin+'/api/lines/WA-primary/replace',{...post,headers:{'Content-Type':'application/json'}})).status,401);
+  assert.equal((await fetch(p.origin+'/api/lines/WA-primary/replace',{...post,body:'{}'})).status,400);assert.equal(replaced,0);
+  const result=await fetch(p.origin+'/api/lines/WA-primary/replace',post);assert.equal(result.status,201);assert.equal((await result.json()).lineKey,'WA-new');assert.equal(replaced,1);
+ }finally{await p.close();}
+});
 test('line management is authenticated and each read is routed to the selected runtime',async()=>{
   let registered=0,connected=0,stopped=0,unlinked=0;
   const adapter={status:()=>({lineKey:'WA-primary'}),qr:()=>null},other={adapter:{status:()=>({lineKey:'WA-other'}),qr:()=> 'other-QR'},chatReader:{list:async()=>({total:7}),messages:async id=>({id,line:'other'})}};

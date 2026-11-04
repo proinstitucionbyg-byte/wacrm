@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   matchesContactFilters,
+  matchesConversationSearch,
   normalizeConversation,
   isUnassignedActiveConversation,
 } from "./conversations";
@@ -37,6 +38,25 @@ const tag = (id: string, name = id) => ({
   name,
   color: "#fff",
   created_at: "",
+});
+
+describe('formatted phone searches', () => {
+  it.each(['937467119', '937 467 119', '51 937 467 119', '+51 937467119', '+51 (937) 467-119', '51 9372'])(
+    'matches local and international phone formats: %s', (query) => {
+      const phone = query === '51 9372' ? '937200001' : '937467119';
+      expect(matchesConversationSearch(makeConversation({ phone }), query)).toBe(true);
+      expect(matchesConversationSearch(makeConversation({ phone: `+51 ${phone}` }), query)).toBe(true);
+    },
+  );
+  it('keeps name/text searches and rejects empty digit-only normalization', () => {
+    const conversation = makeConversation({ phone: '51937467119', name: 'Ana Pérez' });
+    conversation.last_message_text = 'Quiero farmacia';
+    expect(matchesConversationSearch(conversation, 'ANA')).toBe(true);
+    expect(matchesConversationSearch(conversation, 'farmacia')).toBe(true);
+    expect(matchesConversationSearch(conversation, '+ ( )')).toBe(false);
+    expect(matchesConversationSearch(conversation, '999888777')).toBe(false);
+    expect(matchesConversationSearch(makeConversation(null), '937')).toBe(false);
+  });
 });
 
 describe("matchesContactFilters", () => {

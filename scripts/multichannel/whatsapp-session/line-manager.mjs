@@ -4,31 +4,52 @@ import {randomUUID} from 'node:crypto';
 import {sessionScope} from './store.mjs';
 
 // A local account owns this registry. Each runtime still owns its isolated store lock.
-export async function openLineManager({accountId,primary,createRuntime,createOfflineReader,registryPath,maxActive=10}) {
+export async function openLineManager({accountId,primary,createRuntime,createOfflineReader,readBoundPhone,registryPath,maxActive=10}) {
   sessionScope(accountId,primary.lineKey);
   if(!Number.isInteger(maxActive)||maxActive<1||maxActive>10)throw Error('Límite de sesiones inválido.');
   const valid=row=>{sessionScope(accountId,row.lineKey);if(typeof row.label!=='string'||!row.label.trim()||row.label.length>60)throw Error('Nombre inválido.');return {lineKey:row.lineKey,label:row.label.trim()};};
-  let rows=[valid({lineKey:primary.lineKey,label:'Principal'})];
+  let defaultLine=primary.lineKey,rows=[valid({lineKey:primary.lineKey,label:'Principal'})];
   try {
     const saved=JSON.parse(await readFile(registryPath,'utf8'));
     if(saved.version!==1||saved.accountId!==accountId||!Array.isArray(saved.lines)||saved.lines.length>20)throw Error('Registro de líneas inválido.');
     rows=saved.lines.map(valid);
+    if(saved.defaultLine!==undefined){if(!rows.some(r=>r.lineKey===saved.defaultLine))throw Error('Línea principal inválida.');defaultLine=saved.defaultLine;}
     if(new Set(rows.map(r=>r.lineKey)).size!==rows.length)throw Error('Líneas duplicadas.');
     if(!rows.some(r=>r.lineKey===primary.lineKey))rows.unshift(valid({lineKey:primary.lineKey,label:'Principal'}));
   }catch(error){if(error.code!=='ENOENT')throw error;}
+  const phones=new Map();
+  for(const row of rows){const phone=await readBoundPhone?.(row.lineKey);if(phone)phones.set(row.lineKey,phone);}
   const runtimes=new Map([[primary.lineKey,primary.runtime]]);
   const readers=new Map([[primary.lineKey,primary.runtime.chatReader]]);
-  let tail=Promise.resolve(),closed=false;
+  let tail=Promise.resolve(),phoneTail=Promise.resolve(),closed=false;
   const serial=fn=>{const task=tail.then(()=>{if(closed)throw Error('Administrador detenido.');return fn();});tail=task.catch(()=>{});return task;};
-  const persist=async next=>{
+  const persist=async(next,nextDefault=defaultLine)=>{
     await mkdir(dirname(registryPath),{recursive:true,mode:0o700});
     const temp=registryPath+'.'+randomUUID()+'.tmp';
-    await writeFile(temp,JSON.stringify({version:1,accountId,lines:next}),{mode:0o600,flag:'wx'});
-    await rename(temp,registryPath);rows=next;
+    await writeFile(temp,JSON.stringify({version:1,accountId,defaultLine:nextDefault,lines:next}),{mode:0o600,flag:'wx'});
+    await rename(temp,registryPath);rows=next;defaultLine=nextDefault;
   };
   return Object.freeze({
     capacity(){return {limit:maxActive,active:runtimes.size};},
-    list(){return rows.map(row=>{const state=runtimes.get(row.lineKey)?.adapter.status();return {...row,status:state?.status??'stopped',linkedPhone:state?.linkedPhone??null,active:runtimes.has(row.lineKey)};});},
+    defaultLine(){return defaultLine;},
+    list(){return rows.map(row=>{const state=runtimes.get(row.lineKey)?.adapter.status();return {...row,status:state?.status??'stopped',linkedPhone:state?.linkedPhone??phones.get(row.lineKey)??null,active:runtimes.has(row.lineKey)};});},
+    claimPhone(lineKey,phone){const task=phoneTail.then(async()=>{
+      if(closed)throw Error('Administrador detenido.');
+      if(!rows.some(r=>r.lineKey===lineKey)||!/^\d{7,15}$/.test(phone??''))throw Error('Identidad inválida.');
+      if([...phones].some(([key,value])=>key!==lineKey&&value===phone))return false;
+      for(const [key,runtime]of runtimes)if(key!==lineKey&&runtime.adapter.status().linkedPhone===phone)return false;
+      phones.set(lineKey,phone);return true;
+    });phoneTail=task.catch(()=>{});return task;},
+    replace(lineKey){return serial(async()=>{
+      const previous=rows.find(r=>r.lineKey===lineKey);if(!previous)throw Error('Línea desconocida.');
+      if(rows.length>=20)throw Error('Se alcanzó el límite de líneas registradas.');
+      const row=valid({lineKey:'WA-'+randomUUID(),label:previous.label});
+      // A new number gets a new identity/profile. Never reuse the old phone journal.
+      const archived={...previous,label:('Historial '+previous.label).slice(0,48)+' '+lineKey.slice(-8)};
+      await persist(rows.map(r=>r.lineKey===lineKey?archived:r).concat(row),defaultLine===lineKey?row.lineKey:defaultLine);
+      const runtime=runtimes.get(lineKey);if(runtime){await runtime.stop();runtimes.delete(lineKey);}
+      return {...row,historyLine:lineKey};
+    });},
     get(lineKey=primary.lineKey){
       if(closed)throw Error('Administrador detenido.');
       sessionScope(accountId,lineKey);

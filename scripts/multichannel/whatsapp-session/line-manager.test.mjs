@@ -20,6 +20,20 @@ test('registering a line persists metadata without opening WhatsApp',()=>fixture
   const row=await x.manager.register({label:'Soporte'});assert.equal(x.created(),0);assert.equal(x.manager.list()[1].status,'stopped');
   const restored=await openLineManager(x.options);assert.equal(restored.list()[1].lineKey,row.lineKey);await restored.close();
 }));
+test('replacement creates a fresh profile identity and preserves the previous registration and history',()=>fixture(async x=>{
+ await x.manager.claimPhone('WA-main','51900000001');
+ const row=await x.manager.replace('WA-main');assert.notEqual(row.lineKey,'WA-main');assert.equal(row.label,'Principal');
+ assert.equal(x.manager.defaultLine(),row.lineKey);assert.equal(x.created(),0);assert.equal(x.stopped(),1);
+ const old=x.manager.list().find(r=>r.lineKey==='WA-main');assert.match(old.label,/Historial/);assert.equal(old.linkedPhone,'51900000001');assert.equal(old.active,false);
+ const restored=await openLineManager({...x.options,readBoundPhone:async key=>key==='WA-main'?'51900000001':null});
+ assert.equal(restored.defaultLine(),row.lineKey);assert.equal(await restored.claimPhone(row.lineKey,'51900000001'),false);await restored.close();
+}));
+test('concurrent phone claims reject duplicates while the original line may reopen',()=>fixture(async x=>{
+ const row=await x.manager.register({label:'Nueva'});
+ const results=await Promise.all([x.manager.claimPhone('WA-main','51900000001'),x.manager.claimPhone(row.lineKey,'51900000001')]);
+ assert.deepEqual(results,[true,false]);await x.manager.disconnect('WA-main');assert.equal(await x.manager.claimPhone(row.lineKey,'51900000001'),false);
+ assert.equal(await x.manager.claimPhone('WA-main','51900000001'),true);
+}));
 test('default capacity permits ten isolated sessions and rejects an eleventh',()=>fixture(async x=>{
   const options={...x.options};delete options.maxActive;
   const manager=await openLineManager(options);
