@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 
-const kinds = new Set(['binding', 'inbound', 'human', 'crm_sync', 'attempt', 'result', 'ack', 'manual_attempt', 'manual_result']);
+const kinds = new Set(['binding', 'inbound', 'human', 'human_resume', 'crm_sync', 'attempt', 'result', 'ack', 'manual_attempt', 'manual_result']);
 export function sessionScope(accountId, lineKey) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(accountId ?? '') ||
       !/^WA-[A-Za-z0-9_-]{1,60}$/.test(lineKey ?? '')) throw Error('Cuenta o línea de WhatsApp inválida.');

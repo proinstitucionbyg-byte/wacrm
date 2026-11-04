@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": [
+    "../../src/lib/multichannel/**/*.ts",
+    "../../src/app/api/multichannel/**/*.ts",
+    "../../src/components/multichannel/**/*.tsx",
+    "../../src/app/(dashboard)/multichannel/**/*.tsx",
+    "../../next-env.d.ts"
+  ],
+  "exclude": ["../../node_modules", "../../output"]
+}

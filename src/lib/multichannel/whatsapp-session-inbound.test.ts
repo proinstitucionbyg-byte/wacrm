@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { sessionContentType, sessionSenderPhone } from './whatsapp-session-protocol';
 
-const mocks = vi.hoisted(() => ({ factory: vi.fn(), from: vi.fn(), rpc: vi.fn(), dispatch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ factory: vi.fn(), from: vi.fn(), rpc: vi.fn(), dispatch: vi.fn(),internalLine:vi.fn() }));
 vi.mock('@/lib/automations/admin-client', () => ({ supabaseAdmin: () => mocks.factory() }));
 vi.mock('@/lib/whatsapp/inbound-dispatch', () => ({ dispatchInboundThroughCrm: mocks.dispatch }));
 import { POST } from '@/app/api/multichannel/whatsapp/inbound/route';
@@ -26,18 +26,33 @@ beforeEach(() => {
     conversations: { data: { id: 'conversation-1', contact_id: 'contact-1', user_id: 'owner-1', automation_enabled: true, ai_enabled: true, last_human_message_at: null }, error: null },
   };
   mocks.from.mockImplementation((table: string) => {
-    const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
+    const query = { select: vi.fn(), eq: vi.fn(), limit:vi.fn(), maybeSingle: vi.fn() };
     (query as typeof query & { table: string }).table = table;
-    query.select.mockReturnValue(query); query.eq.mockReturnValue(query);
-    query.maybeSingle.mockImplementation(() => Promise.resolve(rows[table]));
+    query.select.mockReturnValue(query); query.eq.mockReturnValue(query);query.limit.mockReturnValue(query);
+    query.maybeSingle.mockImplementation(() => table==='multichannel_whatsapp_session_lines'?mocks.internalLine():Promise.resolve(rows[table]));
     return query;
   });
   mocks.factory.mockReturnValue({ from: mocks.from, rpc: mocks.rpc });
+  mocks.internalLine.mockResolvedValue({data:null,error:null});
   mocks.rpc.mockResolvedValue({ data: 'recorded', error: null });
   mocks.dispatch.mockResolvedValue(undefined);
 });
 
 describe('entrada de WhatsApp Web', () => {
+  it('stores messages from another owned number without starting a bot-to-bot loop',async()=>{
+    mocks.internalLine.mockResolvedValue({data:{line_key:'WA-other-owned'},error:null});
+    const response=await POST(request(payload));expect(response.status).toBe(200);expect(await response.json()).toEqual({result:'recorded',automation:'internal_line_skipped'});expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+  it('maps a numbered menu response to the original CRM branch after the database verifies the prompt',async()=>{
+    mocks.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:{reply_id:'academic_existing_branch'},error:null});
+    expect((await POST(request({...payload,text:'2'}))).status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith('resolve_whatsapp_session_menu_reply',{p_worker_id:'trusted-worker',p_line_key:payload.line_key,p_conversation_id:'conversation-1',p_inbound_row_id:'message-row'});
+    expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({interactiveReplyId:'academic_existing_branch',channel:'session'}));
+  });
+  it('does not guess a menu branch when its verification fails',async()=>{
+    mocks.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:null,error:{message:'private'}});
+    expect((await POST(request({...payload,text:'1'}))).status).toBe(503);expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
   it('is disabled by default and does not access the database', async () => {
     vi.stubEnv('MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED', '');
     expect((await POST(request(payload))).status).toBe(503);

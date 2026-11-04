@@ -7,6 +7,10 @@ const accountId = '11111111-1111-4111-8111-111111111111';
 const jobId = '22222222-2222-4222-8222-222222222222';
 const claimToken = '33333333-3333-4333-8333-333333333333';
 
+test('paused automation does not reserve replies from the central queue',async()=>{
+ let calls=0;const poller=startCrmOutboundPoller({adapter:{status:()=>({status:'ready',automationPaused:true}),dispatch:async()=>{}},client:{claim:async()=>{calls++;},record:async()=>{}},pollMs:1000});
+ await poller.stop();assert.equal(calls,0);
+});
 test('outbound client validates private config and claims only its configured line', async () => {
   assert.throws(() => createCrmOutboundClient({ origin: 'http://example.test', token, lineKey: 'main' }));
   let sent;
@@ -33,10 +37,15 @@ test('outbound poller records ambiguous dispatches for review and stops cleanly'
     },
     async record(_job, result) { events.push(['record', result.state]); return { recorded: true }; },
   };
-  const adapter = { status: () => ({ status: 'ready' }), dispatch: async () => ({ state: 'needs_review' }) };
+  let dispatched;
+  const adapter = { status: () => ({ status: 'ready' }), dispatch: async job => {
+    dispatched=job;
+    return { state: 'needs_review' };
+  } };
   const poller = startCrmOutboundPoller({ adapter, client, pollMs: 1000 });
   const deadline = Date.now() + 500;
   while (!events.length && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
   await poller.stop();
+  assert.equal(dispatched.id,jobId);assert.equal(dispatched.claimToken,claimToken);
   assert.deepEqual(events, [['record', 'needs_review']]);
 });

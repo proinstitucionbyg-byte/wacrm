@@ -6,15 +6,29 @@ import {join} from 'node:path';
 import {openLineManager} from './line-manager.mjs';
 const accountId='4d761b3c-4c6c-4986-bcd8-d95f1754fe35';
 async function fixture(fn){
-  const dir=await mkdtemp(join(tmpdir(),'wa-lines-')),registryPath=join(dir,'lines.json');let created=0,stopped=0;
-  const runtime=lineKey=>({adapter:{status:()=>({accountId,lineKey,status:'connecting'})},chatReader:{},stop:async()=>{stopped++;}});
+  const dir=await mkdtemp(join(tmpdir(),'wa-lines-')),registryPath=join(dir,'lines.json');let created=0,stopped=0,unlinked=0;
+  const runtime=lineKey=>({adapter:{status:()=>({accountId,lineKey,status:'connecting'})},chatReader:{},stop:async()=>{stopped++;},unlink:async()=>{unlinked++;return{unlinked:true};}});
   const options={accountId,registryPath,primary:{lineKey:'WA-main',runtime:runtime('WA-main')},createRuntime:async({lineKey})=>{created++;return runtime(lineKey);},maxActive:2};
   const manager=await openLineManager(options);
-  try{await fn({manager,options,registryPath,created:()=>created,stopped:()=>stopped});}finally{await manager.close();await rm(dir,{recursive:true,force:true});}
+  try{await fn({manager,options,registryPath,created:()=>created,stopped:()=>stopped,unlinked:()=>unlinked});}finally{await manager.close();await rm(dir,{recursive:true,force:true});}
 }
+test('recovery preserves a connecting profile and opens a stopped line only once',()=>fixture(async x=>{
+ const line=await x.manager.register({label:'Repair'});const first=await x.manager.recover(line.lineKey);assert.equal(first.restarted,true);assert.equal(first.uncertainReplayed,false);
+ const next=await x.manager.recover(line.lineKey);assert.equal(next.restarted,false);assert.equal(x.created(),1);assert.equal(x.stopped(),0);
+}));
 test('registering a line persists metadata without opening WhatsApp',()=>fixture(async x=>{
   const row=await x.manager.register({label:'Soporte'});assert.equal(x.created(),0);assert.equal(x.manager.list()[1].status,'stopped');
   const restored=await openLineManager(x.options);assert.equal(restored.list()[1].lineKey,row.lineKey);await restored.close();
+}));
+test('default capacity permits ten isolated sessions and rejects an eleventh',()=>fixture(async x=>{
+  const options={...x.options};delete options.maxActive;
+  const manager=await openLineManager(options);
+  try{
+    const lines=[];for(let n=1;n<=10;n++)lines.push(await manager.register({label:'Extra '+n}));
+    for(const row of lines.slice(0,9))await manager.connect(row.lineKey);
+    assert.equal(manager.list().filter(row=>row.active).length,10);
+    await assert.rejects(manager.connect(lines[9].lineKey),/10 sesiones/);
+  }finally{await manager.close();}
 }));
 test('different lines use different runtimes and concurrent duplicate connects open one',()=>fixture(async x=>{
   const row=await x.manager.register({label:'Ventas'});await Promise.all([x.manager.connect(row.lineKey),x.manager.connect(row.lineKey)]);
@@ -38,4 +52,8 @@ test('stopping one line preserves registration and frees capacity without stoppi
   const result=await x.manager.disconnect(a.lineKey);assert.equal(result.profilePreserved,true);assert.equal(x.stopped(),1);
   assert.equal(x.manager.get('WA-main').adapter.status().lineKey,'WA-main');assert.equal(x.manager.list()[1].active,false);
   await x.manager.connect(b.lineKey);assert.equal(x.created(),2);
+}));
+test('unlink affects only the selected runtime and retains its registration',()=>fixture(async x=>{
+ const line=await x.manager.register({label:'Other'});await x.manager.connect(line.lineKey);await x.manager.unlink(line.lineKey);
+ assert.equal(x.unlinked(),1);assert.equal(x.manager.list().find(r=>r.lineKey===line.lineKey).active,false);assert.ok(x.manager.get('WA-main'));
 }));

@@ -11,6 +11,31 @@ async function fixture(fn) {
   try { await fn(panel); } finally { await panel.close(); }
 }
 const headers=p=>({Authorization:'Bearer '+p.token});
+test('pause and recovery require the owner panel token and reject unknown line or forged scope',async()=>{
+ const changes=[];let repairs=0;const automationControl={status:()=>({allPaused:false,pausedLines:[]}),isPaused:()=>false,set:async value=>{changes.push(value);return value;}};
+ const lineManager={list:()=>[{lineKey:'WA-main'}],recover:async key=>{assert.equal(key,'WA-main');repairs++;return{status:'ready',uncertainReplayed:false};}};
+ const p=await startSessionPanel({adapter:{status:()=>({lineKey:'WA-main'}),qr:()=>null},automationControl,lineManager,port:0,qrToSvg:async()=>''});
+ const post=body=>({method:'POST',headers:{...headers(p),'Content-Type':'application/json'},body:JSON.stringify(body)});
+ try{
+  assert.equal((await fetch(p.origin+'/api/automation',{method:'POST'})).status,401);
+  assert.equal((await fetch(p.origin+'/api/automation',post({scope:'all',paused:true,line_key:'WA-main'}))).status,400);
+  assert.equal((await fetch(p.origin+'/api/automation',post({scope:'line',paused:true,line_key:'WA-unknown'}))).status,400);
+  assert.equal(changes.length,0);
+  assert.equal((await fetch(p.origin+'/api/automation',post({scope:'all',paused:true}))).status,200);assert.deepEqual(changes,[{paused:true}]);
+  assert.equal((await fetch(p.origin+'/api/lines/WA-main/recover',{method:'POST'})).status,401);
+  assert.equal((await fetch(p.origin+'/api/lines/WA-main/recover',post({}))).status,200);assert.equal(repairs,1);
+ }finally{await p.close();}
+});
+test('native QR image is authenticated, scoped and unchanged images keep their ETag',async()=>{
+ const png=Buffer.from('fixture-png');const adapter={status:()=>({}),qr:()=>null,qrImage:()=> 'data:image/png;base64,'+png.toString('base64')};
+ const p=await startSessionPanel({adapter,port:0,qrToSvg:async()=>{throw Error('Must preserve native image');}});
+ try{
+  assert.equal((await fetch(p.origin+'/api/qr')).status,401);
+  const r=await fetch(p.origin+'/api/qr',{headers:headers(p)});assert.equal(r.headers.get('content-type'),'image/png');
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()),png);
+  const unchanged=await fetch(p.origin+'/api/qr',{headers:{...headers(p),'If-None-Match':r.headers.get('etag')}});assert.equal(unchanged.status,304);
+ }finally{await p.close();}
+});
 test('unchanged QR returns 304 so the screen keeps its existing image',()=>fixture(async p=>{
   const first=await fetch(p.origin+'/api/qr',{headers:headers(p)});const tag=first.headers.get('etag');await first.text();
   assert.ok(tag);
@@ -89,9 +114,9 @@ test('stop requires the private token and invokes only the supplied local close 
   } finally {await p.close();}
 });
 test('line management is authenticated and each read is routed to the selected runtime',async()=>{
-  let registered=0,connected=0,stopped=0;
+  let registered=0,connected=0,stopped=0,unlinked=0;
   const adapter={status:()=>({lineKey:'WA-primary'}),qr:()=>null},other={adapter:{status:()=>({lineKey:'WA-other'}),qr:()=> 'other-QR'},chatReader:{list:async()=>({total:7}),messages:async id=>({id,line:'other'})}};
-  const lineManager={list:()=>[{lineKey:'WA-primary'},{lineKey:'WA-other'}],get:key=>{if(key!=='WA-other')throw Error();return other;},register:async row=>{registered++;return row;},connect:async()=>{connected++;return {};},disconnect:async()=>{stopped++;return {profilePreserved:true};}};
+  const lineManager={list:()=>[{lineKey:'WA-primary'},{lineKey:'WA-other'}],get:key=>{if(key!=='WA-other')throw Error();return other;},register:async row=>{registered++;return row;},connect:async()=>{connected++;return {};},disconnect:async()=>{stopped++;return {profilePreserved:true};},unlink:async key=>{assert.equal(key,'WA-other');unlinked++;return{unlinked:true,historyPreserved:true};}};
   const p=await startSessionPanel({adapter,lineManager,port:0,qrToSvg:async x=>x});
   try{
     assert.equal((await fetch(p.origin+'/api/lines')).status,401);
@@ -106,5 +131,8 @@ test('line management is authenticated and each read is routed to the selected r
     assert.equal((await (await fetch(p.origin+'/api/chats?line=WA-other',{headers:headers(p)})).json()).total,7);
     assert.equal(await (await fetch(p.origin+'/api/qr?line=WA-other',{headers:headers(p)})).text(),'other-QR');
     assert.equal((await fetch(p.origin+'/api/status?line=WA-missing',{headers:headers(p)})).status,404);
+    assert.equal((await fetch(p.origin+'/api/lines/WA-other/unlink',{method:'POST'})).status,401);
+    assert.equal((await fetch(p.origin+'/api/lines/WA-other/unlink',{...post,body:'{}'})).status,400);assert.equal(unlinked,0);
+    assert.equal((await fetch(p.origin+'/api/lines/WA-other/unlink',{...post,body:'{"confirmed":true}'})).status,200);assert.equal(unlinked,1);
   }finally{await p.close();}
 });

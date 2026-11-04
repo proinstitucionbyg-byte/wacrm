@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
 import { dispatchInboundThroughCrm } from '@/lib/whatsapp/inbound-dispatch';
+import{withSessionInbound}from'@/lib/whatsapp/session-inbound-context';
 import { sessionContentType, sessionSenderPhone, whatsappSessionInboundSchema } from '@/lib/multichannel/whatsapp-session-protocol';
 
 export const runtime = 'nodejs';
@@ -68,6 +69,13 @@ export async function POST(request: Request) {
     }
     if (!['recorded', 'duplicate'].includes(result.data)) throw new Error('Unexpected inbound result');
 
+    // Linked business lines may talk to each other. Keep their history, but
+    // never let the bots create an automatic reply loop between owned numbers.
+    const internalLine=await db.from('multichannel_whatsapp_session_lines').select('line_key')
+      .eq('account_id',worker.data.account_id).eq('linked_phone',senderPhone).limit(1).maybeSingle();
+    if(internalLine.error)throw internalLine.error;
+    if(internalLine.data)return NextResponse.json({result:result.data,automation:'internal_line_skipped'},{headers:{'Cache-Control':'no-store'}});
+
     // Only plain text is sent to the shared CRM dispatcher for now. Other
     // media remain visible in the Inbox as placeholders until their CRM
     // storage and WhatsApp Web transport are implemented.
@@ -86,22 +94,35 @@ export async function POST(request: Request) {
         .eq('id', message.data.conversation_id).eq('account_id', worker.data.account_id).maybeSingle();
       if (conversation.error || !conversation.data) throw conversation.error ?? new Error('Conversation unavailable');
 
-      await dispatchInboundThroughCrm({
+      let interactiveReplyId:string|null=null;
+      if(/^(?:[1-9]|10)$/.test(parsed.data.text.trim())){
+        const menu=await db.rpc('resolve_whatsapp_session_menu_reply',{
+          p_worker_id:worker.data.id,p_line_key:parsed.data.line_key,
+          p_conversation_id:conversation.data.id,p_inbound_row_id:receipt.data.message_row_id,
+        });
+        // A missing migration is an actionable failure, never a guessed branch.
+        if(menu.error)throw menu.error;
+        if(typeof menu.data?.reply_id==='string')interactiveReplyId=menu.data.reply_id;
+      }
+
+      const dispatchInput={
         db,
-        channel: 'session',
+        channel: 'session' as const,
         accountId: worker.data.account_id,
         userId: conversation.data.user_id,
         contactId: conversation.data.contact_id,
         conversationId: conversation.data.id,
         messageId: message.data.message_id,
         contentText: message.data.content_text,
+        interactiveReplyId,
         isFirstInboundMessage: receipt.data.is_first_inbound,
         previousInboundAt: receipt.data.previous_inbound_at ?? undefined,
         inboundAt: message.data.created_at,
         contactCreated: receipt.data.contact_created,
         hasConfirmedAdOrigin: false,
         conversation: conversation.data,
-      });
+      };
+      await withSessionInbound({accountId:worker.data.account_id,conversationId:conversation.data.id,lineKey:parsed.data.line_key,messageRowId:receipt.data.message_row_id,providerMessageId:parsed.data.provider_message_id},()=>dispatchInboundThroughCrm(dispatchInput));
     }
     return NextResponse.json({ result: result.data }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {

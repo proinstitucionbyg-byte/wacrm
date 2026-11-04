@@ -114,6 +114,7 @@ const navItems: NavItem[] = [
   { href: "/enrollments", labelKey: "", label: "Registro de matrículas", icon: Users, permission: ["enrollments", "view"] },
   { href: "/team-chat", labelKey: "", label: "Chat interno", icon: UsersRound, permission: ["inbox", "view"] },
   {href:'/reports',labelKey:'',label:'Estadísticas de primeras frases',icon:LayoutDashboard,ownerOnly:true},
+  {href:'/multichannel',labelKey:'',label:'Bot multicanal',icon:Bot,ownerOnly:true},
   {
     href: "/notifications",
     labelKey: "notifications",

@@ -7,6 +7,7 @@ import { usePresence } from '@/hooks/use-presence';
 import { PresenceDot } from '@/components/presence/presence-dot';
 import { presenceLabel } from '@/lib/presence';
 import { cn } from '@/lib/utils';
+import { latestSessionOrigin } from '@/lib/whatsapp/session-origin';
 import type {
   Conversation,
   Message,
@@ -240,10 +241,11 @@ export function MessageThread({
   >([]);
   const canAssign = useCan('inbox.assign');
   const canHideMessages = useCan('inbox_management.messages');
+  const sessionOriginLine = useMemo(() => latestSessionOrigin(messages), [messages]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!conversation || contact?.channel !== 'whatsapp') {
+    if (!conversation || contact?.channel !== 'whatsapp' || sessionOriginLine) {
       setBillingPreflight(null);
       setBillingPreflightError('');
       return;
@@ -262,7 +264,7 @@ export function MessageThread({
         }
       });
     return () => { cancelled = true; };
-  }, [conversation?.id, contact?.channel, messages.at(-1)?.created_at]);
+  }, [conversation?.id, contact?.channel, messages.at(-1)?.created_at, sessionOriginLine]);
 
   const [transferPicker, setTransferPicker] = useState(false);
   const [transferArea, setTransferArea] = useState('');
@@ -355,6 +357,7 @@ export function MessageThread({
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
+    if (sessionOriginLine) return { expired: false, remaining: 'WhatsApp vinculado · ' + sessionOriginLine };
     if (!messages.length) return { expired: false, remaining: '' };
 
     // Find last customer message
@@ -382,7 +385,7 @@ export function MessageThread({
         : tTimer('xmRemaining', { minutes: Math.floor(hoursLeft * 60) });
 
     return { expired, remaining };
-  }, [messages, tTimer]);
+  }, [messages, tTimer, sessionOriginLine]);
 
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
@@ -1624,7 +1627,10 @@ export function MessageThread({
         }}
       />
 
-      {contact?.channel === 'whatsapp' && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-[11px] text-muted-foreground" aria-live="polite">
+      {sessionOriginLine && <div className="border-y px-3 py-1.5 text-[11px] text-emerald-700" aria-live="polite">
+        Respuesta por WhatsApp vinculado · {sessionOriginLine}. La disponibilidad de la línea se verifica al enviar.
+      </div>}
+      {contact?.channel === 'whatsapp' && !sessionOriginLine && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-[11px] text-muted-foreground" aria-live="polite">
         <span className={billingPreflight?.state === 'free' ? 'font-semibold text-emerald-600' : billingPreflight?.state === 'paid' ? 'font-semibold text-rose-600' : 'font-semibold text-amber-600'}>
           SIGUIENTE MENSAJE: {billingPreflight?.free_entry_window_open
             ? 'GRATIS PREVISTO · ANUNCIO META CONFIRMADO'

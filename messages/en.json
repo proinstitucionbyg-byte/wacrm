@@ -137,6 +137,7 @@
       "filterOpen": "Open",
       "filterPending": "Pending",
       "filterClosed": "Closed",
+      "filterUnassigned": "Unassigned",
       "tags": "Tags",
       "company": "Company",
       "allCompanies": "All companies",

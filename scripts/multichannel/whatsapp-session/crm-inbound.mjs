@@ -1,7 +1,7 @@
 const TOKEN = /^wcm_[a-f0-9]{64}$/;
 const PHONE = /^\d{7,15}$/;
 
-export function createCrmInboundSync({ origin, token, fetchImpl = fetch, timeoutMs = 8000 }) {
+export function createCrmInboundSync({ origin, token, fetchImpl = fetch, timeoutMs = 30000 }) {
   let endpoint;
   try {
     const url = new URL(origin);

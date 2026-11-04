@@ -19,8 +19,11 @@ try {
     const status = await response.json();
     const qr = status.status === 'awaiting_qr' ? await fetch(new URL('/api/qr', origin), options) : null;
     console.log(JSON.stringify({ status: status.status, connectionReason: status.connectionReason,
+      connectionDetail: status.connectionDetail,
       qrAvailable: qr?.status === 200, qrIsSvg: qr?.headers.get('content-type') === 'image/svg+xml',
-      repliesEnabled: status.repliesEnabled, receivedCount: status.received }));
+      repliesEnabled: status.repliesEnabled, receivedCount: status.received,
+      centralSync: status.centralSync,
+      inboundPoller: status.inboundPoller }));
     await qr?.body?.cancel();
   }
 } catch { console.log(JSON.stringify({ status: 'unavailable' })); process.exitCode = 1; }

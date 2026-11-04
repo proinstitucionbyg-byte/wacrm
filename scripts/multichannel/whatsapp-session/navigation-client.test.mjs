@@ -2,6 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { navigationSafeClient } from './navigation-client.mjs';
+test('native QR remains available while waiting for a new linked socket',async()=>{
+ const calls=[];let callback;
+ class Base extends EventEmitter {options={};pupPage={
+   exposeFunction:async(name,fn)=>{calls.push(name);callback=fn;},
+   evaluate:async(fn,...args)=>{calls.push(args.length?'observe':'evaluate');return false;},
+   waitForFunction:async(_,options)=>{assert.equal(options.timeout,0);callback('data:image/png;base64,aGVsbG8=');},
+ };async inject(){calls.push('inject');}}
+ const Client=navigationSafeClient(Base),client=new Client();let qr;client.on('qr_image',value=>{qr=value;});
+ await client.inject();assert.equal(qr,'data:image/png;base64,aGVsbG8=');assert.ok(calls.includes('observe'));assert.equal(calls.at(-1),'inject');
+});
 test('waits for a navigation-safe page condition before vendor injection',async()=>{
   const events=[];
   class Base extends EventEmitter { options={authTimeoutMs:7000};pupPage={waitForFunction:async(condition,options)=>{

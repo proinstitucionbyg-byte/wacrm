@@ -44,6 +44,8 @@ before(async () => {
   await db.query(`insert into public.profiles(user_id,account_id,account_role) values($1,$2,'owner')`, [ownerId,accountId]);
   await db.exec(await readFile(new URL('../../supabase/migrations/20261029151930_whatsapp_session_inbound_bridge.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261029151956_whatsapp_session_outbound_queue.sql', import.meta.url), 'utf8'));
+  await db.exec('alter table public.messages add column interactive_payload jsonb;');
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104111054_whatsapp_session_text_menus.sql', import.meta.url), 'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -84,6 +86,40 @@ async function step(action, job = {}, state = null, provider = null) {
     workerId,lineKey,action,job.job_id ?? job.id ?? null,job.claim_token ?? null,state,provider,
   ])).rows[0].result;
 }
+
+async function queueMenu(conversationId){
+ return(await db.query('select public.enqueue_whatsapp_session_text_menu($1,$2,$3,$4,$5,$6,$7::jsonb) as result',[
+  accountId,conversationId,lineKey,'inbound-provider-1','Opciones\n1. Ventas\n2. Soporte','menu-demo',JSON.stringify([{id:'sales_existing_branch',title:'Ventas'},{id:'academic_existing_branch',title:'Soporte'}]),
+ ])).rows[0].result;
+}
+async function incomingChoice(conversationId,id,text='2'){
+ await db.query('select public.record_whatsapp_session_inbound($1,$2,$3,$4,$5,$6,$7,$8)',[workerId,lineKey,'51911111111',id,'51922222222',new Date(Date.now()+1000).toISOString(),'text',text]);
+ return(await db.query('select message_row_id from public.whatsapp_session_inbound_receipts where provider_message_id=$1',[id])).rows[0].message_row_id;
+}
+async function resolveMenu(conversationId,inbound,worker=workerId){return(await db.query('select public.resolve_whatsapp_session_menu_reply($1,$2,$3,$4) as result',[worker,lineKey,conversationId,inbound])).rows[0].result;}
+
+test('text menu maps a numeric reply to the original branch exactly once',async()=>{
+ const conversation=await setupInbound();const original=await queueMenu(conversation),duplicate=await queueMenu(conversation);assert.equal(duplicate.job_id,original.job_id);
+ const job=await step('claim');await step('authorize',job);await step('record',job,'accepted','provider-menu');
+ const inbound=await incomingChoice(conversation,'menu-choice');assert.equal(await resolveMenu(conversation,inbound,randomUUID()),null);assert.deepEqual(await resolveMenu(conversation,inbound),{reply_id:'academic_existing_branch'});
+ assert.deepEqual(await resolveMenu(conversation,inbound),{reply_id:'academic_existing_branch'});
+ const repeated=await incomingChoice(conversation,'menu-choice-repeat','1');assert.equal(await resolveMenu(conversation,repeated),null);
+});
+test('an unsent or expired menu cannot select a branch and another worker cannot consume it',async()=>{
+ const conversation=await setupInbound();await queueMenu(conversation);const inbound=await incomingChoice(conversation,'unsent-choice');assert.equal(await resolveMenu(conversation,inbound),null);
+ assert.equal(await resolveMenu(conversation,inbound,randomUUID()),null);
+ await db.query("update public.messages set interactive_payload=interactive_payload||jsonb_build_object('expires_at',now()-interval '1 second') where sender_type='bot'");
+ assert.equal(await resolveMenu(conversation,inbound),null);
+});
+test('menu transition functions reject untrusted browser callers',async()=>{
+ await db.exec('set role authenticated');await assert.rejects(db.query('select public.resolve_whatsapp_session_menu_reply($1,$2,$3,$4)',[workerId,lineKey,randomUUID(),randomUUID()]),/permission denied/);
+ await assert.rejects(db.query('select public.enqueue_whatsapp_session_text_menu($1,$2,$3,$4,$5,$6,$7::jsonb)',[accountId,randomUUID(),lineKey,'inbound','Hola','key','[]']),/permission denied/);
+});
+test('even a provider-confirmed menu expires without selecting any branch',async()=>{
+ const conversation=await setupInbound();await queueMenu(conversation);const job=await step('claim');await step('authorize',job);await step('record',job,'accepted','provider-expired-menu');
+ await db.query("update public.messages set interactive_payload=interactive_payload||jsonb_build_object('expires_at',now()-interval '1 second') where sender_type='bot'");
+ const inbound=await incomingChoice(conversation,'expired-choice');assert.equal(await resolveMenu(conversation,inbound),null);
+});
 
 test('enqueues an idempotent text job and keeps its Inbox message linked', async () => {
   const conversationId = await setupInbound();

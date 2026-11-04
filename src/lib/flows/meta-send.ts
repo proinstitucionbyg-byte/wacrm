@@ -15,6 +15,7 @@ import {
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
 import { enqueueSessionTextIfRequired, rejectUnsupportedSessionTransport } from '@/lib/whatsapp/session-transport-guard'
+import {enqueueSessionMenuIfRequired} from '@/lib/whatsapp/session-text-menu'
 import { sendSocialMessage } from '@/lib/social/send'
 import {
   assertAutomaticWhatsAppSendIsFree,
@@ -351,6 +352,10 @@ async function sendInteractiveViaMeta(
   input: SendInput,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  const sessionMenu=await enqueueSessionMenuIfRequired(db,{accountId:input.accountId,conversationId:input.conversationId,
+    payload:input.kind==='buttons'?{kind:'buttons',body:input.bodyText,buttons:input.buttons,header:input.headerText,footer:input.footerText}
+      :{kind:'list',body:input.bodyText,sections:input.sections,button_label:input.buttonLabel,header:input.headerText,footer:input.footerText}})
+  if(sessionMenu)return sessionMenu
   await rejectUnsupportedSessionTransport(db, input.conversationId, 'interactive')
 
   // Scope the contact + whatsapp_config lookups by account_id —

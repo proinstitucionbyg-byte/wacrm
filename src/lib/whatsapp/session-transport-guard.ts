@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash, randomUUID } from 'node:crypto';
+import{currentSessionInbound}from'./session-inbound-context';
 
 /** Prevents an unimplemented session channel from silently falling back to
  * the account's Meta Cloud number. The lookup stays dormant until the bridge
@@ -9,6 +10,8 @@ export async function getSessionOriginLineForConversation(
   conversationId: string,
 ): Promise<string | null> {
   if (process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED !== 'true') return null;
+
+  const pinned=currentSessionInbound(conversationId);if(pinned)return pinned.lineKey;
 
   const { data, error } = await db.from('messages')
     .select('whatsapp_session_line_key')
@@ -40,14 +43,19 @@ export async function rejectUnsupportedSessionTransport(
 /** Queue engine text on the originating WhatsApp Web line, never Meta Cloud. */
 export async function enqueueSessionTextIfRequired(
   db: SupabaseClient,
-  args: { accountId: string; conversationId: string; text: string; idempotencyKey?: string },
+  args: { accountId: string; conversationId: string; text: string; idempotencyKey?: string;menuOptions?:{id:string;title:string}[] },
 ): Promise<{ whatsapp_message_id: string } | null> {
   if (process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED !== 'true') return null;
-  const { data: source, error: sourceError } = await db.from('messages')
+  const pinned=currentSessionInbound(args.conversationId);
+  if(pinned&&pinned.accountId!==args.accountId)throw Error('El origen de esta respuesta pertenece a otra cuenta.');
+  let sourceQuery=db.from('messages')
     .select('id,whatsapp_session_line_key')
-    .eq('conversation_id', args.conversationId).eq('sender_type', 'customer')
+    .eq('conversation_id', args.conversationId).eq('sender_type', 'customer');
+  if(pinned)sourceQuery=sourceQuery.eq('id',pinned.messageRowId).eq('whatsapp_session_line_key',pinned.lineKey);
+  const { data: source, error: sourceError } = await sourceQuery
     .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(1).maybeSingle();
   if (sourceError) throw new Error('No se pudo verificar con seguridad el canal de esta conversación.');
+  if(pinned&&(!source||source.id!==pinned.messageRowId||source.whatsapp_session_line_key!==pinned.lineKey))throw Error('No se pudo comprobar el origen exacto de la consulta.');
   const lineKey = source?.whatsapp_session_line_key;
   if (!lineKey) return null;
   if (process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED !== 'true') {
@@ -62,15 +70,17 @@ export async function enqueueSessionTextIfRequired(
   if (receiptError || typeof receipt?.provider_message_id !== 'string') {
     throw new Error('No se pudo comprobar el mensaje entrante de esta sesión.');
   }
-  const identity = args.idempotencyKey ?? `${receipt.provider_message_id}\0${args.text}`;
+  if(pinned&&receipt.provider_message_id!==pinned.providerMessageId)throw Error('El recibo no corresponde a la consulta original.');
+  const identity = args.idempotencyKey ?? `${receipt.provider_message_id}\0${args.text}${args.menuOptions?'\0'+JSON.stringify(args.menuOptions):''}`;
   const dedupKey = createHash('sha256').update(identity).digest('hex');
-  const { data, error } = await db.rpc('enqueue_whatsapp_session_text', {
+  const { data, error } = await db.rpc(args.menuOptions?'enqueue_whatsapp_session_text_menu':'enqueue_whatsapp_session_text', {
     p_account_id: args.accountId,
     p_conversation_id: args.conversationId,
     p_line_key: lineKey,
     p_inbound_provider_message_id: receipt.provider_message_id,
     p_body: args.text,
     p_dedup_key: dedupKey,
+    ...(args.menuOptions?{p_options:args.menuOptions}:{}),
   });
   if (error || typeof data?.message_id !== 'string' || !data.message_id.startsWith('waweb-job:')) {
     throw new Error('No se pudo encolar la respuesta en su sesión WhatsApp.');

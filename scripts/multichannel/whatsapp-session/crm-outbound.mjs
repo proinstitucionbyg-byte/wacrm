@@ -2,7 +2,7 @@ const TOKEN = /^wcm_[a-f0-9]{64}$/;
 const LINE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function createCrmOutboundClient({ origin, token, lineKey, fetchImpl = fetch, timeoutMs = 8000 }) {
+export function createCrmOutboundClient({ origin, token, lineKey, fetchImpl = fetch, timeoutMs = 30000 }) {
   let endpoint;
   try {
     const url = new URL(origin);
@@ -80,11 +80,11 @@ export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError
   const loop = (async () => {
     while (!stopped) {
       try {
-        if (adapter.status().status === 'ready') {
+        if (adapter.status().status === 'ready' && !adapter.status().automationPaused) {
           const job = await client.claim();
           if (job) {
             let result;
-            try { result = await adapter.dispatch({ key: job.id, accountId: job.accountId,
+            try { result = await adapter.dispatch({ key: job.id, id: job.id, claimToken: job.claimToken, accountId: job.accountId,
               lineKey: job.lineKey, inboundId: job.inboundId, chatId: job.chatId, body: job.body }); }
             catch { result = { state: 'needs_review' }; }
             await client.record(job, result);

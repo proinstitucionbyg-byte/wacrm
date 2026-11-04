@@ -20,10 +20,16 @@ try {
       if($status.accountId -eq $config.accountId -and $status.lineKey -eq $config.lineKey){Write-Output 'El ejecutor local ya está activo.';exit 0}
     }catch{ }
     $previousPid=[int]$panel.pid
-    # If Windows reused the old worker PID for this PowerShell recovery process,
-    # Get-Process would match this script itself. The profile-specific browser
+    $previousProcess=Get-CimInstance Win32_Process -Filter "ProcessId = $previousPid" -ErrorAction SilentlyContinue
+    $cliPath=[System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'cli.mjs'))
+    # Windows can reuse a stale PID for an unrelated Node process. Block only
+    # when the live command line is this worker; the exact profile-browser
     # check below remains mandatory before releasing the lock.
-    if($previousPid -ne $PID -and (Get-Process -Id $previousPid -ErrorAction SilentlyContinue)){throw 'El proceso anterior todavía existe. Comprueba su estado antes de iniciar otra copia.'}
+    if($previousProcess -and $previousProcess.Name -ieq 'node.exe' -and
+       $previousProcess.CommandLine -and $previousProcess.CommandLine.Contains($cliPath,[System.StringComparison]::OrdinalIgnoreCase) -and
+       $previousProcess.CommandLine -match '(?i)\bconnect\b'){
+      throw 'El proceso anterior todavía existe. Comprueba su estado antes de iniciar otra copia.'
+    }
   }
   $lockPath=[System.IO.Path]::GetFullPath((Join-Path $scopeDir 'worker.lock'))
   if(Test-Path -LiteralPath $lockPath){
@@ -43,5 +49,5 @@ try {
   $cliPath=Join-Path $PSScriptRoot 'cli.mjs'
   $arguments='"'+$cliPath+'" connect'
   $worker=Start-Process -FilePath $nodePath -ArgumentList $arguments -WorkingDirectory $taskRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $scopeDir 'worker.stdout.log') -RedirectStandardError (Join-Path $scopeDir 'worker.stderr.log') -PassThru
-  Write-Output ('Ejecutor local iniciado. PID: '+$worker.Id+'. Envios desactivados.')
+  Write-Output ('Ejecutor local iniciado. PID: '+$worker.Id+'. Consulta los permisos de envio en el panel.')
 } finally {Pop-Location}

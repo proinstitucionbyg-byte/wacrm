@@ -1,3 +1,5 @@
+import {installMessageModelCompatibility} from './message-model-compat.mjs';
+import {observeNativeQr} from './native-qr.mjs';
 // whatsapp-web.js 1.34.7 polls with evaluate() before the page has stabilized.
 // waitForFunction survives a page navigation; keep vendor source unmodified.
 export function navigationSafeClient(BaseClient) {
@@ -13,12 +15,24 @@ export function navigationSafeClient(BaseClient) {
       try { return await super.initialize(); }
       finally { this.initializationFinished = true; }
     }
+    async sendMessage(...args) {
+      await this.pupPage.evaluate(installMessageModelCompatibility);
+      return super.sendMessage(...args);
+    }
     async inject() {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          await this.pupPage.waitForFunction('window.Debug?.VERSION !== undefined', {
-            timeout: this.options.authTimeoutMs || 30_000,
+          const nativeQr = typeof this.pupPage.exposeFunction === 'function';
+          if (nativeQr) {
+            if (!await this.pupPage.evaluate(() => typeof window.__wacrmReceiveNativeQr === 'function')) {
+              await this.pupPage.exposeFunction('__wacrmReceiveNativeQr', png => this.emit('qr_image', png));
+            }
+            await this.pupPage.evaluate(observeNativeQr, '__wacrmReceiveNativeQr');
+          }
+          await this.pupPage.waitForFunction("(() => { try { return window.Debug?.VERSION !== undefined && !!window.require('WAWebSocketModel')?.Socket; } catch { return false; } })()", {
+            timeout: nativeQr ? 0 : this.options.authTimeoutMs || 30_000,
           });
+          if (nativeQr) await this.pupPage.evaluate(() => clearInterval(window.__wacrmNativeQrTimer));
           return await super.inject();
         } catch (error) {
           // A destroyed page has no surviving partial page listeners. Re-enter
