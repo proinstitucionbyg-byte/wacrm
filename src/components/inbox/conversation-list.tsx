@@ -7,6 +7,7 @@ import {
   isUnassignedActiveConversation,
   matchesContactFilters,
   matchesConversationSearch,
+  conversationSearchMatch,
   normalizeConversations,
 } from '@/lib/inbox/conversations';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,7 @@ import { toast } from 'sonner';
 import { isVisibleInInbox } from '@/lib/inbox/cleanup';
 import { InboxRecovery } from './inbox-recovery';
 import { GroupedTags } from './grouped-tags';
+import { InboxBulkCleanup } from './inbox-cleanup';
 
 interface ConversationListProps {
   activeConversationId: string | null;
@@ -86,6 +88,18 @@ export function ConversationList({
   );
 
   const [search, setSearch] = useState('');
+  const [messageSearch, setMessageSearch] = useState<{query:string;ids:string[]}>({query:'',ids:[]});
+  useEffect(() => {
+    const query=search.trim();if(query.length<2)return;
+    const controller=new AbortController();
+    const timer=setTimeout(async()=>{
+      try{const response=await fetch('/api/inbox/search?q='+encodeURIComponent(query),{signal:controller.signal});
+        if(!response.ok)return;const data=await response.json();
+        if(!controller.signal.aborted)setMessageSearch({query,ids:[...new Set<string>(data.matches.map((row:{conversationId:string})=>row.conversationId))]});
+      }catch{/* Local contact matches remain usable if the history search fails. */}
+    },350);
+    return()=>{clearTimeout(timer);controller.abort();};
+  },[search]);
   const [filter, setFilter] = useState<InboxFilter>('all');
   const [visibleLimit, setVisibleLimit] = useState(CONVERSATION_RENDER_BATCH);
   const [loading, setLoading] = useState(true);
@@ -96,6 +110,7 @@ export function ConversationList({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
   const canTag = useCan('inbox.tag'),
+    canClear = useCan('inbox_management.conversations'),
     canManageTags = useCan('tags.manage'),
     canViewPayments = useCan('payments.view');
   const pendingPayments = usePendingPaymentCount(canViewPayments);
@@ -248,15 +263,16 @@ export function ConversationList({
     }
 
     if (search.trim()) {
-      result = result.filter((c) => matchesConversationSearch(c, search));
+      result = result.filter((c) => matchesConversationSearch(c, search) || (messageSearch.query===search.trim()&&messageSearch.ids.includes(c.id)));
     }
 
     return result.sort((a, b) =>
+      (search.trim() ? Number(conversationSearchMatch(a,search)!=='contact')-Number(conversationSearchMatch(b,search)!=='contact') : 0) ||
       (b.last_message_at ? Date.parse(b.last_message_at) : 0) -
       (a.last_message_at ? Date.parse(a.last_message_at) : 0) ||
       b.created_at.localeCompare(a.created_at)
     );
-  }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, search, messageSearch, selectedTagIds, selectedCompany]);
 
   useEffect(() => {
     setVisibleLimit(CONVERSATION_RENDER_BATCH);
@@ -328,16 +344,21 @@ export function ConversationList({
             )}
           </Link>
         )}
-        {canTag && (
+        {(canTag || canClear) && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
+            {canTag && <Button
               variant="outline"
               size="sm"
               disabled={!checkedChats.length}
               onClick={() => setLabelOpen(true)}
             >
               ETIQUETAR {checkedChats.length || ''}
-            </Button>
+            </Button>}
+            <InboxBulkCleanup ids={checkedChats} onCleared={(ids) => {
+              const cleared = new Set(ids);
+              setCheckedChats((current) => current.filter((id) => !cleared.has(id)));
+              onConversationsLoadedRef.current(conversations.filter((row) => !cleared.has(row.id)));
+            }} />
             {checkedChats.length > 0 && (
               <Button
                 variant="ghost"
@@ -553,10 +574,10 @@ export function ConversationList({
           </div>
         ) : (
           <div className="flex flex-col gap-3 px-3 py-3">
-            {visibleConversations.map((conv) => (
+            {visibleConversations.map((conv,index) => (
               <div
                 key={conv.id}
-                className="flex items-center"
+                className="flex flex-wrap items-center"
                 onContextMenu={(e) => {
                   if (!canTag) return;
                   e.preventDefault();
@@ -565,7 +586,9 @@ export function ConversationList({
                   setLabelOpen(true);
                 }}
               >
-                {canTag && (
+                {search.trim() && (index===0 || (conversationSearchMatch(conv,search)==='contact')!==(conversationSearchMatch(visibleConversations[index-1],search)==='contact')) &&
+                  <p className="w-full border-t border-border px-2 py-2 text-xs font-semibold text-muted-foreground">{conversationSearchMatch(conv,search)==='contact'?'CONTACTOS · NOMBRE O TELÉFONO':'COINCIDENCIAS EN MENSAJES'}</p>}
+                {(canTag || canClear) && (
                   <input
                     type="checkbox"
                     aria-label={

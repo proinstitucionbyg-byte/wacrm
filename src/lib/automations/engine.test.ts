@@ -269,6 +269,16 @@ describe('Minedu saved-course integration',()=>{
 })
 
 describe('indefinite conversation pause', () => {
+  it('executes an adviser-requested block immediately without reactivating the paused bot', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.conversationState = { automation_enabled: false, last_human_message_at: new Date().toISOString() };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [{ id: 'send', automation_id: 'a1', position: 0, parent_step_id: null, step_type: 'send_message', step_config: { text: 'Respuesta solicitada' } }];
+    await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat', manualAgentId: 'agent' });
+    expect(engineSendText).toHaveBeenCalled();
+    expect(h.state.pendingInserts).not.toContainEqual(expect.objectContaining({status:'paused'}));
+    expect(h.state.conversationState.automation_enabled).toBe(false);
+  });
   it('holds a new automatic block at its current step while automation is disabled', async () => {
     h.state.owned = { id: 'c1' };
     h.state.conversationState = { automation_enabled: false, last_human_message_at: null };

@@ -41,8 +41,22 @@ describe('delayed Meta origin recheck',()=>{
   it('keeps unconfirmed origin out of automatic paid sends',async()=>{
     h.tables.conversations[0].first_ad_referral=null
     await resumeDeferredKeywordOpening(db,row)
-    expect(result()).toMatchObject({result:'ad_origin_unconfirmed_after_10m',billing_resolution:'por_confirmar'})
+    expect(result()).toMatchObject({status:'pending',result:'waiting_for_late_ad_origin',billing_resolution:'por_confirmar',run_at:'2026-10-27T10:12:00.000Z'})
     expect(h.run).not.toHaveBeenCalled();expect(h.flow).not.toHaveBeenCalled()
+  })
+  it('continues checking and launches when Meta confirms after twenty minutes',async()=>{
+    h.tables.conversations[0].first_ad_referral=null;
+    await resumeDeferredKeywordOpening(db,row);expect(result().status).toBe('pending');
+    vi.setSystemTime('2026-10-27T10:20:00Z');
+    h.tables.messages[0].source_referral={source_type:'ad',source_id:'late-real-ad'};
+    await resumeDeferredKeywordOpening(db,row);
+    expect(result()).toMatchObject({status:'done',result:'automation_started'});
+    expect(h.run).toHaveBeenCalledWith(expect.objectContaining({context:expect.objectContaining({inbound_at:row.received_at})}));
+  })
+  it('stops waiting after an hour without spending API quota or guessing campaign origin',async()=>{
+    h.tables.conversations[0].first_ad_referral=null;vi.setSystemTime('2026-10-27T11:00:00Z');
+    await resumeDeferredKeywordOpening(db,row);expect(result()).toMatchObject({status:'done',result:'ad_origin_unconfirmed_after_60m'});
+    expect(h.run).not.toHaveBeenCalled();expect(h.gate).not.toHaveBeenCalled();
   })
   it('accepts delayed advertising evidence saved on the original inbound message',async()=>{
     h.tables.conversations[0].first_ad_referral=null

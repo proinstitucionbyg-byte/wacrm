@@ -67,6 +67,7 @@ import {
   loadRecentConversationMessages,
 } from '@/lib/inbox/load-messages';
 import { InboxCleanup } from './inbox-cleanup';
+import { ThreadSearch } from './thread-search';
 import {
   Dialog,
   DialogContent,
@@ -1297,6 +1298,7 @@ export function MessageThread({
             </Badge>
           </div>
 
+          <ThreadSearch key={conversation.id} conversationId={conversation.id} />
           <button type="button" onClick={() => setMobileActionsOpen(true)} aria-label="Más opciones del chat" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-foreground hover:bg-muted lg:hidden">
             <MoreVertical className="h-5 w-5" />
           </button>

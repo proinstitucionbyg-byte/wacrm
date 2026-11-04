@@ -43,6 +43,12 @@ describe('entrada de WhatsApp Web', () => {
     mocks.internalLine.mockResolvedValue({data:{line_key:'WA-other-owned'},error:null});
     const response=await POST(request(payload));expect(response.status).toBe(200);expect(await response.json()).toEqual({result:'recorded',automation:'internal_line_skipped'});expect(mocks.dispatch).not.toHaveBeenCalled();
   });
+  it('limits the bot-loop guard to enabled lines so a disconnected test phone can contact support',async()=>{
+    const response=await POST(request(payload));expect(response.status).toBe(200);
+    const index=mocks.from.mock.calls.findIndex(([table])=>table==='multichannel_whatsapp_session_lines');
+    expect(mocks.from.mock.results[index].value.eq).toHaveBeenCalledWith('paused',false);
+    expect(mocks.dispatch).toHaveBeenCalled();
+  });
   it('maps a numbered menu response to the original CRM branch after the database verifies the prompt',async()=>{
     mocks.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:{reply_id:'academic_existing_branch'},error:null});
     expect((await POST(request({...payload,text:'2'}))).status).toBe(200);

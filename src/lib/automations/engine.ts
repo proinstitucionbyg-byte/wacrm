@@ -488,7 +488,7 @@ export async function resumePendingExecution(pending: {
         .eq('id', pending.id).eq('status', 'running')
       return
     }
-    if (conv.automation_enabled === false) {
+    if (conv.automation_enabled === false && !pending.context.manual_agent_id) {
       await db.from('automation_pending_executions').update({ status: 'paused' })
         .eq('id', pending.id).eq('status', 'running')
       return
@@ -1084,7 +1084,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
           return
         }
       }
-      if (conversation?.automation_enabled === false) {
+      if (conversation?.automation_enabled === false && !args.context.manual_agent_id) {
         const payload = {
           automation_id: args.automation.id,
           account_id: args.automation.account_id,

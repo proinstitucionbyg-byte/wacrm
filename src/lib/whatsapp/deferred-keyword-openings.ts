@@ -7,6 +7,8 @@ import { isConfirmedClickToWhatsAppReferral } from './billing'
 import { hasConfiguredOpeningKeyword } from './opening-keywords'
 
 export const KEYWORD_OPENING_META_WAIT_MS = 10 * 60_000
+export const KEYWORD_OPENING_META_RECHECK_MS = 2 * 60_000
+export const KEYWORD_OPENING_META_MAX_WAIT_MS = 60 * 60_000
 const QUEUE = 'whatsapp_keyword_openings'
 
 /** Keep subsequent customer messages quiet while a first keyword waits for
@@ -165,9 +167,15 @@ export async function resumeDeferredKeywordOpening(
   const referralConfirmed = isConfirmedClickToWhatsAppReferral(conversation.first_ad_referral)
     || isConfirmedClickToWhatsAppReferral(originalMessage.source_referral)
   if (!referralConfirmed) {
-    // The owner now requires a ten-minute evidence recheck, not a paid launch
-    // just because the opening text resembles an advertisement.
-    await markQueueRow(db,row,'done','ad_origin_unconfirmed_after_10m','por_confirmar')
+    // Meta evidence may arrive after the first ten-minute check. Keep the
+    // durable request alive without sending or reserving any Cloud quota.
+    if (Date.now() < Date.parse(row.received_at) + KEYWORD_OPENING_META_MAX_WAIT_MS) {
+      const { error } = await db.from(QUEUE).update({
+        status: 'pending', run_at: new Date(Date.now() + KEYWORD_OPENING_META_RECHECK_MS).toISOString(),
+        claimed_at: null, result: 'waiting_for_late_ad_origin', billing_resolution: 'por_confirmar',
+      }).eq('id', row.id).eq('status', 'running')
+      if (error) throw new Error('No se pudo conservar la consulta pendiente de Meta')
+    } else await markQueueRow(db,row,'done','ad_origin_unconfirmed_after_60m','por_confirmar')
     return
   }
   if (!isConfirmedClickToWhatsAppReferral(conversation.first_ad_referral)) {

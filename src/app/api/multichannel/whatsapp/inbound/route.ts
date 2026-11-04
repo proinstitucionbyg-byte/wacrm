@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     // Linked business lines may talk to each other. Keep their history, but
     // never let the bots create an automatic reply loop between owned numbers.
     const internalLine=await db.from('multichannel_whatsapp_session_lines').select('line_key')
-      .eq('account_id',worker.data.account_id).eq('linked_phone',senderPhone).limit(1).maybeSingle();
+      .eq('account_id',worker.data.account_id).eq('linked_phone',senderPhone).eq('paused',false).limit(1).maybeSingle();
     if(internalLine.error)throw internalLine.error;
     if(internalLine.data)return NextResponse.json({result:result.data,automation:'internal_line_skipped'},{headers:{'Cache-Control':'no-store'}});
 

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   matchesContactFilters,
   matchesConversationSearch,
+  conversationSearchMatch,
   normalizeConversation,
   isUnassignedActiveConversation,
 } from "./conversations";
@@ -41,6 +42,13 @@ const tag = (id: string, name = id) => ({
 });
 
 describe('formatted phone searches', () => {
+  it('prioritizes the actual contact over another chat mentioning that phone', () => {
+    const luis=makeConversation({name:'Luis',phone:'51987020644'});
+    const mention=makeConversation({name:'Otro contacto',phone:'51900000001'});mention.last_message_text='Escríbele al 987 020 644';
+    expect(conversationSearchMatch(luis,'9870 2064 4')).toBe('contact');
+    expect(conversationSearchMatch(mention,'9870 2064 4')).toBe('message');
+    expect(conversationSearchMatch(makeConversation({name:'Luis',phone:'opaque',phone_normalized:'51987020644'}),'9870 2064 4')).toBe('contact');
+  });
   it.each(['937467119', '937 467 119', '51 937 467 119', '+51 937467119', '+51 (937) 467-119', '51 9372'])(
     'matches local and international phone formats: %s', (query) => {
       const phone = query === '51 9372' ? '937200001' : '937467119';

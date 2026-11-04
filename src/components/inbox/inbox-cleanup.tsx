@@ -7,6 +7,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { toast } from 'sonner';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 
+export function InboxBulkCleanup({ ids, onCleared }: { ids: string[]; onCleared: (ids: string[]) => void }) {
+  const allowed = useCan('inbox_management.conversations');
+  const [open, setOpen] = useState(false), [busy, setBusy] = useState(false);
+  if (!allowed) return null;
+  async function clearSelected() {
+    setBusy(true);
+    try {
+      const response = await fetch('/api/inbox/conversations/clear', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversations: ids, confirmed: true }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw Error(result.error || 'No se pudo eliminar la selección.');
+      onCleared(result.cleared);
+      if (result.failed.length) toast.error(`${result.cleared.length} eliminadas; ${result.failed.length} siguen seleccionadas para revisar.`);
+      else { toast.success(`${result.cleared.length} conversaciones retiradas del Inbox del equipo.`); setOpen(false); }
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'No se pudo eliminar la selección.'); }
+    finally { setBusy(false); }
+  }
+  return <><Button variant="outline" size="sm" className="text-destructive" disabled={busy || !ids.length || ids.length > 100} onClick={() => setOpen(true)}>Eliminar seleccionadas ({ids.length})</Button>
+    <Dialog open={open} onOpenChange={(value) => { if (!busy) setOpen(value); }}><DialogContent><DialogHeader><DialogTitle>¿Retirar {ids.length} conversaciones del equipo?</DialogTitle><DialogDescription>Las asesoras dejarán de ver sus historiales actuales en el Inbox. Puedes recuperarlos en RECUPERAR CHATS. Los mensajes nuevos volverán a aparecer. Los teléfonos de los estudiantes y sus documentos no se borran.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancelar</Button><Button variant="destructive" disabled={busy} onClick={() => void clearSelected()}>{busy ? 'Eliminando…' : 'Eliminar del equipo'}</Button></DialogFooter></DialogContent></Dialog></>;
+}
+
 export function InboxCleanup({ conversationId, onCleared, onRefresh }: {conversationId:string;onCleared:()=>void;onRefresh?:()=>void}) {
   const canClear=useCan('inbox_management.conversations'),canHide=useCan('inbox_management.messages');
   const [open,setOpen]=useState(false),[busy,setBusy]=useState(false);
