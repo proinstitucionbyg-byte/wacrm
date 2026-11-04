@@ -15,13 +15,14 @@ const event = {
 function mockDb(rpcResult = 'recorded') {
   const rows: Record<string, { data: unknown; error: null }> = {
     multichannel_workers: { data: { id: 'worker', account_id: 'account' }, error: null },
+    multichannel_whatsapp_session_lines: { data: null, error: null },
     whatsapp_session_inbound_receipts: { data: { message_row_id: 'message-row', contact_created: true, is_first_inbound: true, previous_inbound_at: null }, error: null },
     messages: { data: { message_id: 'waweb:WA-SOPORTE:provider-1', conversation_id: 'conversation', content_text: 'Quiero informes', created_at: event.occurred_at }, error: null },
     conversations: { data: { id: 'conversation', contact_id: 'contact', user_id: 'owner', automation_enabled: true, ai_enabled: true, last_human_message_at: null }, error: null },
   }
   const from = vi.fn((table: string) => {
     const builder = {
-      select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), limit: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue(rows[table]),
     }
     return builder
@@ -46,6 +47,18 @@ beforeEach(() => {
 })
 
 describe('WhatsApp session inbound route', () => {
+  it('routes a numbered selection using the verified original button title for existing keyword branches',async()=>{
+    const db=mockDb();
+    db.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:{reply_id:'btn_1',reply_title:'📚 Cursos y promos'},error:null});
+    expect((await POST(request({...event,text:'1'}))).status).toBe(200);
+    expect(h.dispatch).toHaveBeenCalledWith(expect.objectContaining({interactiveReplyId:'btn_1',contentText:'📚 Cursos y promos'}));
+    expect(db.rpc).toHaveBeenCalledWith('record_whatsapp_session_inbound',expect.objectContaining({p_content_text:'1'}));
+  });
+
+  it('does not guess a branch title when the verified menu mapping is incomplete',async()=>{
+    const db=mockDb();db.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:{reply_id:'btn_1'},error:null});
+    expect((await POST(request({...event,text:'1'}))).status).toBe(503);expect(h.dispatch).not.toHaveBeenCalled();
+  });
   it.each(['recorded', 'duplicate'])('sends a %s plain-text event to the shared CRM dispatcher', async result => {
     const db = mockDb(result)
     const response = await POST(request(event))

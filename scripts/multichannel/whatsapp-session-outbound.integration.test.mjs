@@ -52,6 +52,8 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104174332_phone_echo_preserve_reactivation.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104181629_sticky_support_conversation.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104185557_support_meta_wait.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104223100_close_unstarted_whatsapp_reply.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104225000_session_menu_reply_title.sql', import.meta.url), 'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -76,6 +78,23 @@ async function cloudSource(){
  await db.query('update public.multichannel_whatsapp_session_lines set support_ready_at=now() where account_id=$1',[accountId]);return conversation;
 }
 async function supportOpening(conversation){return(await db.query('select public.enqueue_cloud_support_opening($1,$2,$3,$4,$5::jsonb)as result',[accountId,conversation,'wamid.cloud-test','Hola, ¿en qué podemos ayudarte?\n1. Cursos',JSON.stringify([{id:'existing-id',title:'Cursos'}])])).rows[0].result;}
+
+test('a locally blocked unstarted reply releases the worker for the next reply without pretending delivery',async()=>{
+ const conversation=await setupInbound();await enqueue(conversation,'blocked-first');await enqueue(conversation,'second-reply');
+ const first=await step('claim');
+ assert.equal(await step('record',{...first,claim_token:randomUUID()},'cancelled'),null);
+ assert.equal(await step('record',first,'accepted','invented-receipt'),null);
+ const closed=await step('record',first,'cancelled');assert.equal(closed.recorded,true);
+ const second=await step('claim');assert.ok(second);assert.notEqual(second.id,first.id);
+ assert.equal((await db.query('select status from messages where id=$1',[first.message_row_id])).rows[0].status,'failed');
+});
+
+test('an uncertain unstarted reply is quarantined instead of repeatedly reserving the queue',async()=>{
+ const conversation=await setupInbound();await enqueue(conversation);const job=await step('claim');
+ assert.equal((await step('record',job,'needs_review')).recorded,true);
+ assert.equal(await step('claim'),null);
+ assert.equal((await db.query('select status from whatsapp_session_outbound_jobs where id=$1',[job.id])).rows[0].status,'needs_review');
+});
 
 test('Meta wait is three minutes from the real inbound, survives repeated messages and cannot be claimed twice',async()=>{
  const conversation=await cloudSource();
@@ -205,10 +224,22 @@ async function resolveMenu(conversationId,inbound,worker=workerId){return(await 
 test('text menu maps a numeric reply to the original branch exactly once',async()=>{
  const conversation=await setupInbound();const original=await queueMenu(conversation),duplicate=await queueMenu(conversation);assert.equal(duplicate.job_id,original.job_id);
  const job=await step('claim');await step('authorize',job);await step('record',job,'accepted','provider-menu');
- const inbound=await incomingChoice(conversation,'menu-choice');assert.equal(await resolveMenu(conversation,inbound,randomUUID()),null);assert.deepEqual(await resolveMenu(conversation,inbound),{reply_id:'academic_existing_branch'});
- assert.deepEqual(await resolveMenu(conversation,inbound),{reply_id:'academic_existing_branch'});
+ const inbound=await incomingChoice(conversation,'menu-choice');assert.equal(await resolveMenu(conversation,inbound,randomUUID()),null);assert.deepEqual(await resolveMenu(conversation,inbound),{reply_id:'academic_existing_branch',reply_title:'Soporte'});
+ assert.deepEqual(await resolveMenu(conversation,inbound),{reply_id:'academic_existing_branch',reply_title:'Soporte'});
  const repeated=await incomingChoice(conversation,'menu-choice-repeat','1');assert.equal(await resolveMenu(conversation,repeated),null);
 });
+test('the same number selects different options in successive delivered menus of the same chat',async()=>{
+ const conversation=await setupInbound();await queueMenu(conversation);
+ const first=await step('claim');await step('authorize',first);await step('record',first,'accepted','provider-first-menu');
+ const firstInput=await incomingChoice(conversation,'first-numeric','1');
+ assert.deepEqual(await resolveMenu(conversation,firstInput),{reply_id:'sales_existing_branch',reply_title:'Ventas'});
+ await db.query('select enqueue_whatsapp_session_text_menu($1,$2,$3,$4,$5,$6,$7::jsonb)',[
+  accountId,conversation,lineKey,'first-numeric','Elige un curso\n1. Farmacia','menu-second',JSON.stringify([{id:'btn_1',title:'Farmacia'}])]);
+ const second=await step('claim');await step('authorize',second);await step('record',second,'accepted','provider-second-menu');
+ const secondInput=await incomingChoice(conversation,'second-numeric','1');
+ assert.deepEqual(await resolveMenu(conversation,secondInput),{reply_id:'btn_1',reply_title:'Farmacia'});
+});
+
 test('an unsent or expired menu cannot select a branch and another worker cannot consume it',async()=>{
  const conversation=await setupInbound();await queueMenu(conversation);const inbound=await incomingChoice(conversation,'unsent-choice');assert.equal(await resolveMenu(conversation,inbound),null);
  assert.equal(await resolveMenu(conversation,inbound,randomUUID()),null);

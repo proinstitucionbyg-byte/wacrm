@@ -105,6 +105,7 @@ export async function POST(request: Request) {
       if (conversation.error || !conversation.data) throw conversation.error ?? new Error('Conversation unavailable');
 
       let interactiveReplyId:string|null=null;
+      let dispatchText=message.data.content_text;
       if(/^(?:[1-9]|10)$/.test(parsed.data.text.trim())){
         const menu=await db.rpc('resolve_whatsapp_session_menu_reply',{
           p_worker_id:worker.data.id,p_line_key:parsed.data.line_key,
@@ -112,7 +113,11 @@ export async function POST(request: Request) {
         });
         // A missing migration is an actionable failure, never a guessed branch.
         if(menu.error)throw menu.error;
-        if(typeof menu.data?.reply_id==='string')interactiveReplyId=menu.data.reply_id;
+        if(typeof menu.data?.reply_id==='string'){
+          if(typeof menu.data.reply_title!=='string'||!menu.data.reply_title.trim())throw Error('Menu title unavailable');
+          interactiveReplyId=menu.data.reply_id;
+          dispatchText=menu.data.reply_title;
+        }
       }
 
       const dispatchInput={
@@ -123,7 +128,7 @@ export async function POST(request: Request) {
         contactId: conversation.data.contact_id,
         conversationId: conversation.data.id,
         messageId: message.data.message_id,
-        contentText: message.data.content_text,
+        contentText: dispatchText,
         interactiveReplyId,
         isFirstInboundMessage: receipt.data.is_first_inbound,
         previousInboundAt: receipt.data.previous_inbound_at ?? undefined,

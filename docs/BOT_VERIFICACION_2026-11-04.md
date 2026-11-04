@@ -4,6 +4,16 @@ Este corte complementa `BOT_ALCANCE_VIGENTE.md` y prevalece sobre sus estados an
 
 ## Corte posterior: espera de Meta y recuperación
 
+### Recuperación de las 17:36 Lima
+
+- La publicación `3d45626` estaba bloqueada desde las 14:08 por una descarga truncada de GitHub (`gzip: unexpected end of file`), antes de compilar. Se canceló solamente esa acción de despliegue y se volvió a publicar el mismo código. EasyPanel confirmó **Success a las 17:30:14 Lima**; `/api/multichannel/support/cron` pasó de 404 a 401 sin credenciales.
+- Causa adicional del bloqueo de envíos: una respuesta rechazada localmente antes de `authorize` quedaba `claimed`. La función solo cerraba resultados de `dispatching`; al vencer la reserva, volvía a tomar la misma respuesta y frenaba el resto. Se añadió cierre restringido a `cancelled`/`needs_review` para reservas sin inicio, sin ID de proveedor y con trabajador/línea/token/plazo válidos. Nunca permite inventar un acuse de entrega. Migración aplicada y **24 pruebas SQL aprobadas**.
+- La reserva que bloqueaba quedó cancelada sin intento. La cola de Soporte se vació: seis entregas adicionales confirmadas por proveedor, incluyendo dos mensajes del caso 997474889. Los dos anteriores obsoletos se cancelaron antes del envío. Permanecen ocho pendientes en Principal, que está pausado expresamente; no reactivarlo ni trasladarlos a otra línea a ciegas. Siete resultados históricos inciertos siguen para revisión, sin repetir.
+- Soporte 933691668 y WhatsApp 04 siguen conectados, sin QR. Política de derivación habilitada de nuevo tras comprobar publicación y latido real de 933. Orden: 933 → 04. SMS continúa sin equipo/configuración física.
+- Prueba nueva autorizada +51 969383871: entrada real registrada; espera persistente hasta 17:41:50 Lima. Falta observar el resultado al vencer, respuesta posterior del teléfono y respuesta manual desde CRM por la misma línea. No declarar terminado hasta ese recorrido.
+- Peticiones secundarias: agrandar teléfono en panel derecho; sincronizar creación/asignación/eliminación de etiquetas como CONTACTADO con la Base Comercial y sus desplegables. La segunda no está implementada en este corte.
+- El despertador pedido alrededor de 14:09 no llegó a guardarse; no afirmar que se creó. El propietario retomó la sesión a las 17:14.
+
 - `ab86486` publicado con Success en EasyPanel el 04/11 a las 13:49 Lima; `/api/inbox/pending-count` responde 401 sin sesión. Incluye contador, número en mensajes, checks fosforescentes, emojis, fijación de soporte y protección de continuidad comercial. Las derivaciones nuevas siguen pausadas hasta comprobar el incremento siguiente.
 - Orden posterior del propietario: esperar hasta tres minutos antes de derivar un contacto sin evidencia de pauta. Implementación preparada: cola persistente con vencimiento desde la entrada real, sin reiniciar el plazo por mensajes adicionales; relectura de pauta al vencer; exclusión de casos ya respondidos o pausados; tarea independiente del navegador. Un primer número sin pauta pasa a Soporte aunque pregunte por cursos; la continuidad comercial previamente abierta conserva Cloud cuando su ventana lo permite.
 - Durante esa espera, la salida manual no puede caer a Cloud por falta temporal de evidencia. Una fila `needs_review` conserva el bloqueo para revisión; no se repite automáticamente una ejecución incierta.
