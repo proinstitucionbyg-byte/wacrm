@@ -11,6 +11,8 @@ export const whatsappSessionInboundSchema = z.object({
   occurred_at: z.string().datetime({ offset: true }),
   type: z.string().trim().min(1).max(32),
   text: z.string().max(65536).default(''),
+  direction:z.literal('outbound').optional(),
+  ack:z.number().int().min(-1).max(4).optional(),
 }).strict();
 
 export function sessionSenderPhone(chatId: string, resolvedPhone?: string): string | null {

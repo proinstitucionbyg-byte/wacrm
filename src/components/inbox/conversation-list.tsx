@@ -378,8 +378,8 @@ export function ConversationList({
               </Button>
             )}
             {checkedChats.length > 0 && tags.filter((tag) => checkedTagCounts.has(tag.id)).map((tag) => (
-              <button key={tag.id} type="button" disabled={tagBusy} onClick={() => void applyLabel(true, tag.id)} aria-label={`Retirar ${tag.name} de los chats seleccionados`} className="inline-flex min-h-8 items-center gap-1 rounded-full border px-2 py-1 text-xs" style={{ color: tag.color }}>
-                {tag.name} ({checkedTagCounts.get(tag.id)}/{checkedChats.length}) <X className="h-5 w-5" />
+              <button key={tag.id} type="button" title={`${tag.name} · ${checkedTagCounts.get(tag.id)}/${checkedChats.length} seleccionados`} disabled={tagBusy} onClick={() => void applyLabel(true, tag.id)} aria-label={`Retirar ${tag.name} de los chats seleccionados`} className="inline-flex h-6 max-w-36 items-center gap-1 rounded-full border px-2 text-[10px]" style={{ color: tag.color }}>
+                <span className="truncate">{tag.name}</span><span className="shrink-0">{checkedTagCounts.get(tag.id)}/{checkedChats.length}</span><X className="h-3 w-3 shrink-0" />
               </button>
             ))}
           </div>

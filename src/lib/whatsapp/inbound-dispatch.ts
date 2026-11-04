@@ -16,6 +16,7 @@ import { hasPendingDeferredKeywordOpening } from './deferred-keyword-openings'
 import { pauseUnknownFirstInboundForHuman } from './first-inbound-routing'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import type { ImageAnalysis } from '@/lib/ai/analyze-image'
+import {routeCloudSupportOpening} from './cloud-support'
 
 type ConversationControls = {
   ai_enabled?: boolean | null
@@ -48,6 +49,7 @@ export async function dispatchInboundThroughCrm(args: {
   conversation: ConversationControls
 }): Promise<void> {
   const { db } = args
+  if(args.channel==='cloud'&&await routeCloudSupportOpening(db,args))return
   const lastHuman = args.conversation.last_human_message_at
     ? Date.parse(args.conversation.last_human_message_at)
     : 0

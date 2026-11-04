@@ -46,6 +46,10 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261029151956_whatsapp_session_outbound_queue.sql', import.meta.url), 'utf8'));
   await db.exec('alter table public.messages add column interactive_payload jsonb;');
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104111054_whatsapp_session_text_menus.sql', import.meta.url), 'utf8'));
+  await db.exec('alter table public.messages add column source_referral jsonb;alter table public.conversations add column first_ad_referral jsonb;');
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104162106_whatsapp_cloud_support_handoff.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104172431_whatsapp_session_outgoing_echo.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261104174332_phone_echo_preserve_reactivation.sql', import.meta.url), 'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -57,7 +61,78 @@ after(() => db.close());
 beforeEach(async () => {
   await db.exec(`reset role; delete from public.whatsapp_session_outbound_jobs; delete from public.whatsapp_session_inbound_receipts;
     delete from public.messages; delete from public.conversations; delete from public.contacts;
-    update public.multichannel_whatsapp_session_lines set paused=false;`);
+    delete from public.whatsapp_support_routes;
+    update public.multichannel_whatsapp_session_lines set paused=false,support_ready_at=null;`);
+});
+
+async function cloudSource(){
+ const contact=(await db.query('insert into public.contacts(account_id,user_id,phone)values($1,$2,$3)returning id',[accountId,ownerId,'51933333333'])).rows[0].id;
+ const conversation=(await db.query('insert into public.conversations(account_id,user_id,contact_id,automation_enabled)values($1,$2,$3,false)returning id',[accountId,ownerId,contact])).rows[0].id;
+ await db.query("insert into public.messages(conversation_id,sender_type,content_type,content_text,message_id,status)values($1,'customer','text','Hola','wamid.cloud-test','delivered')",[conversation]);
+ await db.query('insert into public.whatsapp_support_routes(account_id,enabled,line_order)values($1,true,$2)',[accountId,[lineKey]]);
+ await db.query('update public.multichannel_whatsapp_session_lines set support_ready_at=now() where account_id=$1',[accountId]);return conversation;
+}
+async function supportOpening(conversation){return(await db.query('select public.enqueue_cloud_support_opening($1,$2,$3,$4,$5::jsonb)as result',[accountId,conversation,'wamid.cloud-test','Hola, ¿en qué podemos ayudarte?\n1. Cursos',JSON.stringify([{id:'existing-id',title:'Cursos'}])])).rows[0].result;}
+test('Cloud first contact is sent through an available owner line without inventing a session inbound or billing reservation',async()=>{
+ const conversation=await cloudSource(),first=await supportOpening(conversation),again=await supportOpening(conversation);assert.equal(first.state,'queued');assert.equal(first.job_id,again.job_id);
+ assert.equal((await db.query('select count(*)::int as n from public.whatsapp_session_inbound_receipts')).rows[0].n,0);
+ const job=await step('claim');assert.ok(job.cloud_support_source_id);const permit=await step('authorize',job);assert.equal(permit.inbound_source,'cloud_support');
+ await step('record',job,'accepted','physical-support-provider');
+ assert.equal((await db.query("select status from public.messages where message_id='physical-support-provider'")).rows[0].status,'sent');
+});
+test('Cloud support refuses ad conversations and preserves active human attention',async()=>{
+ const conversation=await cloudSource();await db.query("update public.conversations set first_ad_referral=$1 where id=$2",[{source_type:'ad',source_id:'real-ad'},conversation]);
+ assert.equal((await supportOpening(conversation)).handled,false);
+ await db.query('update public.conversations set first_ad_referral=null,last_human_message_at=now() where id=$1',[conversation]);
+ assert.equal((await supportOpening(conversation)).state,'human_active');assert.equal(await step('claim'),null);
+});
+test('Cloud support chooses the next configured available line and never an unconfigured one',async()=>{
+ const conversation=await cloudSource();const alternate='WA-support-backup';
+ await db.query('insert into public.multichannel_whatsapp_session_lines(account_id,line_key,worker_id,linked_phone,paused,support_ready_at)values($1,$2,$3,$4,false,now())',[accountId,alternate,workerId,'51944444444']);
+ try{await db.query('update public.whatsapp_support_routes set line_order=$1 where account_id=$2',[[lineKey,alternate],accountId]);await db.query('update public.multichannel_whatsapp_session_lines set support_ready_at=null where line_key=$1',[lineKey]);
+  const result=await supportOpening(conversation);assert.equal(result.line_key,alternate);
+ }finally{await db.exec('delete from public.whatsapp_session_outbound_jobs;delete from public.messages;');await db.query('delete from public.multichannel_whatsapp_session_lines where line_key=$1',[alternate]);}
+});
+test('Cloud support fails closed when no ready line exists and browser roles cannot configure the routing',async()=>{
+ const conversation=await cloudSource();await db.exec('update public.multichannel_whatsapp_session_lines set support_ready_at=null');assert.equal((await supportOpening(conversation)).state,'no_ready_line');
+ await db.exec('set role authenticated');try{await assert.rejects(db.query('select * from public.whatsapp_support_routes'),/permission denied/);}finally{await db.exec('reset role');}
+});
+test('an expired claim on another paused line cannot hold every line of the worker',async()=>{
+ const conversation=await setupInbound();await enqueue(conversation);const held=await step('claim');
+ const backup='WA-release-test';await db.query('insert into public.multichannel_whatsapp_session_lines(account_id,line_key,worker_id,linked_phone,paused)values($1,$2,$3,$4,false)',[accountId,backup,workerId,'51955555555']);
+ try{
+  await db.query("update public.whatsapp_session_outbound_jobs set lease_until=now()-interval '1 minute' where id=$1",[held.id]);
+  await db.query('update public.multichannel_whatsapp_session_lines set paused=true where line_key=$1',[lineKey]);
+  await db.query('select public.whatsapp_session_outbound_step($1,$2,$3)',[workerId,backup,'claim']);
+  assert.equal((await db.query('select status from public.whatsapp_session_outbound_jobs where id=$1',[held.id])).rows[0].status,'cancelled');
+ }finally{await db.query('delete from public.multichannel_whatsapp_session_lines where line_key=$1',[backup]);}
+});
+test('actual provider acknowledgements update delivered and read without regressing or sending again',async()=>{
+ const conversation=await setupInbound();await enqueue(conversation);const job=await step('claim');await step('authorize',job);await step('record',job,'accepted','provider-delivery-test');
+ assert.equal(await step('ack',job,'delivered','wrong-provider'),null);
+ assert.equal((await step('ack',job,'delivered','provider-delivery-test')).status,'delivered');
+ assert.equal((await step('ack',job,'read','provider-delivery-test')).status,'read');
+ assert.equal((await step('ack',job,'delivered','provider-delivery-test')).status,'read');
+ assert.equal(await step('claim'),null);
+});
+async function phoneEcho(conversation,id='native-phone',text='Respuesta desde el teléfono',ack=2){return(await db.query('select public.record_whatsapp_session_phone_echo($1,$2,$3,$4,$5,$6,$7,$8,$9) as result',[workerId,lineKey,'51911111111','51922222222',id,new Date().toISOString(),'text',text,ack])).rows[0].result;}
+test('a phone-written message reaches Inbox once, pauses the bot, and never creates a customer inbound',async()=>{
+ const conversation=await setupInbound(),before=(await db.query('select count(*)::int n from public.whatsapp_session_inbound_receipts')).rows[0].n;
+ const first=await phoneEcho(conversation),again=await phoneEcho(conversation);assert.equal(first.message_row_id,again.message_row_id);assert.equal(first.status,'delivered');
+ assert.equal((await db.query('select automation_enabled from public.conversations where id=$1',[conversation])).rows[0].automation_enabled,false);
+ assert.equal((await db.query('select count(*)::int n from public.whatsapp_session_inbound_receipts')).rows[0].n,before);
+});
+test('a later delivery ack cannot undo explicit bot reactivation',async()=>{
+ const conversation=await setupInbound();await phoneEcho(conversation);
+ await db.query('update public.conversations set automation_enabled=true,ai_enabled=true where id=$1',[conversation]);
+ await phoneEcho(conversation,'native-phone','Respuesta desde el teléfono',3);
+ assert.equal((await db.query('select automation_enabled from public.conversations where id=$1',[conversation])).rows[0].automation_enabled,true);
+});
+test('a real phone echo reconciles a unique uncertain job without sending it again',async()=>{
+ const conversation=await setupInbound();await enqueue(conversation);const job=await step('claim');await step('authorize',job);await step('record',job,'needs_review');
+ const echo=await phoneEcho(conversation,'native-proof','Respuesta desde la sesión',2);assert.equal(echo.matched_queue,true);assert.equal(echo.status,'delivered');
+ assert.equal((await db.query('select provider_message_id,status from public.whatsapp_session_outbound_jobs where id=$1',[job.id])).rows[0].provider_message_id,'native-proof');
+ assert.equal(await step('claim'),null);
 });
 
 async function setupInbound({ humanAt = null } = {}) {

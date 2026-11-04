@@ -39,6 +39,12 @@ beforeEach(() => {
 });
 
 describe('entrada de WhatsApp Web', () => {
+  it('records a linked phone outgoing echo without dispatching a new automation or AI response',async()=>{
+    mocks.rpc.mockResolvedValue({data:{recorded:true},error:null});
+    const response=await POST(request({...payload,direction:'outbound',ack:2}));expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith('record_whatsapp_session_phone_echo',expect.objectContaining({p_worker_id:'trusted-worker',p_recipient_phone:'51922222222',p_ack:2}));
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
   it('stores messages from another owned number without starting a bot-to-bot loop',async()=>{
     mocks.internalLine.mockResolvedValue({data:{line_key:'WA-other-owned'},error:null});
     const response=await POST(request(payload));expect(response.status).toBe(200);expect(await response.json()).toEqual({result:'recorded',automation:'internal_line_skipped'});expect(mocks.dispatch).not.toHaveBeenCalled();

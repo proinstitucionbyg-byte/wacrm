@@ -36,10 +36,13 @@ export function createCrmOutboundClient({ origin, token, lineKey, fetchImpl = fe
   }
 
   return Object.freeze({
+    async heartbeat(ready,phone){return request({action:'heartbeat',ready,session_phone:phone});},
+    async ack(value){const result=await request({action:'ack',job_id:value.id,provider_message_id:value.providerId,state:value.state});if(!result.receipt?.recorded)throw Error('Acuse pendiente de sincronización.');return result.receipt;},
     async claim() {
       const response = await request({ action: 'claim' });
       if (response.job == null) return null;
       const job = response.job;
+      if(job.inboundSource!==undefined&&job.inboundSource!=='cloud_support')throw Error('Origen de respuesta inválido.');
       if (!UUID.test(job.id ?? '') || !UUID.test(job.claimToken ?? '') || !UUID.test(job.accountId ?? '') ||
           job.lineKey !== lineKey || !/^\d{7,15}@c\.us$/.test(job.chatId ?? '') ||
           typeof job.inboundId !== 'string' || job.inboundId.length < 1 || job.inboundId.length > 1024 ||
@@ -72,6 +75,7 @@ export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError
   if (!adapter?.status || !adapter?.dispatch || !client?.claim || !client?.record ||
       !Number.isInteger(pollMs) || pollMs < 1000 || pollMs > 30000) throw Error('Configuración del ejecutor de salida inválida.');
   let stopped = false;
+  const acknowledged=new Set();
   let timer, wake;
   const wait = () => new Promise(resolve => {
     wake = resolve;
@@ -80,12 +84,15 @@ export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError
   const loop = (async () => {
     while (!stopped) {
       try {
+        if(client.ack)for(const ack of adapter.replyAcknowledgements?.()??[]){const key=ack.id+':'+ack.providerId+':'+ack.state;if(!acknowledged.has(key)){await client.ack(ack);acknowledged.add(key);}}
+        const status=adapter.status();
+        if(client.heartbeat&&/^\d{7,15}$/.test(status.linkedPhone??''))await client.heartbeat(status.status==='ready'&&!status.automationPaused,status.linkedPhone);
         if (adapter.status().status === 'ready' && !adapter.status().automationPaused) {
           const job = await client.claim();
           if (job) {
             let result;
             try { result = await adapter.dispatch({ key: job.id, id: job.id, claimToken: job.claimToken, accountId: job.accountId,
-              lineKey: job.lineKey, inboundId: job.inboundId, chatId: job.chatId, body: job.body }); }
+              lineKey: job.lineKey, inboundId: job.inboundId, chatId: job.chatId, body: job.body,...(job.senderType?{senderType:job.senderType}:{}),...(job.inboundSource?{inboundSource:job.inboundSource}:{}) }); }
             catch { result = { state: 'needs_review' }; }
             await client.record(job, result);
           }

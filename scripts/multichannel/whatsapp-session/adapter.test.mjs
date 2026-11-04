@@ -30,6 +30,30 @@ async function ready(s){await s.adapter.start();s.client.emit('ready');await s.a
 async function inbound(s,id='inbound-one',chat=chatId){s.client.emit('message_create',message(id,false,chat));await s.adapter.idle();}
 const job=(key='job-one')=>({key,accountId,lineKey,chatId,inboundId:'inbound-one',body:'Respuesta ficticia'});
 const campaignJob=()=>({id:'campaign-job',key:'campaign:campaign-job',campaignId:'campaign-1',accountId,lineKey,chatId,body:'Campaña ficticia'});
+test('a Cloud support opening needs an explicit server permit and never fabricates a local inbound',async()=>{
+ const s=setup({policy:j=>({allowed:true,paused:false,permissionConfirmed:true,...j,inboundSource:undefined,expiresAt:Date.now()+5000})});await ready(s);const j={...job('cloud-opening'),inboundSource:'cloud_support'};
+ assert.equal((await s.adapter.dispatch(j)).state,'blocked');assert.equal(s.sent(),0);await s.adapter.stop();
+ const allowed=setup({policy:j=>({allowed:true,paused:false,permissionConfirmed:true,...j,inboundSource:'cloud_support',expiresAt:Date.now()+5000})});await ready(allowed);
+ assert.equal((await allowed.adapter.dispatch(j)).state,'accepted');assert.equal(allowed.adapter.status().received,0);assert.equal(allowed.sent(),1);
+ assert.equal((await allowed.adapter.dispatch(j)).state,'already_attempted');await allowed.adapter.stop();
+});
+test('an explicitly authorized staff reply can send while the contact bot is paused',async()=>{
+ const s=setup({policy:j=>({allowed:true,paused:false,permissionConfirmed:true,...j,senderType:'agent',expiresAt:Date.now()+5000})});await ready(s);await inbound(s);
+ s.client.emit('message_create',message('human-native',true));await s.adapter.idle();
+ assert.equal((await s.adapter.dispatch(job('auto-paused'))).state,'blocked');
+ assert.equal((await s.adapter.dispatch({...job('staff-reply'),senderType:'agent'})).state,'accepted');
+ assert.equal(s.sent(),1);await s.adapter.stop();
+});
+test('phone-written messages and their delivery ack reach CRM even while the bot is paused',async()=>{
+ const events=[];const s=setup({getAutomationPaused:()=>true,onInbound:async event=>{events.push(event);return{state:'synced'};}});await ready(s);
+ const outgoing={...message('phone-native-sync',true),ack:1};s.client.emit('message_create',outgoing);await s.adapter.idle();
+ assert.equal(events.length,1);assert.equal(events[0].own,true);assert.equal(s.adapter.status().received,0);
+ s.client.emit('message_ack',outgoing,2);await s.adapter.idle();assert.equal(events.at(-1).ack,2);await s.adapter.stop();
+});
+test('provider remote identity is accepted when a send result omits its to field',async()=>{
+ const s=setup();await ready(s);await inbound(s);s.client.sendMessage=async()=>({id:{_serialized:'actual-provider-id',fromMe:true,remote:{_serialized:chatId}}});
+ const result=await s.adapter.dispatch(job('remote-proof'));assert.equal(result.state,'accepted');assert.equal(result.providerId,'actual-provider-id');await s.adapter.stop();
+});
 test('a duplicate linked phone cannot receive or send on another line',async()=>{
  const s=setup({authorizePhone:async()=>false});await ready(s);assert.equal(s.adapter.status().status,'duplicate_number');
  await inbound(s);assert.equal(s.adapter.status().received,0);assert.equal(s.records.some(r=>r.kind==='binding'),false);assert.equal(s.destroyed(),1);await s.adapter.stop();

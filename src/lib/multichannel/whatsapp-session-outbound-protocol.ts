@@ -4,6 +4,8 @@ import { whatsappSessionLineKeySchema } from './whatsapp-session-protocol';
 const claim = { job_id: z.string().uuid(), claim_token: z.string().uuid() };
 
 export const whatsappSessionOutboundWorkerSchema = z.discriminatedUnion('action', [
+  z.object({action:z.literal('heartbeat'),line_key:whatsappSessionLineKeySchema,session_phone:z.string().regex(/^\d{7,15}$/),ready:z.boolean()}).strict(),
+  z.object({action:z.literal('ack'),line_key:whatsappSessionLineKeySchema,job_id:z.string().uuid(),provider_message_id:z.string().min(1).max(1024),state:z.enum(['delivered','read'])}).strict(),
   z.object({ action: z.literal('claim'), line_key: whatsappSessionLineKeySchema }).strict(),
   z.object({ action: z.literal('authorize'), line_key: whatsappSessionLineKeySchema, ...claim,
     inbound_provider_message_id: z.string().min(1).max(1024),

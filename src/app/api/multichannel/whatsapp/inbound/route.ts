@@ -53,6 +53,16 @@ export async function POST(request: Request) {
     if (worker.error) throw worker.error;
     if (!worker.data) return NextResponse.json({ error: 'Ejecutor revocado o no registrado.' }, { status: 401 });
 
+    if(parsed.data.direction==='outbound'){
+      const echo=await db.rpc('record_whatsapp_session_phone_echo',{
+        p_worker_id:worker.data.id,p_line_key:parsed.data.line_key,p_linked_phone:parsed.data.linked_phone,
+        p_recipient_phone:senderPhone,p_provider_id:parsed.data.provider_message_id,p_occurred_at:parsed.data.occurred_at,
+        p_content_type:sessionContentType(parsed.data.type),p_text:parsed.data.text,p_ack:parsed.data.ack??null,
+      });
+      if(echo.error||echo.data?.recorded!==true)throw Error('Phone echo pending');
+      return NextResponse.json({result:'recorded'},{headers:{'Cache-Control':'no-store'}});
+    }
+
     const result = await db.rpc('record_whatsapp_session_inbound', {
       p_worker_id: worker.data.id,
       p_line_key: parsed.data.line_key,

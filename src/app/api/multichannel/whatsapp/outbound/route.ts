@@ -46,14 +46,20 @@ export async function POST(request: Request) {
     if (!worker.data) return respond({ error: 'Ejecutor revocado o no registrado.' }, 401);
 
     const action = parsed.data;
+    if(action.action==='heartbeat'){
+      const updated=await db.from('multichannel_whatsapp_session_lines').update({support_ready_at:action.ready?new Date().toISOString():null})
+        .eq('account_id',worker.data.account_id).eq('worker_id',worker.data.id).eq('line_key',action.line_key).eq('linked_phone',action.session_phone).eq('paused',false).select('line_key').maybeSingle();
+      if(updated.error)return respond({error:'No se confirmó la disponibilidad.'},503);
+      return updated.data?respond({ready:action.ready}):respond({error:'Línea no disponible.'},403);
+    }
     const { data, error } = await db.rpc('whatsapp_session_outbound_step', {
       p_worker_id: worker.data.id,
       p_line_key: action.line_key,
       p_action: action.action,
       p_job_id: 'job_id' in action ? action.job_id : null,
       p_claim_token: 'claim_token' in action ? action.claim_token : null,
-      p_state: action.action === 'record' ? action.state : null,
-      p_provider_message_id: action.action === 'record' ? action.provider_message_id ?? null : null,
+      p_state: action.action === 'record'||action.action==='ack' ? action.state : null,
+      p_provider_message_id: action.action === 'record'||action.action==='ack' ? action.provider_message_id ?? null : null,
     });
     if (error?.code === '42501') return respond({ error: 'Línea no autorizada o pausa activa.' }, 403);
     if (error) return respond({ error: 'Cola WhatsApp no disponible; no se confirmó el envío.' }, 503);
@@ -69,6 +75,8 @@ export async function POST(request: Request) {
         inboundId: data.inbound_provider_message_id,
         body: data.body,
         claimToken: data.claim_token,
+        senderType:data.sender_type,
+        ...(data.cloud_support_source_id?{inboundSource:'cloud_support'}:{}),
       } });
     }
 
@@ -88,6 +96,8 @@ export async function POST(request: Request) {
         accountId: data.account_id, lineKey: data.line_key, sessionPhone: data.session_phone,
         inboundId: data.inbound_provider_message_id, chatId: data.chat_id,
         bodyHash: action.body_hash, expiresAt,
+        ...(data.sender_type==='agent'?{senderType:'agent'}:{}),
+        ...(data.inbound_source==='cloud_support'?{inboundSource:'cloud_support'}:{}),
       } });
     }
 

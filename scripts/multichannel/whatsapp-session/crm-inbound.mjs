@@ -33,6 +33,7 @@ export function createCrmInboundSync({ origin, token, fetchImpl = fetch, timeout
           sender_phone: senderPhone,
           provider_message_id: event.id, chat_id: event.chatId,
           occurred_at: new Date(event.timestamp).toISOString(), type: event.type, text: event.text ?? '',
+          ...(event.own?{direction:'outbound',...(Number.isInteger(event.ack)&&event.ack>=-1&&event.ack<=4?{ack:event.ack}:{})}:{}),
         }),
       });
       if (response.status === 422) return { state: 'needs_contact_resolution' };

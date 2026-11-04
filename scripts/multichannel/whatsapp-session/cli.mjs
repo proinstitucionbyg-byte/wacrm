@@ -78,6 +78,7 @@ async function main() {
     try{
     const archive=await openHistoryArchive({accountId,lineKey,path:join(privateRoot,sessionScope(accountId,lineKey),'history.jsonl')});
     for(const row of store.records())if(['inbound','human'].includes(row.kind))await archiveJournalMessage(archive,row.payload);
+    for(const row of store.records())if(row.kind==='result'&&row.payload.phoneEcho)await archiveJournalMessage(archive,row.payload.phoneEcho);
     let outboundClient;
     let campaignClient;
     if (ownerConfig.accountId === accountId && ownerConfig.crmOutbound?.enabled === true) {

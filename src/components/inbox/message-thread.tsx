@@ -358,7 +358,7 @@ export function MessageThread({
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
-    if (sessionOriginLine) return { expired: false, remaining: 'WhatsApp vinculado · ' + sessionOriginLine };
+    if (sessionOriginLine) return { expired: false, remaining: 'WhatsApp vinculado' };
     if (!messages.length) return { expired: false, remaining: '' };
 
     // Find last customer message
@@ -1254,8 +1254,8 @@ export function MessageThread({
           </div>
         </div>
       ) : (
-        <div className="border-border bg-card flex items-center justify-between gap-2 border-b px-3 py-3 sm:px-4">
-          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <div className="border-border bg-card flex flex-wrap items-center gap-2 border-b px-3 py-3 sm:px-4">
+          <div className="mr-auto flex min-w-0 flex-1 basis-48 items-center gap-2 sm:gap-3">
             {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
             {onBack && (
@@ -1287,7 +1287,7 @@ export function MessageThread({
             <Badge
               variant="outline"
               className={cn(
-                'ml-2 hidden gap-1 rounded-full border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] sm:inline-flex',
+                'ml-2 hidden max-w-40 shrink-0 gap-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] xl:inline-flex',
                 sessionInfo.expired
                   ? 'border-red-500/40 bg-red-500/10 text-red-300 light:text-red-700'
                   : 'border-sky-500/40 bg-sky-500/10 text-sky-300 light:text-sky-700'
@@ -1302,7 +1302,7 @@ export function MessageThread({
           <button type="button" onClick={() => setMobileActionsOpen(true)} aria-label="Más opciones del chat" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-foreground hover:bg-muted lg:hidden">
             <MoreVertical className="h-5 w-5" />
           </button>
-          <div className="hidden items-center gap-2 lg:flex">
+          <div className="hidden shrink-0 flex-wrap items-center gap-2 lg:flex">
             {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just
@@ -1630,7 +1630,7 @@ export function MessageThread({
       />
 
       {sessionOriginLine && <div className="border-y px-3 py-1.5 text-[11px] text-emerald-700" aria-live="polite">
-        Respuesta por WhatsApp vinculado · {sessionOriginLine}. La disponibilidad de la línea se verifica al enviar.
+        Respuesta desde la línea de WhatsApp vinculada. Verificamos su conexión antes de enviar.
       </div>}
       {contact?.channel === 'whatsapp' && !sessionOriginLine && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-[11px] text-muted-foreground" aria-live="polite">
         <span className={billingPreflight?.state === 'free' ? 'font-semibold text-emerald-600' : billingPreflight?.state === 'paid' ? 'font-semibold text-rose-600' : 'font-semibold text-amber-600'}>

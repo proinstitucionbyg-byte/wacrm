@@ -39,13 +39,13 @@ onStartSelection: () => void;
 function StatusIcon({ status }: { status: Message["status"] }) {
   switch (status) {
     case "sending":
-      return <Clock className="h-3 w-3 text-muted-foreground" />;
+      return <span title="Pendiente de confirmación; todavía no consta como entregado"><Clock className="h-3.5 w-3.5 text-amber-200 light:text-amber-700" /></span>;
     case "sent":
-      return <Check className="h-3 w-3 text-muted-foreground" />;
+      return <span title="Enviado; aún sin confirmación de entrega"><Check className="h-3.5 w-3.5 text-white/80 light:text-slate-500" /></span>;
     case "delivered":
-      return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
+      return <span title="Entregado"><CheckCheck className="h-3.5 w-3.5 text-emerald-300 light:text-emerald-700" /></span>;
     case "read":
-      return <CheckCheck className="h-3 w-3 text-blue-400" />;
+      return <span title="Leído"><CheckCheck className="h-3.5 w-3.5 text-cyan-200 light:text-blue-700" /></span>;
     case "failed":
       return <XCircle className="h-3 w-3 text-red-400" />;
     default:

@@ -19,6 +19,12 @@ function classifyInitializationError(error) {
   if (error instanceof TypeError) return 'browser_runtime_error';
   return 'initialization_failed';
 }
+function classifySendFailure(error){
+ const message=String(error?.message??'');
+ if(/lid|wid|not registered|invalid.*chat|no.*chat/i.test(message))return'recipient_resolution_failed';
+ if(/timeout|target closed|context.*destroyed|connection|session closed/i.test(message))return'connection_or_timeout';
+ return'provider_outcome_unconfirmed';
+}
 
 function safeInitializationDetail(error) {
   const message = typeof error === 'string' ? error : error?.message ?? '';
@@ -38,6 +44,7 @@ function snapshot(message, now) {
   return { id: message.id._serialized, chatId, own, timestamp,
     text: typeof message.body === 'string' ? message.body.slice(0, 65536) : '',
     type: typeof message.type === 'string' ? message.type.slice(0, 32) : 'unknown',
+    ...(Number.isInteger(message.ack)&&message.ack>=-1&&message.ack<=4?{ack:message.ack}:{}),
     hasMedia: message.hasMedia === true };
 }
 
@@ -56,7 +63,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   let status = 'stopped', connectionReason = null, connectionDetail = null, qr = null, binding = null, tail = Promise.resolve(), started = false, stopping = false;
   let readySignalSeen = false, socketState = null;
   function automationPaused(){try{return getAutomationPaused()!==false;}catch{return true;}}
-  const incoming = new Map(), seen = new Set(), paused = new Set(), attempts = new Map(), manualAttempts = new Map(), bots = new Map(), pendingHuman = new Map();
+  const incoming = new Map(), humanMessages=new Map(), seen = new Set(), paused = new Set(), attempts = new Map(), manualAttempts = new Map(), bots = new Map(), pendingHuman = new Map();
   const crmSync = new Map(), crmSyncPhones = new Map(), phoneByChat = new Map(), crmSyncInFlight = new Map();
   let crmSyncTail = Promise.resolve(), crmRetryTimer = null, crmRetryDelayMs = crmRetryInitialMs, crmRetryBusy = false;
   function canonicalChatId(chatId) {
@@ -76,7 +83,13 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         incoming.set(p.id, p);
         if (/^\d{7,15}$/.test(p.senderPhone ?? '')) phoneByChat.set(p.chatId, p.senderPhone);
       }
-      else paused.add(p.chatId);
+      else {
+        paused.add(p.chatId);
+        if(p.own===true&&Number.isFinite(p.timestamp)&&replyChatPattern.test(p.chatId)){
+          const previous=humanMessages.get(p.id);humanMessages.set(p.id,p);
+          if(previous&&Number.isInteger(p.ack)&&(p.ack>(previous.ack??-2)||p.ack===-1))crmSync.set(p.id,'retry');
+        }
+      }
     } else if (record.kind === 'human_resume') {
       if (!replyChatPattern.test(p.chatId ?? '') || p.source !== 'owner_confirmed') throw Error('Reanudación humana inválida.');
       const target=canonicalChatId(p.chatId);
@@ -98,6 +111,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       if (!previous || !['blocked', 'accepted', 'needs_review'].includes(p.state)) throw Error('Resultado persistido inválido.');
       attempts.set(p.key, { ...previous, ...p });
       if (p.state === 'accepted' && idValid(p.providerId)) bots.set(p.providerId, p.key);
+      if(p.phoneEcho){const echo=p.phoneEcho;if(echo.id!==p.providerId||echo.own!==true||!replyChatPattern.test(echo.chatId??'')||typeof echo.text!=='string'||!Number.isFinite(echo.timestamp))throw Error('Eco de envío inválido.');humanMessages.set(echo.id,echo);crmSync.set(echo.id,'retry');}
     } else if (record.kind === 'ack') {
       const previous = attempts.get(p.key);
       if (!previous || !['accepted', 'delivered', 'read', 'failed'].includes(p.state)) throw Error('Acuse persistido inválido.');
@@ -121,7 +135,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   async function syncInbound(event) {
     if (!onInbound || !event || status !== 'ready' || !binding ||
         ['synced', 'needs_contact_resolution'].includes(crmSync.get(event.id))) return;
-    if(automationPaused()){
+    if(!event.own&&automationPaused()){
       if(crmSync.get(event.id)!=='retry')await enqueue(()=>persist('crm_sync',{id:event.id,state:'retry'}));
       return;
     }
@@ -136,9 +150,9 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if (!/^\d{7,15}$/.test(senderPhone ?? '')) state = 'needs_contact_resolution';
         else {
           const enriched = { ...event, senderPhone };
-          incoming.set(event.id, enriched);
+          if(event.own)humanMessages.set(event.id,enriched);else incoming.set(event.id, enriched);
           phoneByChat.set(event.chatId, senderPhone);
-          if(!automationPaused()){
+          if(event.own||!automationPaused()){
             const result = await onInbound({ ...enriched, lineKey, linkedPhone: binding });
             if (['synced', 'needs_contact_resolution'].includes(result?.state)) state = result.state;
           }
@@ -155,6 +169,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     for (const event of incoming.values()) {
       if (crmSync.get(event.id) === 'retry') await syncInbound(event);
     }
+    for(const event of humanMessages.values())if(event.timestamp>=now()-86400000&&(!crmSync.has(event.id)||crmSync.get(event.id)==='retry'))await syncInbound(event);
   }
   function hasPendingCrmRetry() { return [...crmSync.values()].includes('retry'); }
   function schedulePendingCrmRetry() {
@@ -250,8 +265,12 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if (stopping || status === 'storage_error') return;
         if (bots.has(event.id)) { pendingHuman.delete(event.id); return null; }
         if (seen.has(event.id)) return null;
+        if(event.own){
+          const candidates=[...attempts].filter(([,p])=>!p.providerId&&p.bodyHash===replyBodyHash(event.text)&&canonicalChatId(p.chatId)===canonicalChatId(event.chatId)&&Number.isFinite(p.startedAt)&&Math.abs(p.startedAt-event.timestamp)<=120000);
+          if(candidates.length===1){const echo={...event,...(phoneByChat.get(event.chatId)?{senderPhone:phoneByChat.get(event.chatId)}:{})};await persist('result',{key:candidates[0][0],state:'accepted',providerId:event.id,phoneEcho:echo});pendingHuman.delete(event.id);return echo;}
+        }
         let stored=event;
-        if (!event.own) {
+        if (!event.chatId.endsWith('@g.us')) {
           let senderPhone=/^(\d{7,15})@c\.us$/.exec(event.chatId)?.[1] ?? null;
           if (!senderPhone && event.chatId.endsWith('@lid') && typeof resolveSenderPhone === 'function') {
             try { senderPhone=await resolveSenderPhone(event.chatId); } catch { /* CRM sync retries this lookup from the journal. */ }
@@ -260,7 +279,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         }
         await persist(event.own ? 'human' : 'inbound', stored);
         if(typeof onArchiveMessage==='function'){try{await onArchiveMessage(stored);}catch{/* The original message remains in the durable session journal. */}}
-        return event.own ? null : stored;
+        return event.chatId.endsWith('@g.us')?null:stored;
       }).then(saved => {
         if (saved) void scheduleCrmSync(saved);
       }).catch(() => {});
@@ -270,7 +289,8 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       const providerId = message?.id?._serialized;
       void enqueue(async () => {
         const key = bots.get(providerId), attempt = attempts.get(key);
-        if (!attempt || stopping) return;
+        if(stopping)return;
+        if(!attempt){const human=humanMessages.get(providerId);if(human&&Number.isInteger(ack)&&ack>=-1&&ack<=4){await persist('human',{...human,ack});void scheduleCrmSync({...human,ack});}return;}
         const state = ({ '-1': 'failed', 0: 'accepted', 1: 'accepted', 2: 'delivered', 3: 'read', 4: 'read' })[ack];
         const rank = { needs_review: 0, accepted: 1, failed: 1, delivered: 2, read: 3 };
         if (!state || rank[state] < rank[attempt.state] || state === attempt.state) return;
@@ -279,18 +299,20 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     },
   };
   for (const [event, handler] of Object.entries(handlers)) client.on(event, handler);
-  function blocked(chatId) {
+  function blocked(chatId,manual=false) {
     const target=canonicalChatId(chatId);
     return status !== 'ready' || client.info?.wid?.user !== binding || stopping ||
-      [...paused].some(value=>canonicalChatId(value)===target) || [...pendingHuman.values()].some(value=>canonicalChatId(value)===target);
+      (!manual&&([...paused].some(value=>canonicalChatId(value)===target) || [...pendingHuman.values()].some(value=>canonicalChatId(value)===target)));
   }
   async function permitted(job) {
-    if (automationPaused() || blocked(job.chatId) || !authorizeReply) return false;
+    const manual=job.senderType==='agent';
+    if ((!manual&&automationPaused()) || blocked(job.chatId,manual) || !authorizeReply) return false;
     try {
       const p = await authorizeReply({ ...job, sessionPhone: binding, bodyHash: replyBodyHash(job.body) });
-      return !automationPaused() && !blocked(job.chatId) && p?.allowed === true && p.paused === false && p.permissionConfirmed === true &&
+      return (manual||!automationPaused()) && !blocked(job.chatId,manual) && (!manual||p?.senderType==='agent') && p?.allowed === true && p.paused === false && p.permissionConfirmed === true &&
         p.accountId === accountId && p.lineKey === lineKey && p.sessionPhone === binding &&
         p.inboundId === job.inboundId && p.chatId === job.chatId && p.bodyHash === replyBodyHash(job.body) &&
+        (job.inboundSource!=='cloud_support'||p.inboundSource==='cloud_support') &&
         Number.isFinite(p.expiresAt) && p.expiresAt > now() && p.expiresAt <= now() + 30_000;
     } catch { return false; }
   }
@@ -306,10 +328,11 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   }
   async function acceptedProviderId(message,chatId) {
     if(!idValid(message?.id?._serialized)||!(message.fromMe===true||message.id.fromMe===true))return null;
-    if(message.to?.endsWith('@lid')&&!phoneByChat.has(message.to)&&typeof resolveSenderPhone==='function'){
-      try{const phone=await resolveSenderPhone(message.to);if(/^\d{7,15}$/.test(phone??''))phoneByChat.set(message.to,phone);}catch{/* Unknown acknowledgement stays for review. */}
+    const recipient=typeof message.to==='string'?message.to:typeof message.id.remote==='string'?message.id.remote:message.id.remote?._serialized;
+    if(recipient?.endsWith('@lid')&&!phoneByChat.has(recipient)&&typeof resolveSenderPhone==='function'){
+      try{const phone=await resolveSenderPhone(recipient);if(/^\d{7,15}$/.test(phone??''))phoneByChat.set(recipient,phone);}catch{/* Unknown acknowledgement stays for review. */}
     }
-    return canonicalChatId(message.to)===canonicalChatId(chatId)?message.id._serialized:null;
+    return canonicalChatId(recipient)===canonicalChatId(chatId)?message.id._serialized:null;
   }
   return Object.freeze({
     async start() {
@@ -346,6 +369,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       return { status, socketState, connectionReason, connectionDetail: status === 'connection_error' ? connectionDetail : null,
         accountId, lineKey, linkedPhone: binding, repliesEnabled: repliesEnabled && !!authorizeReply, automationPaused:automationPaused(),
         received: incoming.size, pausedChats: paused.size, attempts: attempts.size,
+        recentSendFailures:[...attempts.values()].filter(row=>row.failureReason).slice(-5).map(row=>({state:row.state,reason:row.failureReason})),
         uncertainSends:[...attempts.values(),...manualAttempts.values()].filter(row=>row.state==='needs_review').length,
         inboundPoller: typeof getInboundPollerStatus === 'function' ? getInboundPollerStatus() : null,
         centralSync: { synced: [...crmSync.values()].filter(state => state === 'synced').length,
@@ -405,6 +429,8 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     dispatch(input) {
       const job = structuredClone(input);
       if (!job || job.accountId !== accountId || job.lineKey !== lineKey || !idValid(job.key) || job.key.length > 160 ||
+          (job.inboundSource!==undefined&&job.inboundSource!=='cloud_support') ||
+          (job.senderType!==undefined&&!['agent','bot'].includes(job.senderType)) ||
           !replyChatPattern.test(job.chatId ?? '') || !idValid(job.inboundId) || typeof job.body !== 'string' || !job.body.trim() || job.body.length > 4000) {
         return Promise.reject(Error('Respuesta fuera de la sesión o inválida.'));
       }
@@ -412,16 +438,16 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if (!repliesEnabled) return { state: 'disabled' };
         if (attempts.has(job.key)) return { state: 'already_attempted', previous: attempts.get(job.key).state };
         const inbound=incoming.get(job.inboundId);
-        if (!inbound || canonicalChatId(inbound.chatId)!==canonicalChatId(job.chatId) || !await permitted(job)) return { state: 'blocked' };
-        await persist('attempt', { key: job.key, chatId: job.chatId, inboundId: job.inboundId, bodyHash: replyBodyHash(job.body) });
+        if ((job.inboundSource!=='cloud_support'&&(!inbound||canonicalChatId(inbound.chatId)!==canonicalChatId(job.chatId))) || !await permitted(job)) return { state: 'blocked' };
+        await persist('attempt', { key: job.key, chatId: job.chatId, inboundId: job.inboundId, bodyHash: replyBodyHash(job.body),startedAt:now() });
         if (!await permitted(job)) { await persist('result', { key: job.key, state: 'blocked' }); return { state: 'blocked' }; }
-        let state = 'needs_review', providerId = null;
+        let state = 'needs_review', providerId = null,failureReason=null;
         try {
-          const message = await client.sendMessage(job.chatId, job.body, { sendSeen: false });
-          providerId=await acceptedProviderId(message,job.chatId);
+          const message = await client.sendMessage(inbound?.chatId??job.chatId, job.body, { sendSeen: false });
+          providerId=await acceptedProviderId(message,inbound?.chatId??job.chatId);
           if (providerId) state = 'accepted';
-        } catch { /* Unknown outcome stays reserved; never resend automatically. */ }
-        await persist('result', { key: job.key, state, providerId });
+        } catch(error) { failureReason=classifySendFailure(error); }
+        await persist('result', { key: job.key, state, providerId,...(failureReason?{failureReason}:{}) });
         return { state, providerId };
       });
     },
@@ -444,6 +470,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       return [...attempts.entries()].filter(([key,p])=>key.startsWith('campaign:')&&p.campaignId&&idValid(p.providerId)&&['delivered','read'].includes(p.state))
         .map(([key,p])=>({id:key.slice(9),providerId:p.providerId,state:'delivered'}));
     },
+    replyAcknowledgements(){return [...attempts.entries()].filter(([key,p])=>requestIdPattern.test(key)&&idValid(p.providerId)&&['delivered','read'].includes(p.state)).map(([key,p])=>({id:key,providerId:p.providerId,state:p.state}));},
     async unlink() {
       if(status!=='ready'||client.info?.wid?.user!==binding||typeof client.logout!=='function')throw Error('La identidad de esta línea no está confirmada.');
       stopping=true;qr=null;if(crmRetryTimer)clearTimeout(crmRetryTimer);crmRetryTimer=null;
