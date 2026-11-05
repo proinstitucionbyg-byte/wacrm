@@ -1,0 +1,12 @@
+# Continuación del bot: medios y venta — 05/11/2026
+
+Este corte complementa `BOT_VERIFICACION_2026-11-04.md`. No declara terminado el bot.
+
+- El propietario informó una posible restricción temporal de **994174238**. Se pausó esa línea en la base y se retiró del orden de soporte; no se borraron perfiles ni historial. Orden conservado: **933691668 → 922779439 → 924413651 → 947370506**. Cada línea requiere conexión confirmada; el teléfono guardado no prueba disponibilidad.
+- La rama comercial existente necesitaba audio, que el transporte de sesión rechazaba. Se añadió soporte de audio/imagen/video/documento a la misma cola, con origen y destinatario verificados, idempotencia por ejecución/paso y autorización que incluye el archivo exacto. No cambia a Cloud si falla la sesión.
+- Los archivos de este incremento se descargan únicamente del almacenamiento público del proyecto Supabase configurado, con HTTPS, tamaño y tipo limitados. No se aceptan enlaces con credenciales ni redirecciones. El audio se prepara como nota de voz; su transcripción interna no sustituye el archivo enviado.
+- Los ejecutores antiguos no pueden tratar un archivo como texto: deben anunciar capacidad de medios antes de encolarlo/recibirlo. Migración `whatsapp_session_media_queue` aplicada; la capacidad empieza desactivada hasta actualizar el ejecutor.
+- Las secuencias por sesión esperan el acuse real usando la identidad estable del trabajo, aunque WhatsApp reemplace el ID temporal por el del proveedor. Un resultado incierto o sin confirmación detiene la continuación para revisión, sin reenvío automático.
+- Comprobaciones: 64 pruebas Node de adaptador/cliente/descarga; 30 SQL en PostgreSQL temporal, incluyendo archivo→reserva→autorización→acuse; 29 Vitest de transporte/menús/referencias/controlador; 273 pruebas del directorio de automatizaciones (incluyen las de referencias). Lint del incremento y tipos de código de producción correctos. `npm run typecheck` global sigue encontrando copias de trabajo en `output` y pruebas de otras áreas; no se modificaron para ocultarlas.
+- Pendiente antes de afirmar entrega comercial: publicar/verificar la compilación, actualizar el ejecutor conservando vínculos, comprobar la descarga del audio real y retomar el evento real del **969383871** desde su punto no enviado. No repetir bienvenida ni crear entrada de cliente ficticia.
+- Después: secuencias de medios de campañas y grupos dentro del CRM. SMS físico y migración a Contabo continúan separados y pendientes.

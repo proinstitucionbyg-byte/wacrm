@@ -56,10 +56,10 @@ describe('entrada de WhatsApp Web', () => {
     expect(mocks.dispatch).toHaveBeenCalled();
   });
   it('maps a numbered menu response to the original CRM branch after the database verifies the prompt',async()=>{
-    mocks.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:{reply_id:'academic_existing_branch'},error:null});
+    mocks.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:{reply_id:'academic_existing_branch',reply_title:'🎓 Soy estudiante'},error:null});
     expect((await POST(request({...payload,text:'2'}))).status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledWith('resolve_whatsapp_session_menu_reply',{p_worker_id:'trusted-worker',p_line_key:payload.line_key,p_conversation_id:'conversation-1',p_inbound_row_id:'message-row'});
-    expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({interactiveReplyId:'academic_existing_branch',channel:'session'}));
+    expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({interactiveReplyId:'academic_existing_branch',contentText:'🎓 Soy estudiante',channel:'session'}));
   });
   it('does not guess a menu branch when its verification fails',async()=>{
     mocks.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:null,error:{message:'private'}});

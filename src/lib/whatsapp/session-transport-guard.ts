@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash, randomUUID } from 'node:crypto';
 import{currentSessionInbound}from'./session-inbound-context';
+import {normalizeSessionMedia,type SessionMedia} from '../../../scripts/multichannel/whatsapp-session/session-media.mjs';
 
 /** Prevents an unimplemented session channel from silently falling back to
  * the account's Meta Cloud number. The lookup stays dormant until the bridge
@@ -47,7 +48,7 @@ export async function rejectUnsupportedSessionTransport(
 /** Queue engine text on the originating WhatsApp Web line, never Meta Cloud. */
 export async function enqueueSessionTextIfRequired(
   db: SupabaseClient,
-  args: { accountId: string; conversationId: string; text: string; idempotencyKey?: string;menuOptions?:{id:string;title:string}[] },
+  args: { accountId: string; conversationId: string; text: string; idempotencyKey?: string;menuOptions?:{id:string;title:string}[];media?:SessionMedia },
 ): Promise<{ whatsapp_message_id: string } | null> {
   if (process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED !== 'true') return null;
   const pinned=currentSessionInbound(args.conversationId);
@@ -65,8 +66,8 @@ export async function enqueueSessionTextIfRequired(
     const supportLine=await getSessionOriginLineForConversation(db,args.conversationId);
     if(!supportLine)return null;
     if(!source?.message_id)throw Error('No se confirmó la consulta original para soporte.');
-    const dedupKey=createHash('sha256').update(args.idempotencyKey??`${source.message_id}\0${args.text}\0${JSON.stringify(args.menuOptions??null)}`).digest('hex');
-    const {data,error}=await db.rpc('enqueue_cloud_support_reply',{p_account_id:args.accountId,p_conversation_id:args.conversationId,p_line_key:supportLine,p_provider_id:source.message_id,p_body:args.text,p_dedup_key:dedupKey,p_sender_id:null,p_options:args.menuOptions??null});
+    const dedupKey=createHash('sha256').update(args.idempotencyKey??`${source.message_id}\0${args.text}\0${JSON.stringify(args.media??args.menuOptions??null)}`).digest('hex');
+    const {data,error}=await db.rpc(args.media?'enqueue_whatsapp_session_media':'enqueue_cloud_support_reply',args.media?{p_account_id:args.accountId,p_conversation_id:args.conversationId,p_line_key:supportLine,p_inbound_provider_message_id:source.message_id,p_body:args.text,p_dedup_key:dedupKey,p_media:args.media,p_cloud_source:true}:{p_account_id:args.accountId,p_conversation_id:args.conversationId,p_line_key:supportLine,p_provider_id:source.message_id,p_body:args.text,p_dedup_key:dedupKey,p_sender_id:null,p_options:args.menuOptions??null});
     if(error||typeof data?.message_id!=='string')throw Error('No se pudo guardar la respuesta por soporte; no se enviará por Cloud.');
     return {whatsapp_message_id:data.message_id};
   }
@@ -83,9 +84,9 @@ export async function enqueueSessionTextIfRequired(
     throw new Error('No se pudo comprobar el mensaje entrante de esta sesión.');
   }
   if(pinned&&receipt.provider_message_id!==pinned.providerMessageId)throw Error('El recibo no corresponde a la consulta original.');
-  const identity = args.idempotencyKey ?? `${receipt.provider_message_id}\0${args.text}${args.menuOptions?'\0'+JSON.stringify(args.menuOptions):''}`;
+  const identity = args.idempotencyKey ?? `${receipt.provider_message_id}\0${args.text}${args.media||args.menuOptions?'\0'+JSON.stringify(args.media??args.menuOptions):''}`;
   const dedupKey = createHash('sha256').update(identity).digest('hex');
-  const { data, error } = await db.rpc(args.menuOptions?'enqueue_whatsapp_session_text_menu':'enqueue_whatsapp_session_text', {
+  const { data, error } = await db.rpc(args.media?'enqueue_whatsapp_session_media':args.menuOptions?'enqueue_whatsapp_session_text_menu':'enqueue_whatsapp_session_text', {
     p_account_id: args.accountId,
     p_conversation_id: args.conversationId,
     p_line_key: lineKey,
@@ -93,11 +94,24 @@ export async function enqueueSessionTextIfRequired(
     p_body: args.text,
     p_dedup_key: dedupKey,
     ...(args.menuOptions?{p_options:args.menuOptions}:{}),
+    ...(args.media?{p_media:args.media}:{}),
   });
   if (error || typeof data?.message_id !== 'string' || !data.message_id.startsWith('waweb-job:')) {
     throw new Error('No se pudo encolar la respuesta en su sesión WhatsApp.');
   }
   return { whatsapp_message_id: data.message_id };
+}
+
+/** Use the same source receipt and queue for files. Cloud-origin sales retain
+ * their current sender; session files can never silently fall back to Cloud. */
+export async function enqueueSessionMediaIfRequired(db:SupabaseClient,args:{accountId:string;conversationId:string;mediaType:SessionMedia['kind'];mediaUrl:string;caption?:string;filename?:string;transcript?:string;idempotencyKey?:string}):Promise<{whatsapp_message_id:string}|null>{
+ const line=await getSessionOriginLineForConversation(db,args.conversationId);if(!line)return null;
+ if(process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED!=='true')throw Error('La salida de archivos por sesión aún no está habilitada.');
+ const media=normalizeSessionMedia({kind:args.mediaType,url:args.mediaUrl,...(args.caption?{caption:args.caption}:{}),...(args.filename?{filename:args.filename}:{})});
+ const origin=process.env.NEXT_PUBLIC_SUPABASE_URL;
+ if(!origin||new URL(media.url).origin!==new URL(origin).origin||!new URL(media.url).pathname.startsWith('/storage/v1/object/public/'))throw Error('El archivo requiere el almacenamiento autorizado del CRM; no se enviará por Cloud.');
+ const text=(args.caption?.trim()||args.transcript?.trim()||`[${media.kind}]`).slice(0,4000);
+ return enqueueSessionTextIfRequired(db,{accountId:args.accountId,conversationId:args.conversationId,text,idempotencyKey:args.idempotencyKey,media});
 }
 
 /** Queue a human's Inbox text reply on the exact WhatsApp Web line that

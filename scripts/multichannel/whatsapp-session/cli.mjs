@@ -21,6 +21,7 @@ import {openAutomationControl} from './automation-control.mjs';
 import {openHistoryArchive,createArchivedReader,archiveJournalMessage} from './history-archive.mjs';
 import{retainingLocalAuth}from'./retaining-local-auth.mjs';
 import {startCrmManagement} from './crm-management.mjs';
+import {createSessionMediaLoader} from './session-media.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const privateRoot = join(root, 'output', 'multichannel-private', 'whatsapp-session');
@@ -81,9 +82,14 @@ async function main() {
     for(const row of store.records())if(['inbound','human'].includes(row.kind))await archiveJournalMessage(archive,row.payload);
     for(const row of store.records())if(row.kind==='result'&&row.payload.phoneEcho)await archiveJournalMessage(archive,row.payload.phoneEcho);
     let outboundClient;
+    let prepareMedia;
+    if(Array.isArray(ownerConfig.mediaOrigins)&&ownerConfig.mediaOrigins.length){
+      try{prepareMedia=createSessionMediaLoader({allowedOrigins:ownerConfig.mediaOrigins,makeMedia:(mime,data,filename)=>new wwebjs.MessageMedia(mime,data,filename)});}
+      catch{console.error('Origen de archivos no configurado; el texto sigue disponible.');}
+    }
     let campaignClient;
     if (ownerConfig.accountId === accountId && ownerConfig.crmOutbound?.enabled === true) {
-      try { outboundClient = createCrmOutboundClient({ ...ownerConfig.crmOutbound, lineKey }); }
+      try { outboundClient = createCrmOutboundClient({ ...ownerConfig.crmOutbound, lineKey,mediaCapable:!!prepareMedia }); }
       catch { console.error('Salida CRM no disponible; las respuestas siguen apagadas.'); }
     }
     if(ownerConfig.accountId===accountId&&ownerConfig.campaigns?.enabled===true){
@@ -100,7 +106,7 @@ async function main() {
     });
     const resolvePhone=createSessionPhoneResolver({client});
     adapter = createSessionAdapter({ accountId, lineKey, store, client, enabled: true,
-      repliesEnabled: Boolean(outboundClient), authorizeReply: outboundClient?.authorizeReply,
+      repliesEnabled: Boolean(outboundClient), authorizeReply: outboundClient?.authorizeReply,prepareMedia,
       onInbound, resolveSenderPhone:resolvePhone, getInboundPollerStatus:()=>inboundPoller?.status()??null, expectedPhone,
       authorizePhone:phone=>lineManager?lineManager.claimPhone(lineKey,phone):false,
       campaignsEnabled:!!campaignClient,authorizeCampaign:campaignClient?.authorize,getAutomationPaused:()=>automationControl.isPaused(lineKey),onArchiveMessage:event=>archiveJournalMessage(archive,event) });

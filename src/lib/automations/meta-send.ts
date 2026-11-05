@@ -14,7 +14,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
-import { enqueueSessionTextIfRequired, rejectUnsupportedSessionTransport } from '@/lib/whatsapp/session-transport-guard'
+import { enqueueSessionTextIfRequired, enqueueSessionMediaIfRequired, rejectUnsupportedSessionTransport } from '@/lib/whatsapp/session-transport-guard'
 import { sendSocialMessage } from '@/lib/social/send'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import {
@@ -108,13 +108,15 @@ interface SendMediaArgs {
   transcript?: string
   caption?: string
   filename?: string
+  idempotencyKey?: string
   keywordOpeningFallback?: boolean
 }
 
 export async function engineSendMedia(
   args: SendMediaArgs,
 ): Promise<{ whatsapp_message_id: string }> {
-  await rejectUnsupportedSessionTransport(supabaseAdmin(), args.conversationId, 'media')
+  const queued=await enqueueSessionMediaIfRequired(supabaseAdmin(),args)
+  if(queued)return queued
   return sendViaMeta({ ...args, kind: 'media' })
 }
 export async function engineSendInteractive(

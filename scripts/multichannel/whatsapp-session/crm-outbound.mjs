@@ -1,8 +1,9 @@
+import {normalizeSessionMedia} from './session-media.mjs';
 const TOKEN = /^wcm_[a-f0-9]{64}$/;
 const LINE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function createCrmOutboundClient({ origin, token, lineKey, fetchImpl = fetch, timeoutMs = 30000 }) {
+export function createCrmOutboundClient({ origin, token, lineKey, mediaCapable=false, fetchImpl = fetch, timeoutMs = 30000 }) {
   let endpoint;
   try {
     const url = new URL(origin);
@@ -36,12 +37,13 @@ export function createCrmOutboundClient({ origin, token, lineKey, fetchImpl = fe
   }
 
   return Object.freeze({
-    async heartbeat(ready,phone){return request({action:'heartbeat',ready,session_phone:phone});},
+    async heartbeat(ready,phone){return request({action:'heartbeat',ready,session_phone:phone,media_capable:mediaCapable===true});},
     async ack(value){const result=await request({action:'ack',job_id:value.id,provider_message_id:value.providerId,state:value.state});if(!result.receipt?.recorded)throw Error('Acuse pendiente de sincronización.');return result.receipt;},
     async claim() {
-      const response = await request({ action: 'claim' });
+      const response = await request({ action: 'claim',accept_media:mediaCapable===true });
       if (response.job == null) return null;
       const job = response.job;
+      if(job.media){if(!mediaCapable)throw Error('Este ejecutor no admite archivos; no se enviará su texto de referencia.');job.media=normalizeSessionMedia(job.media);}
       if(job.inboundSource!==undefined&&job.inboundSource!=='cloud_support')throw Error('Origen de respuesta inválido.');
       if (!UUID.test(job.id ?? '') || !UUID.test(job.claimToken ?? '') || !UUID.test(job.accountId ?? '') ||
           job.lineKey !== lineKey || !/^\d{7,15}@c\.us$/.test(job.chatId ?? '') ||
@@ -93,7 +95,7 @@ export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError
           if (job) {
             let result;
             try { result = await adapter.dispatch({ key: job.id, id: job.id, claimToken: job.claimToken, accountId: job.accountId,
-              lineKey: job.lineKey, inboundId: job.inboundId, chatId: job.chatId, body: job.body,...(job.senderType?{senderType:job.senderType}:{}),...(job.inboundSource?{inboundSource:job.inboundSource}:{}) }); }
+              lineKey: job.lineKey, inboundId: job.inboundId, chatId: job.chatId, body: job.body,...(job.media?{media:job.media}:{}),...(job.senderType?{senderType:job.senderType}:{}),...(job.inboundSource?{inboundSource:job.inboundSource}:{}) }); }
             catch { result = { state: 'needs_review' }; }
             await client.record(job, result);
           }

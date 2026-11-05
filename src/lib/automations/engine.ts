@@ -35,6 +35,7 @@ import { captureCourseCheckpoint, currentCourseCheckpoint, isCourseContinue, isC
 import { applyCommercialCadence, readCommercialCadence, COMPLETE_CADENCE_VERSION, ESSENTIAL_POSITIONS, INFORMATION_GROUP_POSITIONS, splitCommercialCaption, type CommercialCadence } from './commercial-cadence'
 import { COMMERCIAL_SCHEDULE_VERSION, COMMERCIAL_TIMEZONE, planCommercialWait } from './commercial-schedule'
 import {resumeCommercialWindow} from './commercial-window-resume'
+import {deliveryReferenceAliases,isSessionDeliveryReference,readDeliveryReference} from './delivery-reference'
 
 // ------------------------------------------------------------
 // Public API
@@ -667,11 +668,8 @@ export async function resumePendingExecution(pending: {
     }
   }
   if (pending.context?.await_delivery_message_id) {
-    const { data: message, error: messageError } = await db.from('messages')
-      .select('status')
-      .eq('conversation_id', pending.context.conversation_id)
-      .eq('message_id', pending.context.await_delivery_message_id)
-      .maybeSingle()
+    const delivery = await readDeliveryReference(db,pending.account_id,pending.context.conversation_id!,pending.context.await_delivery_message_id)
+    const message={status:delivery.status},messageError=delivery.error
     if (messageError || message?.status === 'failed') {
       const reason = 'El mensaje anterior no se entregó; se detuvo la secuencia para conservar el orden'
       await finalizeLog(pending.log_id, 'failed', reason)
@@ -691,6 +689,13 @@ export async function resumePendingExecution(pending: {
       }
       // Some delivered WhatsApp messages never receive a delivery webhook.
       // Continue after a short spacing window rather than losing the sale.
+      if(isSessionDeliveryReference(pending.context.await_delivery_message_id)){
+        const reason='La sesión no confirmó la entrega del mensaje anterior; revisar antes de continuar'
+        await finalizeLog(pending.log_id,'failed',reason)
+        await markPending(pending.id,'failed')
+        await notifyDeliveryFailure(pending,reason)
+        return
+      }
     }
   }
   if (isCourseDetour(automation) && pending.context?.course_detour_resume && pending.contact_id && pending.context.conversation_id) {
@@ -763,14 +768,15 @@ export async function resumePendingExecution(pending: {
 export async function resumeDeliveredMessage(messageId: string, conversationId: string, accountId: string): Promise<void> {
   try {
     const db = supabaseAdmin()
-    const { data: message, error: messageError } = await db.from('messages')
-      .select('status').eq('conversation_id', conversationId).eq('message_id', messageId).maybeSingle()
-    if (messageError || !['delivered', 'read'].includes(message?.status ?? '')) return
+    const delivery=await readDeliveryReference(db,accountId,conversationId,messageId)
+    if(delivery.error||!['delivered','read'].includes(delivery.status??''))return
+    const aliases=await deliveryReferenceAliases(db,accountId,conversationId,messageId)
 
+    for(const reference of aliases){
     const { data: pending, error } = await db.from('automation_pending_executions')
       .select('*').eq('account_id', accountId).eq('status', 'pending')
       .contains('context', { conversation_id: conversationId,
-        await_delivery_message_id: messageId, await_delivery_only: true })
+        await_delivery_message_id: reference, await_delivery_only: true })
       .limit(10)
     if (error) {
       console.error('[automations] delivery resume lookup failed:', error)
@@ -788,6 +794,7 @@ export async function resumeDeliveredMessage(messageId: string, conversationId: 
       if (claim) {
         await resumePendingExecution(claim as Parameters<typeof resumePendingExecution>[0])
       }
+    }
     }
   } catch (error) {
     // The existing cron remains the recovery path if webhook handling fails.
@@ -1438,6 +1445,7 @@ case 'send_media': {
     caption: split?.caption??rawCfg.caption,
     filename: rawCfg.filename,
     transcript,
+    idempotencyKey: `automation:${args.logId}:${step.id}`,
     keywordOpeningFallback: args.context.billing_unknown_keyword_fallback === true,
   })
   rememberWhatsAppDelivery(args, whatsapp_message_id, conversationId, 90_000)
@@ -1764,7 +1772,7 @@ function rememberWhatsAppDelivery(args: ExecuteArgs, messageId: string, conversa
   // The enrollment welcome path requires an atomic "complete" result before
   // it marks documents sent. Do not turn that existing guarantee into a
   // partial cron run while adding delivery pacing to ordinary automations.
-  if (args.context.enrollment_sequence_id || !messageId.startsWith('wamid.')) {
+  if (args.context.enrollment_sequence_id || !(messageId.startsWith('wamid.')||isSessionDeliveryReference(messageId))) {
     args.context.await_delivery_message_id = undefined
     args.context.await_delivery_started_at = undefined
     args.context.await_delivery_fallback_ms = undefined

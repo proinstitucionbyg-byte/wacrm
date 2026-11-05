@@ -10,7 +10,7 @@ function message(id='inbound-one', own=false, chat=chatId) {
   return {id:{_serialized:id,fromMe:own},fromMe:own,from:own?phone+'@c.us':chat,to:own?chat:phone+'@c.us',
     body:'Mensaje ficticio',type:'chat',timestamp:Math.floor(Date.now()/1000)};
 }
-function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,authorizePhone,onInbound,resolveSenderPhone,crmRetryInitialMs,campaignsEnabled=false,campaignPolicy,getAutomationPaused}={}) {
+function setup({rows=[],enabled=true,repliesEnabled=true,policy,prepareMedia,expectedPhone,authorizePhone,onInbound,resolveSenderPhone,crmRetryInitialMs,campaignsEnabled=false,campaignPolicy,getAutomationPaused}={}) {
   const records=structuredClone(rows), client=new EventEmitter(); client.info={wid:{user:phone}};
   let sent=0,destroyed=0;
   client.initialize=async()=>{}; client.destroy=async()=>{destroyed++;};
@@ -23,13 +23,26 @@ function setup({rows=[],enabled=true,repliesEnabled=true,policy,expectedPhone,au
     allowed:true,paused:false,permissionConfirmed:true,...job,expiresAt:Date.now()+5000};};
   let campaignCalls=0;
   const authorizeCampaign=async job=>{campaignCalls++;return campaignPolicy?campaignPolicy(job,campaignCalls):{allowed:true,paused:false,permissionConfirmed:true,accountId,lineKey,sessionPhone:phone,jobId:job.id,campaignId:job.campaignId,chatId:job.chatId,bodyHash:job.bodyHash,expiresAt:Date.now()+5000};};
-  const adapter=createSessionAdapter({accountId,lineKey,client,store,enabled,repliesEnabled,authorizeReply,onInbound,resolveSenderPhone,expectedPhone,authorizePhone,crmRetryInitialMs,campaignsEnabled,authorizeCampaign,getAutomationPaused});
+  const adapter=createSessionAdapter({accountId,lineKey,client,store,enabled,repliesEnabled,authorizeReply,prepareMedia,onInbound,resolveSenderPhone,expectedPhone,authorizePhone,crmRetryInitialMs,campaignsEnabled,authorizeCampaign,getAutomationPaused});
   return {adapter,client,store,records,sent:()=>sent,destroyed:()=>destroyed,permitCalls:()=>permitCalls};
 }
 async function ready(s){await s.adapter.start();s.client.emit('ready');await s.adapter.idle();}
 async function inbound(s,id='inbound-one',chat=chatId){s.client.emit('message_create',message(id,false,chat));await s.adapter.idle();}
 const job=(key='job-one')=>({key,accountId,lineKey,chatId,inboundId:'inbound-one',body:'Respuesta ficticia'});
 const campaignJob=()=>({id:'campaign-job',key:'campaign:campaign-job',campaignId:'campaign-1',accountId,lineKey,chatId,body:'Campaña ficticia'});
+test('media sends the authorized file object and options, never the internal body as a text replacement',async()=>{
+ const media={kind:'audio',url:'https://assets.example.test/storage/v1/object/public/course.ogg'},content={data:'AUDIO'};let sent;
+ const s=setup({prepareMedia:async value=>{assert.deepEqual(value,media);return{content,options:{sendAudioAsVoice:true}};}});await ready(s);await inbound(s);
+ s.client.sendMessage=async(target,value,options)=>{sent={target,value,options};return message('real-media-provider',true,target);};
+ const result=await s.adapter.dispatch({...job('audio-one'),media});assert.equal(result.state,'accepted');assert.equal(sent.value,content);assert.equal(sent.options.sendAudioAsVoice,true);assert.equal(sent.options.sendSeen,false);assert.equal(sent.target,chatId);
+ await s.adapter.stop();
+});
+test('a changed media hash, missing loader or pause during download cannot send',async()=>{
+ const media={kind:'audio',url:'https://assets.example.test/storage/v1/object/public/course.ogg'};
+ const legacy=setup({prepareMedia:async()=>{throw Error('must not download');},policy:j=>({allowed:true,paused:false,permissionConfirmed:true,...j,bodyHash:replyBodyHash(j.body),expiresAt:Date.now()+5000})});await ready(legacy);await inbound(legacy);assert.equal((await legacy.adapter.dispatch({...job(),media})).state,'blocked');assert.equal(legacy.sent(),0);await legacy.adapter.stop();
+ const missing=setup();await ready(missing);await inbound(missing);assert.equal((await missing.adapter.dispatch({...job(),media})).state,'blocked');assert.equal(missing.sent(),0);await missing.adapter.stop();
+ let paused=false;const late=setup({getAutomationPaused:()=>paused,prepareMedia:async()=>{paused=true;return{content:{data:'AUDIO'},options:{}};}});await ready(late);await inbound(late);assert.equal((await late.adapter.dispatch({...job(),media})).state,'blocked');assert.equal(late.sent(),0);await late.adapter.stop();
+});
 test('own LID digits cannot bind or reject a saved phone as a different number',async()=>{
  const s=setup({rows:[{kind:'binding',payload:{phone}}]});s.client.info={wid:{user:'123456789012345',server:'lid'}};
  await ready(s);assert.equal(s.adapter.status().status,'connecting');assert.equal(s.destroyed(),0);assert.equal(s.adapter.status().linkedPhone,phone);await s.adapter.stop();

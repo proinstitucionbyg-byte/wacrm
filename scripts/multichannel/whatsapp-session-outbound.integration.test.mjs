@@ -55,6 +55,8 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104223100_close_unstarted_whatsapp_reply.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104225000_session_menu_reply_title.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104232000_whatsapp_owner_management.sql', import.meta.url), 'utf8'));
+  await db.exec('alter table public.messages add column media_url text;');
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261105055837_whatsapp_session_media_queue.sql', import.meta.url), 'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -69,7 +71,7 @@ beforeEach(async () => {
     delete from public.whatsapp_support_waits;
     delete from public.messages; delete from public.conversations; delete from public.contacts;
     delete from public.whatsapp_support_routes;
-    update public.multichannel_whatsapp_session_lines set paused=false,support_ready_at=null;`);
+    update public.multichannel_whatsapp_session_lines set paused=false,support_ready_at=null,supports_media=false;`);
 });
 
 async function cloudSource(){
@@ -221,6 +223,32 @@ async function enqueueManual(conversationId, dedupKey = 'manual:reply-1') {
     accountId,conversationId,lineKey,ownerId,'Respuesta de la asesora',dedupKey,
   ])).rows[0].result;
 }
+
+const media={kind:'audio',url:'https://assets.example.test/storage/v1/object/public/media/course.ogg'};
+async function queueMedia(conversationId,key='course-audio',value=media,cloud=false){return(await db.query('select public.enqueue_whatsapp_session_media($1,$2,$3,$4,$5,$6,$7::jsonb,$8) result',[accountId,conversationId,lineKey,cloud?'wamid.cloud-test':'inbound-provider-1','Audio del curso',key,JSON.stringify(value),cloud])).rows[0].result;}
+async function mediaReady(){await db.query('update multichannel_whatsapp_session_lines set supports_media=true,support_ready_at=now() where account_id=$1 and line_key=$2',[accountId,lineKey]);}
+
+test('media requires a fresh media-capable line and preserves exact file identity on retries',async()=>{
+ const conversation=await setupInbound();await assert.rejects(queueMedia(conversation),/media-capable/);await mediaReady();
+ const first=await queueMedia(conversation),again=await queueMedia(conversation);assert.equal(again.duplicate,true);assert.equal(first.job_id,again.job_id);
+ const row=(await db.query('select j.media,m.content_type,m.media_url from whatsapp_session_outbound_jobs j join messages m on m.id=j.message_row_id where j.id=$1',[first.job_id])).rows[0];assert.deepEqual(row,{media,content_type:'audio',media_url:media.url});
+ await assert.rejects(queueMedia(conversation,'course-audio',{...media,url:media.url+'2'}),/deduplication conflict/);assert.equal((await db.query('select count(*)::int n from whatsapp_session_outbound_jobs')).rows[0].n,1);
+ const claimed=await step('claim');assert.deepEqual(claimed.media,media);assert.equal((await step('authorize',claimed)).allowed,true);
+ await step('record',claimed,'accepted','real-media-provider');
+ await db.query("select public.whatsapp_session_outbound_step($1,$2,'ack',$3,null,'delivered',$4)",[workerId,lineKey,claimed.id,'real-media-provider']);
+ assert.deepEqual((await db.query('select j.status,m.message_id,m.media_url from whatsapp_session_outbound_jobs j join messages m on m.id=j.message_row_id where j.id=$1',[claimed.id])).rows[0],{status:'delivered',message_id:'real-media-provider',media_url:media.url});
+});
+test('media retains human pause, source and tenant checks and refuses unsafe metadata',async()=>{
+ const conversation=await setupInbound({humanAt:new Date().toISOString()});await mediaReady();await assert.rejects(queueMedia(conversation),/human/i);
+ await db.query('update conversations set last_human_message_at=null where id=$1',[conversation]);
+ for(const value of [{...media,url:'http://127.0.0.1/private'},{...media,filename:'../private'},{...media,url:media.url+'?token=secret'},{...media,kind:'sticker'},{...media,extra:'unapproved'}])await assert.rejects(queueMedia(conversation,'invalid',value),/Invalid session media/);
+ await db.query("update multichannel_whatsapp_session_lines set support_ready_at=now()-interval '1 minute' where account_id=$1",[accountId]);await assert.rejects(queueMedia(conversation),/media-capable/);
+});
+test('Cloud support media uses the real Cloud source without fabricating a session receipt',async()=>{
+ const conversation=await cloudSource();await supportOpening(conversation);await mediaReady();const queued=await queueMedia(conversation,'cloud-audio',media,true);
+ const job=(await db.query('select media,cloud_support_source_id from whatsapp_session_outbound_jobs where id=$1',[queued.job_id])).rows[0];assert.deepEqual(job.media,media);assert.ok(job.cloud_support_source_id);assert.equal((await db.query('select count(*)::int n from whatsapp_session_inbound_receipts')).rows[0].n,0);
+ await db.exec('set role authenticated');await assert.rejects(queueMedia(conversation,'forbidden',media,true),/permission denied/);
+});
 
 async function step(action, job = {}, state = null, provider = null) {
   return (await db.query(`select public.whatsapp_session_outbound_step($1,$2,$3,$4,$5,$6,$7) as result`, [

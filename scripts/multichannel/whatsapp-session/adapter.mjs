@@ -1,11 +1,11 @@
-import { createHash } from 'node:crypto';
 import { sessionScope } from './store.mjs';
+import {normalizeSessionMedia,sessionPayloadHash} from './session-media.mjs';
 
 const replyChatPattern = /^\d{5,20}@(c\.us|lid)$/;
 const manualChatPattern = /^\d{5,25}@(c\.us|lid|g\.us)$/;
 const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const idValid = id => typeof id === 'string' && id.length > 0 && id.length <= 1024;
-export const replyBodyHash = body => createHash('sha256').update(body).digest('hex');
+export const replyBodyHash = (body,media) => sessionPayloadHash(body,media);
 
 function classifyInitializationError(error) {
   const message = typeof error === 'string' ? error : error?.message ?? '';
@@ -51,7 +51,7 @@ function snapshot(message, now) {
 /** Real client adapter. No automatic rule/AI response or Cloud API fallback.
  * A send requires an injected, fresh CRM policy; the CLI supplies none. */
 export function createSessionAdapter({ accountId, lineKey, client, store, enabled = false,
-  repliesEnabled = false, authorizeReply, onInbound, resolveSenderPhone, getInboundPollerStatus, expectedPhone, authorizePhone, now = Date.now, startupTimeoutMs = 90_000,
+  repliesEnabled = false, authorizeReply, prepareMedia, onInbound, resolveSenderPhone, getInboundPollerStatus, expectedPhone, authorizePhone, now = Date.now, startupTimeoutMs = 90_000,
   crmRetryInitialMs = 5_000, crmRetryMaxMs = 60_000, campaignsEnabled = false, authorizeCampaign, getAutomationPaused = () => false, onArchiveMessage }) {
   if (store?.scope !== sessionScope(accountId, lineKey) || !client?.on || !client?.initialize || !client?.sendMessage) {
     throw Error('Falta la sesión aislada y su cliente.');
@@ -315,10 +315,10 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     const manual=job.senderType==='agent';
     if ((!manual&&automationPaused()) || blocked(job.chatId,manual) || !authorizeReply) return false;
     try {
-      const p = await authorizeReply({ ...job, sessionPhone: binding, bodyHash: replyBodyHash(job.body) });
+      const p = await authorizeReply({ ...job, sessionPhone: binding, bodyHash: replyBodyHash(job.body,job.media) });
       return (manual||!automationPaused()) && !blocked(job.chatId,manual) && (!manual||p?.senderType==='agent') && p?.allowed === true && p.paused === false && p.permissionConfirmed === true &&
         p.accountId === accountId && p.lineKey === lineKey && p.sessionPhone === binding &&
-        p.inboundId === job.inboundId && p.chatId === job.chatId && p.bodyHash === replyBodyHash(job.body) &&
+        p.inboundId === job.inboundId && p.chatId === job.chatId && p.bodyHash === replyBodyHash(job.body,job.media) &&
         (job.inboundSource!=='cloud_support'||p.inboundSource==='cloud_support') &&
         Number.isFinite(p.expiresAt) && p.expiresAt > now() && p.expiresAt <= now() + 30_000;
     } catch { return false; }
@@ -447,6 +447,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     },
     dispatch(input) {
       const job = structuredClone(input);
+      if(job?.media)job.media=normalizeSessionMedia(job.media);
       if (!job || job.accountId !== accountId || job.lineKey !== lineKey || !idValid(job.key) || job.key.length > 160 ||
           (job.inboundSource!==undefined&&job.inboundSource!=='cloud_support') ||
           (job.senderType!==undefined&&!['agent','bot'].includes(job.senderType)) ||
@@ -456,13 +457,15 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       return enqueue(async () => {
         if (!repliesEnabled) return { state: 'disabled' };
         if (attempts.has(job.key)) return { state: 'already_attempted', previous: attempts.get(job.key).state };
+        if(job.media&&typeof prepareMedia!=='function')return {state:'blocked'};
         const inbound=incoming.get(job.inboundId);
         if ((job.inboundSource!=='cloud_support'&&(!inbound||canonicalChatId(inbound.chatId)!==canonicalChatId(job.chatId))) || !await permitted(job)) return { state: 'blocked' };
-        await persist('attempt', { key: job.key, chatId: job.chatId, inboundId: job.inboundId, bodyHash: replyBodyHash(job.body),startedAt:now() });
+        let prepared;if(job.media){try{prepared=await prepareMedia(job.media);if(!prepared?.content||!prepared.options)throw Error('Missing media');}catch{return {state:'blocked',failureReason:'media_unavailable'};}}
+        await persist('attempt', { key: job.key, chatId: job.chatId, inboundId: job.inboundId, bodyHash: replyBodyHash(job.body,job.media),startedAt:now(),...(job.media?{media:job.media}:{}) });
         if (!await permitted(job)) { await persist('result', { key: job.key, state: 'blocked' }); return { state: 'blocked' }; }
         let state = 'needs_review', providerId = null,failureReason=null;
         try {
-          const message = await client.sendMessage(inbound?.chatId??job.chatId, job.body, { sendSeen: false });
+          const message = await client.sendMessage(inbound?.chatId??job.chatId, prepared?.content??job.body, {...(prepared?.options??{}),sendSeen:false});
           providerId=await acceptedProviderId(message,inbound?.chatId??job.chatId);
           if (providerId) state = 'accepted';
         } catch(error) { failureReason=classifySendFailure(error); }

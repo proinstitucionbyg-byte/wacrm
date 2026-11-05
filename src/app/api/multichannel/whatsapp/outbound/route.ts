@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
 import { resumeDeliveredMessage } from '@/lib/automations/engine';
 import { whatsappSessionOutboundWorkerSchema } from '@/lib/multichannel/whatsapp-session-outbound-protocol';
+import {normalizeSessionMedia,sessionPayloadHash} from '../../../../../../scripts/multichannel/whatsapp-session/session-media.mjs';
 
 export const runtime = 'nodejs';
 const respond = (body: unknown, status = 200) => NextResponse.json(body, {
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
 
     const action = parsed.data;
     if(action.action==='heartbeat'){
-      const updated=await db.from('multichannel_whatsapp_session_lines').update({support_ready_at:action.ready?new Date().toISOString():null})
+      const updated=await db.from('multichannel_whatsapp_session_lines').update({support_ready_at:action.ready?new Date().toISOString():null,supports_media:action.media_capable===true})
         .eq('account_id',worker.data.account_id).eq('worker_id',worker.data.id).eq('line_key',action.line_key).eq('linked_phone',action.session_phone).eq('paused',false).select('line_key').maybeSingle();
       if(updated.error)return respond({error:'No se confirmó la disponibilidad.'},503);
       return updated.data?respond({ready:action.ready}):respond({error:'Línea no disponible.'},403);
@@ -66,6 +67,10 @@ export async function POST(request: Request) {
 
     if (action.action === 'claim') {
       if (!data) return respond({ job: null });
+      if(data.media&&action.accept_media!==true){
+        await db.rpc('whatsapp_session_outbound_step',{p_worker_id:worker.data.id,p_line_key:action.line_key,p_action:'record',p_job_id:data.id,p_claim_token:data.claim_token,p_state:'needs_review',p_provider_message_id:null});
+        return respond({error:'Este ejecutor requiere actualizarse para archivos; no se enviará texto de reemplazo.'},409);
+      }
       return respond({ job: {
         id: data.id,
         key: `wa-session:${data.id}`,
@@ -74,6 +79,7 @@ export async function POST(request: Request) {
         chatId: data.chat_id,
         inboundId: data.inbound_provider_message_id,
         body: data.body,
+        ...(data.media?{media:normalizeSessionMedia(data.media)}:{}),
         claimToken: data.claim_token,
         senderType:data.sender_type,
         ...(data.cloud_support_source_id?{inboundSource:'cloud_support'}:{}),
@@ -81,10 +87,12 @@ export async function POST(request: Request) {
     }
 
     if (action.action === 'authorize') {
+      const stored=await db.from('whatsapp_session_outbound_jobs').select('media').eq('id',action.job_id).eq('account_id',worker.data.account_id).eq('worker_id',worker.data.id).eq('line_key',action.line_key).eq('claim_token',action.claim_token).maybeSingle();
+      if(stored.error||!stored.data)return respond({permit:{allowed:false}});
       if (!data?.allowed || data.job_id !== action.job_id || data.line_key !== action.line_key ||
           data.chat_id !== action.chat_id || data.inbound_provider_message_id !== action.inbound_provider_message_id ||
           data.claim_token !== action.claim_token ||
-          createHash('sha256').update(data.body ?? '').digest('hex') !== action.body_hash) {
+          sessionPayloadHash(data.body??'',stored.data?.media??undefined) !== action.body_hash) {
         return respond({ permit: { allowed: false } });
       }
       const expiresAt = Date.parse(data.expires_at);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enqueueSessionManualText, enqueueSessionTextIfRequired, getSessionOriginLineForConversation, rejectUnsupportedSessionTransport } from './session-transport-guard';
+import { enqueueSessionManualText, enqueueSessionMediaIfRequired, enqueueSessionTextIfRequired, getSessionOriginLineForConversation, rejectUnsupportedSessionTransport } from './session-transport-guard';
 
 function dbWith(result: { data: unknown; error: unknown }) {
   const query = {
@@ -15,7 +15,9 @@ function dbWith(result: { data: unknown; error: unknown }) {
 
 const originalFlag = process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED;
 const originalSendFlag = process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED;
+const originalStorage=process.env.NEXT_PUBLIC_SUPABASE_URL;
 afterEach(() => {
+  if(originalStorage===undefined)delete process.env.NEXT_PUBLIC_SUPABASE_URL;else process.env.NEXT_PUBLIC_SUPABASE_URL=originalStorage;
   if (originalFlag === undefined) delete process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED;
   else process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED = originalFlag;
   if (originalSendFlag === undefined) delete process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED;
@@ -44,6 +46,18 @@ describe('enqueueSessionTextIfRequired', () => {
     expect(db.rpc).toHaveBeenCalledWith('enqueue_whatsapp_session_text', expect.objectContaining({
       p_line_key: 'WA-SOPORTE', p_inbound_provider_message_id: 'wamid-inbound', p_body: 'Hola',
     }));
+  });
+  it('queues the existing course audio with the exact native receipt and no Cloud fallback',async()=>{
+    process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED='true';process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED='true';process.env.NEXT_PUBLIC_SUPABASE_URL='https://assets.example.test';
+    const db=enqueueDb({data:{id:'row',whatsapp_session_line_key:'WA-SOPORTE'},error:null});
+    await expect(enqueueSessionMediaIfRequired(db as never,{accountId:'account',conversationId:'conversation',mediaType:'audio',mediaUrl:'https://assets.example.test/storage/v1/object/public/course.ogg',idempotencyKey:'run:step'})).resolves.toEqual({whatsapp_message_id:'waweb-job:abc'});
+    expect(db.rpc).toHaveBeenCalledWith('enqueue_whatsapp_session_media',expect.objectContaining({p_line_key:'WA-SOPORTE',p_inbound_provider_message_id:'inbound-provider-id',p_media:{kind:'audio',url:'https://assets.example.test/storage/v1/object/public/course.ogg'}}));
+  });
+  it('rejects an outside file host before creating a session job and preserves an ordinary Cloud sender',async()=>{
+    process.env.MULTICHANNEL_WHATSAPP_SESSION_BRIDGE_ENABLED='true';process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED='true';process.env.NEXT_PUBLIC_SUPABASE_URL='https://assets.example.test';
+    const db=enqueueDb({data:{id:'row',whatsapp_session_line_key:'WA-SOPORTE'},error:null});
+    await expect(enqueueSessionMediaIfRequired(db as never,{accountId:'account',conversationId:'conversation',mediaType:'audio',mediaUrl:'https://other.example.test/audio.ogg'})).rejects.toThrow('almacenamiento autorizado');expect(db.rpc).not.toHaveBeenCalled();
+    const cloud=enqueueDb({data:{id:'row',whatsapp_session_line_key:null},error:null});await expect(enqueueSessionMediaIfRequired(cloud as never,{accountId:'account',conversationId:'conversation',mediaType:'image',mediaUrl:'123456'})).resolves.toBeNull();
   });
 
   it('refuses to fall back to Cloud while session sending is disabled', async () => {
