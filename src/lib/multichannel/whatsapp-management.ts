@@ -8,6 +8,7 @@ export const managementAction=z.object({action:z.literal('manage_line'),operatio
  .refine(v=>!['unlink','replace'].includes(v.operation)||!!v.expected_phone);
 
 export const managementSnapshotLine=z.object({lineKey:whatsappSessionLineKeySchema,label:z.string().min(1).max(60),
+ archived:z.boolean().optional(),
  status:z.enum(['stopped','connecting','awaiting_qr','ready','duplicate_number','wrong_number','storage_error','auth_failure','disconnected','connection_error']),
  linkedPhone:z.string().regex(/^\d{7,15}$/).nullable(),active:z.boolean(),
  qr:z.string().max(200000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/).nullable()}).strict();

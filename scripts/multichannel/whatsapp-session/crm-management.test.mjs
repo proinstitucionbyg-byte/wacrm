@@ -20,6 +20,13 @@ test('a management snapshot contains connection details and an expiring QR, neve
  assert.equal(calls,1);assert.equal(result[0].qr,null);assert.equal(result[1].qr,'data:image/png;base64,YQ==');
  assert.ok(!JSON.stringify(result).includes('must-not-leave'));assert.ok(!JSON.stringify(result).includes('private'));
 });
+test('legacy archived profiles cannot reopen or produce a QR through owner management',async()=>{
+ let touched=0;const archived={...line,label:'Historial Historial WhatsApp 03 12345678',status:'awaiting_qr'};
+ const manager={list:()=>[archived],get:()=>{touched++;return {adapter:{qr:()=> 'must-not-show'}};},connect:async()=>touched++};
+ await assert.rejects(executeManagementCommand(manager,command,accountId),/historial/);
+ const snapshot=await managementSnapshot(manager,async()=> 'data:image/png;base64,YQ==');
+ assert.equal(snapshot[0].archived,true);assert.equal(snapshot[0].qr,null);assert.equal(touched,0);
+});
 test('a lost command acknowledgement is retried without executing the action again',async()=>{
  let calls=0,requests=0,finished;
  const done=new Promise(resolve=>{finished=resolve;});

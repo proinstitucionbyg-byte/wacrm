@@ -61,6 +61,7 @@ export async function POST(request: Request) {
       const snapshot=managementSnapshotLine.array().safeParse(state.data.snapshot);if(!snapshot.success)throw Error('Invalid management state');
       const line=snapshot.data.find(l=>l.lineKey===action.line_key);
       if(action.operation!=='create'&&!line)return NextResponse.json({error:'Esa línea no pertenece a esta computadora.'},{status:404});
+      if(line&&(line.archived===true||line.label.startsWith('Historial '))&&action.operation!=='stop')return NextResponse.json({error:'Ese número ya está archivado. Escanea el QR de su tarjeta actual; no necesitas volver a cambiarlo.'},{status:409});
       if(['unlink','replace'].includes(action.operation)&&line?.linkedPhone!==action.expected_phone)return NextResponse.json({error:'El número cambió. Actualiza y comprueba el teléfono antes de continuar.'},{status:409});
       const inserted=await db.from('whatsapp_management_commands').insert({account_id:ctx.accountId,worker_id:worker.data.id,operation:action.operation,line_key:action.line_key,label:action.label,expected_phone:action.expected_phone}).select('id').single();
       if(inserted.error?.code==='23505')return NextResponse.json({error:'Espera a que termine la acción anterior de esta computadora.'},{status:409});

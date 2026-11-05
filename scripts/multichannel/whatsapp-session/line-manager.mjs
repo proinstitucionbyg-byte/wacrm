@@ -7,7 +7,7 @@ import {sessionScope} from './store.mjs';
 export async function openLineManager({accountId,primary,createRuntime,createOfflineReader,readBoundPhone,registryPath,maxActive=10}) {
   sessionScope(accountId,primary.lineKey);
   if(!Number.isInteger(maxActive)||maxActive<1||maxActive>10)throw Error('Límite de sesiones inválido.');
-  const valid=row=>{sessionScope(accountId,row.lineKey);if(typeof row.label!=='string'||!row.label.trim()||row.label.length>60)throw Error('Nombre inválido.');return {lineKey:row.lineKey,label:row.label.trim()};};
+  const valid=row=>{sessionScope(accountId,row.lineKey);if(typeof row.label!=='string'||!row.label.trim()||row.label.length>60||row.archived!==undefined&&typeof row.archived!=='boolean')throw Error('Nombre inválido.');return {lineKey:row.lineKey,label:row.label.trim(),archived:row.archived??row.label.startsWith('Historial ')};};
   let defaultLine=primary.lineKey,rows=[valid({lineKey:primary.lineKey,label:'Principal'})];
   try {
     const saved=JSON.parse(await readFile(registryPath,'utf8'));
@@ -42,10 +42,12 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
     });phoneTail=task.catch(()=>{});return task;},
     replace(lineKey){return serial(async()=>{
       const previous=rows.find(r=>r.lineKey===lineKey);if(!previous)throw Error('Línea desconocida.');
+      if(previous.archived)throw Error('Este número es historial. Utiliza la tarjeta actual para escanear otro teléfono.');
+      if(!phones.get(lineKey)&&!runtimes.get(lineKey)?.adapter.status().linkedPhone)throw Error('Esta línea ya espera un teléfono. Escanea su QR, sin crear otro perfil.');
       if(rows.length>=20)throw Error('Se alcanzó el límite de líneas registradas.');
       const row=valid({lineKey:'WA-'+randomUUID(),label:previous.label});
       // A new number gets a new identity/profile. Never reuse the old phone journal.
-      const archived={...previous,label:('Historial '+previous.label).slice(0,48)+' '+lineKey.slice(-8)};
+      const archived={...previous,archived:true};
       await persist(rows.map(r=>r.lineKey===lineKey?archived:r).concat(row),defaultLine===lineKey?row.lineKey:defaultLine);
       const runtime=runtimes.get(lineKey);if(runtime){await runtime.stop();runtimes.delete(lineKey);}
       return {...row,historyLine:lineKey};
@@ -64,12 +66,14 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
     register({label}){return serial(async()=>{
       if(rows.length>=20)throw Error('Se alcanzó el límite de líneas registradas.');
       const row=valid({lineKey:'WA-'+randomUUID(),label});
-      if(rows.some(r=>r.label.toLocaleLowerCase()===row.label.toLocaleLowerCase()))throw Error('Ese nombre ya existe.');
+      if(row.archived)throw Error('Ese nombre está reservado para el historial.');
+      if(rows.some(r=>!r.archived&&r.label.toLocaleLowerCase()===row.label.toLocaleLowerCase()))throw Error('Ese nombre ya existe.');
       await persist([...rows,row]);return row;
     });},
     connect(lineKey){return serial(async()=>{
       sessionScope(accountId,lineKey);
       if(!rows.some(r=>r.lineKey===lineKey))throw Error('Línea desconocida.');
+      if(rows.find(r=>r.lineKey===lineKey).archived)throw Error('El historial es de solo consulta; no se puede conectar.');
       if(runtimes.has(lineKey))return {alreadyActive:true};
       if(runtimes.size>=maxActive)throw Error('Límite local: '+maxActive+' sesiones abiertas.');
       const runtime=await createRuntime({accountId,lineKey});
@@ -87,12 +91,14 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
     unlink(lineKey){return serial(async()=>{
       sessionScope(accountId,lineKey);const runtime=runtimes.get(lineKey);
       if(!rows.some(r=>r.lineKey===lineKey)||typeof runtime?.unlink!=='function')throw Error('Conecta y verifica esta línea antes de desvincularla.');
+      if(rows.find(r=>r.lineKey===lineKey).archived)throw Error('El historial es de solo consulta.');
       const result=await runtime.unlink();if(result?.unlinked!==true)throw Error('No se confirmó la desvinculación.');
       runtimes.delete(lineKey);return{unlinked:true,historyPreserved:true};
     });},
     recover(lineKey){return serial(async()=>{
       sessionScope(accountId,lineKey);
       if(!rows.some(r=>r.lineKey===lineKey))throw Error('Línea desconocida.');
+      if(rows.find(r=>r.lineKey===lineKey).archived)throw Error('El historial es de solo consulta; no se puede reactivar.');
       let runtime=runtimes.get(lineKey),restarted=false;
       const previous=runtime?.adapter.status();
       if(runtime&&!['ready','connecting','awaiting_qr'].includes(previous.status)){

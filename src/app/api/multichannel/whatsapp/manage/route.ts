@@ -27,11 +27,11 @@ export async function POST(request:Request){
    else{const previous=await db.from('whatsapp_management_commands').select('status').eq('id',done.id).eq('worker_id',id).eq('account_id',account_id).maybeSingle();if(previous.error)throw previous.error;if(previous.data&&['done','error','needs_review'].includes(previous.data.status))acknowledged=done.id;}
    if(!acknowledged)return reply({error:'Resultado no confirmado; no repitas la acción.'},409);
   }
-  const lines=input.data.lines.map(line=>({...line,qr:line.status==='awaiting_qr'?line.qr:null}));
+  const lines=input.data.lines.map(line=>({...line,archived:line.archived===true||line.label.startsWith('Historial '),qr:line.status==='awaiting_qr'&&!line.archived&&!line.label.startsWith('Historial ')?line.qr:null}));
   const saved=await db.from('whatsapp_management_state').upsert({worker_id:id,account_id,snapshot:lines,seen_at:new Date().toISOString()},{onConflict:'worker_id'});if(saved.error)throw saved.error;
   // A verified ready session is registered in pause. Only the owner enables its bot.
   const known=await db.from('multichannel_whatsapp_session_lines').select('line_key,linked_phone,worker_id').eq('account_id',account_id);if(known.error)throw known.error;
-  for(const line of lines.filter(l=>l.active&&l.status==='ready'&&l.linkedPhone)){
+  for(const line of lines.filter(l=>!l.archived&&l.active&&l.status==='ready'&&l.linkedPhone)){
    if(!known.data?.some(l=>l.line_key===line.lineKey||l.linked_phone===line.linkedPhone)){
     const registered=await db.from('multichannel_whatsapp_session_lines').insert({account_id,worker_id:id,line_key:line.lineKey,linked_phone:line.linkedPhone,paused:true});
     if(registered.error&&registered.error.code!=='23505')throw registered.error;

@@ -1,7 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useState} from 'react';
-type Line={lineKey:string;label:string;status:string;linkedPhone:string|null;active:boolean;qr:string|null};
+type Line={lineKey:string;label:string;status:string;linkedPhone:string|null;active:boolean;qr:string|null;archived?:boolean};
 type Registered={line_key:string;worker_id:string;linked_phone:string;paused:boolean};
 type Snapshot={worker_id:string;online:boolean;lines:Line[]};
 type Command={id:string;worker_id:string;status:string;result:string|null};
@@ -40,7 +40,7 @@ export function WhatsappConnectionManager(){
   {pending&&<p role="status" className="text-sm">Procesando la acción solicitada. Las demás líneas mantienen su conexión.</p>}
   {latest?.result&&!pending&&<p role="status" className="text-sm">{latest.result}</p>}
   {creating&&<form className="flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void manage('create');}}><input aria-label="Nombre del nuevo WhatsApp" className="rounded border bg-background p-2" placeholder="Ej. Soporte 2" maxLength={60} required value={name} onChange={e=>setName(e.target.value)}/><button className={button} disabled={!online||busy||!!pending||!name.trim()}>Crear y mostrar QR</button><button type="button" className={button} onClick={()=>setCreating(false)}>Cancelar</button></form>}
-  <div className="grid gap-3 md:grid-cols-2">{state?.lines.map(line=>{
+  <div className="grid gap-3 md:grid-cols-2">{state?.lines.filter(line=>!line.archived&&!line.label.startsWith('Historial ')).map(line=>{
    const registered=data?.lines.find(r=>r.line_key===line.lineKey&&r.worker_id===worker&&r.linked_phone===line.linkedPhone);
    return <article key={line.lineKey} className="space-y-3 rounded-lg border border-border p-3"><div><h3 className="font-semibold">{line.label}</h3><p className="text-lg font-semibold tabular-nums">{line.linkedPhone?'+'+line.linkedPhone:'Teléfono por vincular'}</p><p className="text-sm">{online?(labels[line.status]??'Revisar estado'):'Sin conexión confirmada'}</p></div>
     {online&&line.status==='awaiting_qr'&&<div className="space-y-2">{line.qr?<img src={line.qr} alt={'QR para vincular '+line.label} className="h-56 w-56 rounded bg-white p-2"/>:<p role="status">Preparando el QR…</p>}<p className="text-sm">En ese celular: WhatsApp → Dispositivos vinculados → Vincular dispositivo. Escanea este QR y comprueba el número que aparece.</p></div>}
@@ -54,5 +54,6 @@ export function WhatsappConnectionManager(){
     {online&&line.status==='ready'&&!registered&&<p role="status" className="text-sm">Registrando este número en el CRM…</p>}
    </article>;
   })}</div>
+  {!!state?.lines.some(line=>line.archived||line.label.startsWith('Historial '))&&<details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-sm">Números anteriores · historial conservado</summary><p className="mt-2 text-sm text-muted-foreground">Estos números ya fueron reemplazados. No se conectan ni generan otro QR. Para vincular el nuevo celular, utiliza su tarjeta actual de arriba.</p><ul className="mt-2 space-y-1 text-sm">{state.lines.filter(line=>line.archived||line.label.startsWith('Historial ')).map(line=><li key={line.lineKey}>{line.linkedPhone?'+'+line.linkedPhone:'Perfil anterior sin teléfono'} · Solo historial</li>)}</ul></details>}
  </section>;
 }

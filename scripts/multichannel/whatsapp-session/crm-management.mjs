@@ -11,6 +11,7 @@ export async function executeManagementCommand(manager,command,accountId){
  }
  if(!LINE.test(command.line_key??''))throw Error('Línea inválida.');
  const line=manager.list().find(l=>l.lineKey===command.line_key);if(!line)throw Error('Línea desconocida.');
+ if((line.archived===true||line.label.startsWith('Historial '))&&op!=='stop')throw Error('El historial es de solo consulta.');
  if(['unlink','replace'].includes(op)&&(!command.expected_phone||line.linkedPhone!==command.expected_phone))throw Error('El teléfono cambió; actualiza antes de continuar.');
  if(op==='connect'){await manager.connect(line.lineKey);return 'Línea abierta. Comprueba su estado o escanea su QR.';}
  if(op==='stop'){await manager.disconnect(line.lineKey);return 'Línea detenida. Se conservan el vínculo y el historial.';}
@@ -22,13 +23,13 @@ export async function executeManagementCommand(manager,command,accountId){
 export async function managementSnapshot(manager,qrToDataUrl){
  return Promise.all(manager.list().map(async line=>{
   let qr=null;
-  if(line.active&&line.status==='awaiting_qr'){
+  if(!line.archived&&!line.label.startsWith('Historial ')&&line.active&&line.status==='awaiting_qr'){
    const adapter=manager.get(line.lineKey).adapter;
    qr=adapter.qrImage?.()??null;
    if(!qr){const raw=adapter.qr?.();if(raw)qr=await qrToDataUrl(raw);}
    if(typeof qr!=='string'||qr.length>200000||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(qr))qr=null;
   }
-  return {lineKey:line.lineKey,label:line.label,status:line.status,active:line.active,linkedPhone:line.linkedPhone??null,qr};
+  return {lineKey:line.lineKey,label:line.label,archived:line.archived===true||line.label.startsWith('Historial '),status:line.status,active:line.active,linkedPhone:line.linkedPhone??null,qr};
  }));
 }
 

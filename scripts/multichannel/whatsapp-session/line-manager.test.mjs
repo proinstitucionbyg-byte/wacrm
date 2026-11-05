@@ -24,7 +24,12 @@ test('replacement creates a fresh profile identity and preserves the previous re
  await x.manager.claimPhone('WA-main','51900000001');
  const row=await x.manager.replace('WA-main');assert.notEqual(row.lineKey,'WA-main');assert.equal(row.label,'Principal');
  assert.equal(x.manager.defaultLine(),row.lineKey);assert.equal(x.created(),0);assert.equal(x.stopped(),1);
- const old=x.manager.list().find(r=>r.lineKey==='WA-main');assert.match(old.label,/Historial/);assert.equal(old.linkedPhone,'51900000001');assert.equal(old.active,false);
+ const old=x.manager.list().find(r=>r.lineKey==='WA-main');assert.equal(old.archived,true);assert.equal(old.linkedPhone,'51900000001');assert.equal(old.active,false);
+ await assert.rejects(x.manager.replace('WA-main'),/historial/);
+ await assert.rejects(x.manager.connect('WA-main'),/historial/);
+ await assert.rejects(x.manager.recover('WA-main'),/historial/);
+ await assert.rejects(x.manager.replace(row.lineKey),/ya espera/);
+ assert.equal(x.manager.list().length,2);
  const restored=await openLineManager({...x.options,readBoundPhone:async key=>key==='WA-main'?'51900000001':null});
  assert.equal(restored.defaultLine(),row.lineKey);assert.equal(await restored.claimPhone(row.lineKey,'51900000001'),false);await restored.close();
 }));
