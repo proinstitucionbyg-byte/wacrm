@@ -206,7 +206,7 @@ export function validateTriggerForActivation(
       })
     }
   } else if (triggerType === 'time_based') {
-    if (!nonEmpty(cfg.schedule)) {
+    if (!(cfg.internal_only === true && cfg.sales_window_last_call === true) && !nonEmpty(cfg.schedule)) {
       issues.push({ path: 'trigger.schedule', message: 'schedule is required' })
     }
   } else if (triggerType === 'tag_added') {

@@ -42,6 +42,8 @@ import {deliveryReferenceAliases,isSessionDeliveryReference,readDeliveryReferenc
 // ------------------------------------------------------------
 
 export interface AutomationContext {
+  /** Durable last-call reservation, checked again before each step. */
+  sales_window_followup_id?: string
   /** Pin the approved course cadence only on a new automatic, unbounded run. */
   commercial_cadences?: Record<string, CommercialCadence>
   commercial_started_at?: Record<string, string>
@@ -1069,6 +1071,14 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   const pendingTail=captionTailStep()
   if(pendingTail)executionSteps.unshift(pendingTail)
   for (const [index, step] of executionSteps.entries()) {
+    if (args.context.sales_window_followup_id) {
+      const {data:current,error:checkError}=await db.rpc('sales_window_followup_is_current',{
+        p_id:args.context.sales_window_followup_id,p_account:args.automation.account_id,
+        p_conversation:args.context.conversation_id,p_automation:args.automation.id,
+      })
+      if(checkError)throw checkError
+      if(current!==true){await finalizeLog(args.logId,'success','Cierre omitido: cambió la ventana, el área o el estado de compra');return}
+    }
     // An adviser can reply while a block is waiting for delivery or while
     // this loop is advancing. Keep the exact next step instead of sending
     // over the adviser or losing the remaining sequence.

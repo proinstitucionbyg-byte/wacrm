@@ -1,8 +1,9 @@
 import {installMessageModelCompatibility} from './message-model-compat.mjs';
 import {observeNativeQr} from './native-qr.mjs';
 import {installMediaModelCompatibility} from './media-model-compat.mjs';
-import {createHash} from 'node:crypto';
-import {snapshotMediaReceipts} from './media-receipt.mjs';
+import {randomUUID} from 'node:crypto';
+import {snapshotMediaReceipts,takePreparedMediaReceipt} from './media-receipt.mjs';
+import {resumeAlreadySyncedSession} from './synced-session.mjs';
 // whatsapp-web.js 1.34.7 polls with evaluate() before the page has stabilized.
 // waitForFunction survives a page navigation; keep vendor source unmodified.
 export function navigationSafeClient(BaseClient) {
@@ -12,6 +13,8 @@ export function navigationSafeClient(BaseClient) {
       this.initialNavigationRecoveries = 0;
       this.sessionBecameReady = false;
       this.initializationFinished = false;
+      this.authenticationSeen = false;
+      this.once('authenticated',()=>{this.authenticationSeen=true;});
       this.once('ready', () => { this.sessionBecameReady = true; });
     }
     async initialize() {
@@ -35,12 +38,14 @@ export function navigationSafeClient(BaseClient) {
       const media=args[1]?.mimetype?args[1]:args[2]?.media;
       if(!media)return super.sendMessage(...args);
       await this.pupPage.evaluate(installMediaModelCompatibility);
-      const proof={chatId:args[0],filehash:createHash('sha256').update(Buffer.from(media.data,'base64')).digest('base64')};
-      const before=await this.pupPage.evaluate(snapshotMediaReceipts,proof);
+      const before=await this.pupPage.evaluate(snapshotMediaReceipts,{chatId:args[0]});
+      const token=randomUUID();media.wacrmReceiptToken=token;
       let sent,failure;
-      try{sent=await super.sendMessage(...args);}catch(error){failure=error;}
+      try{sent=await super.sendMessage(...args);}catch(error){failure=error;}finally{delete media.wacrmReceiptToken;}
+      let proof;try{proof=await this.pupPage.evaluate(takePreparedMediaReceipt,token);}catch{/* A valid provider result is still authoritative. */}
       if(sent?.id?._serialized)return sent;
-      const after=await this.pupPage.evaluate(snapshotMediaReceipts,proof);
+      if(!proof){if(failure)throw failure;return sent;}
+      const after=await this.pupPage.evaluate(snapshotMediaReceipts,{chatId:args[0],filehash:proof.filehash});
       const created=after.chatId===before.chatId?after.ids.filter(id=>!before.ids.includes(id)):[];
       if(created.length===1)return this.getMessageById(created[0]);
       if(failure)throw failure;
@@ -60,7 +65,9 @@ export function navigationSafeClient(BaseClient) {
             timeout: nativeQr ? 0 : this.options.authTimeoutMs || 30_000,
           });
           if (nativeQr) await this.pupPage.evaluate(() => clearInterval(window.__wacrmNativeQrTimer));
-          return await super.inject();
+          const result=await super.inject();
+          if(!this.authenticationSeen&&!this.sessionBecameReady&&typeof this.pupPage.evaluate==='function')await this.pupPage.evaluate(resumeAlreadySyncedSession);
+          return result;
         } catch (error) {
           // A destroyed page has no surviving partial page listeners. Re-enter
           // initial injection only, bounded, before readiness; never retry sends.

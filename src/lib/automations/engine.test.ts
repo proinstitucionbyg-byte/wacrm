@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
     newerCustomer: false,
     paymentPending: false,
     claimedPending: null as Record<string,unknown>|null,
+    closingCurrent: true,
   },
 }));
 
@@ -173,7 +174,7 @@ vi.mock("./admin-client", () => {
         state.fromCalls.push(t);
         return builder(t);
       },
-      rpc: () => Promise.resolve({ error: null }),
+      rpc: (name:string) => Promise.resolve({ error: null, ...(name==='sales_window_followup_is_current'?{data:h.state.closingCurrent}:{}) }),
     }),
   };
 });
@@ -209,6 +210,12 @@ describe('versioned commercial cadence integration', () => {
   }
   const pending = () => ({ id: 'p1', automation_id: 'a1', account_id: ACCOUNT, user_id: 'u1', contact_id: 'c1', log_id: 'log1',
     parent_step_id: null, branch: null, next_step_position: 1, context: { conversation_id: 'chat' } });
+  it('stops the closing continuation when a reply/payment/area change invalidates its reservation',async()=>{
+    setup();h.state.closingCurrent=false;
+    await resumePendingExecution({...pending(),context:{conversation_id:'chat',sales_window_followup_id:'reservation'}});
+    expect(engineSendText).not.toHaveBeenCalled();
+    h.state.closingCurrent=true;
+  });
   it('pins a new automatic run, skips unsolicited material, and keeps the original next position', async () => {
     setup();
     await runAutomationById({ accountId: ACCOUNT, automationId: 'a1', contactId: 'c1', conversationId: 'chat' });

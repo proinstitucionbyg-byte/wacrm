@@ -4,11 +4,11 @@ import { EventEmitter } from 'node:events';
 import { navigationSafeClient } from './navigation-client.mjs';
 test('an empty media return is reconciled only to a unique new native receipt with the exact file proof, without resending',async()=>{
  let sends=0,reads=0;const provider={id:{_serialized:'true_verified-media',fromMe:true}};
- class Base extends EventEmitter{pupPage={evaluate:async(fn,proof)=>{if(!proof)return;assert.match(proof.filehash,/^[A-Za-z0-9+/]{43}=$/);return{chatId:'51900000002@c.us',ids:reads++?['true_old','true_verified-media']:['true_old']};}};async sendMessage(){sends++;return undefined;}async getMessageById(id){assert.equal(id,provider.id._serialized);return provider;}}
+ class Base extends EventEmitter{pupPage={evaluate:async(fn,proof)=>{if(!proof)return;if(fn.name==='takePreparedMediaReceipt'){assert.equal(typeof proof,'string');return{filehash:'c'.repeat(43)+'='};}if(reads++)assert.equal(proof.filehash,'c'.repeat(43)+'=');else assert.equal(proof.filehash,undefined);return{chatId:'51900000002@c.us',ids:reads>1?['true_old','true_verified-media']:['true_old']};}};async sendMessage(){sends++;return undefined;}async getMessageById(id){assert.equal(id,provider.id._serialized);return provider;}}
  const client=new(navigationSafeClient(Base))();assert.equal(await client.sendMessage('51900000002@c.us',{mimetype:'audio/ogg',data:'aGVsbG8='}),provider);assert.equal(sends,1);
 });
 test('several new media candidates remain uncertain and never trigger another send',async()=>{
- let sends=0,reads=0;class Base extends EventEmitter{pupPage={evaluate:async(fn,proof)=>proof?{chatId:'51900000002@c.us',ids:reads++?['true_one','true_two']:[]}:undefined};async sendMessage(){sends++;return undefined;}async getMessageById(){throw Error('Ambiguous receipt must not be selected');}}
+ let sends=0,reads=0;class Base extends EventEmitter{pupPage={evaluate:async(fn,proof)=>fn.name==='takePreparedMediaReceipt'?{filehash:'c'.repeat(43)+'='}:proof?{chatId:'51900000002@c.us',ids:reads++?['true_one','true_two']:[]}:undefined};async sendMessage(){sends++;return undefined;}async getMessageById(){throw Error('Ambiguous receipt must not be selected');}}
  const client=new(navigationSafeClient(Base))();assert.equal(await client.sendMessage('51900000002@c.us',{mimetype:'audio/ogg',data:'aGVsbG8='}),undefined);assert.equal(sends,1);
 });
 test('an own LID is normalized only from the official paired phone, never its digits',async()=>{
@@ -24,7 +24,7 @@ test('native QR remains available while waiting for a new linked socket',async()
    waitForFunction:async(_,options)=>{assert.equal(options.timeout,0);callback('data:image/png;base64,aGVsbG8=');},
  };async inject(){calls.push('inject');}}
  const Client=navigationSafeClient(Base),client=new Client();let qr;client.on('qr_image',value=>{qr=value;});
- await client.inject();assert.equal(qr,'data:image/png;base64,aGVsbG8=');assert.ok(calls.includes('observe'));assert.equal(calls.at(-1),'inject');
+ await client.inject();assert.equal(qr,'data:image/png;base64,aGVsbG8=');assert.ok(calls.includes('observe'));assert.ok(calls.includes('inject'));
 });
 test('waits for a navigation-safe page condition before vendor injection',async()=>{
   const events=[];

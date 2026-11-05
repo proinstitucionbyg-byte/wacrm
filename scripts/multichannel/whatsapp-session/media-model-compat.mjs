@@ -12,6 +12,12 @@ export function installMediaModelCompatibility(){
   if(!media||typeof media!=='object')throw Error('WhatsApp returned no prepared media');
   const result={...media,...(typeof media.toJSON==='function'?media.toJSON():{})};
   delete result.__x_id;
+  const token=args[0]?.wacrmReceiptToken;
+  if(typeof token==='string'&&/^[0-9a-f-]{36}$/i.test(token)&&typeof result.filehash==='string'){
+   const receipts=api.__wacrmPreparedMediaReceipts??=new Map();
+   receipts.set(token,{filehash:result.filehash});
+   while(receipts.size>16)receipts.delete(receipts.keys().next().value);
+  }
   return result;
  };
  compatible.wacrmMediaCompatible=true;api.processMediaData=compatible;

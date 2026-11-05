@@ -987,6 +987,9 @@ function TriggerCard({
               </div>
             )}
             {type === "time_based" && (
+              config.internal_only === true && config.sales_window_last_call === true ? (
+                <p className="text-xs text-muted-foreground">Se envía 30 minutos antes de cerrar las 24 horas desde el último mensaje del cliente. Solo ventas sin compra ni pago pendiente o validado. No requiere una expresión de horario.</p>
+              ) : (
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
                   {t("schedule")}
@@ -1003,6 +1006,7 @@ function TriggerCard({
                   {t("scheduleHint")}
                 </p>
               </div>
+              )
             )}
           </div>
         )}

@@ -273,6 +273,8 @@ describe("validateTriggerForActivation", () => {
   });
 
   it("requires schedule on time_based triggers", () => {
+    expect(validateTriggerForActivation('time_based', {internal_only:true,sales_window_last_call:true})).toEqual([]);
+    expect(validateTriggerForActivation('time_based', {sales_window_last_call:true})).toHaveLength(1);
     expect(validateTriggerForActivation("time_based", {})).toEqual([
       { path: "trigger.schedule", message: "schedule is required" },
     ]);
