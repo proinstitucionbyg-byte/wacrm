@@ -21,6 +21,9 @@ export function WhatsappConnectionManager(){
  const pending=data?.commands.find(c=>c.worker_id===worker&&['pending','running'].includes(c.status));
  const latest=data?.commands.find(c=>c.worker_id===worker);
  const online=state?.online===true&&!error;
+ const currentLines=state?.lines.filter(line=>!line.archived&&!line.label.startsWith('Historial '))??[];
+ const unusedLines=currentLines.filter(line=>!line.active&&!line.linkedPhone&&line.label!=='Principal');
+ const visibleLines=currentLines.filter(line=>!unusedLines.includes(line)).sort((a,b)=>Number(b.label==='Principal')-Number(a.label==='Principal')||a.label.localeCompare(b.label,'es',{numeric:true}));
  async function request(body:unknown){const response=await fetch('/api/multichannel/whatsapp/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw Error(result.error||'No se pudo solicitar la acción.');return result;}
  async function manage(operation:string,line?:Line){
   if((operation==='unlink'||operation==='replace')&&!window.confirm(operation==='unlink'?`¿Desvincular +${line?.linkedPhone}? Se cerrará su vínculo con WhatsApp y se conservará el historial.`:`¿Cambiar +${line?.linkedPhone} por otro teléfono? Se abrirá un perfil nuevo; el historial anterior se conserva separado.`))return;
@@ -30,7 +33,7 @@ export function WhatsappConnectionManager(){
  }
  async function toggleBot(line:Registered){setBusy(true);try{await request({action:'pause_line',line_key:line.line_key,value:!line.paused});setNotice(line.paused?'Automatizaciones habilitadas para este número.':'Automatizaciones pausadas para este número.');await refresh();}catch(e){setNotice(e instanceof Error?e.message:'No se pudo cambiar la pausa.');}finally{setBusy(false);}}
  return <section className="space-y-4 rounded-xl border border-border p-4" aria-label="Mis WhatsApps">
-  <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Mis WhatsApps</h2><p className="text-sm text-muted-foreground">1. Elige una línea · 2. Escanea su QR aquí · 3. Habilita sus automatizaciones</p></div><button className={button} disabled={!online||busy||!!pending} onClick={()=>setCreating(v=>!v)}>Vincular otro WhatsApp</button></div>
+  <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Mis WhatsApps</h2><p className="text-sm text-muted-foreground">Escanea únicamente la tarjeta que dice «Escanea el QR». Si ya muestra tu número y «Conectado», no necesitas escanear otra vez.</p></div><button className={button} disabled={!online||busy||!!pending} onClick={()=>unusedLines.length?void manage('connect',unusedLines[0]):setCreating(v=>!v)}>Vincular otro WhatsApp</button></div>
   <p className="text-sm text-muted-foreground">Las asesoras atienden desde Inbox. Puedes mantener hasta diez números conectados; cada uno conserva su vínculo e historial.</p>
   {data&&data.workers.filter(w=>w.enabled).length>1&&<label className="block text-sm">Computadora del bot<select className="ml-2 rounded border bg-background p-2" value={worker} onChange={e=>setWorker(e.target.value)}><option value="">Seleccionar computadora</option>{data.workers.filter(w=>w.enabled).map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>}
   {!data&&!error&&<p role="status">Comprobando tus WhatsApps…</p>}
@@ -40,7 +43,7 @@ export function WhatsappConnectionManager(){
   {pending&&<p role="status" className="text-sm">Procesando la acción solicitada. Las demás líneas mantienen su conexión.</p>}
   {latest?.result&&!pending&&<p role="status" className="text-sm">{latest.result}</p>}
   {creating&&<form className="flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void manage('create');}}><input aria-label="Nombre del nuevo WhatsApp" className="rounded border bg-background p-2" placeholder="Ej. Soporte 2" maxLength={60} required value={name} onChange={e=>setName(e.target.value)}/><button className={button} disabled={!online||busy||!!pending||!name.trim()}>Crear y mostrar QR</button><button type="button" className={button} onClick={()=>setCreating(false)}>Cancelar</button></form>}
-  <div className="grid gap-3 md:grid-cols-2">{state?.lines.filter(line=>!line.archived&&!line.label.startsWith('Historial ')).map(line=>{
+  <div className="grid gap-3 md:grid-cols-2">{visibleLines.map(line=>{
    const registered=data?.lines.find(r=>r.line_key===line.lineKey&&r.worker_id===worker&&r.linked_phone===line.linkedPhone);
    return <article key={line.lineKey} className="space-y-3 rounded-lg border border-border p-3"><div><h3 className="font-semibold">{line.label}</h3><p className="text-lg font-semibold tabular-nums">{line.linkedPhone?'+'+line.linkedPhone:'Teléfono por vincular'}</p><p className="text-sm">{online?(labels[line.status]??'Revisar estado'):'Sin conexión confirmada'}</p></div>
     {online&&line.status==='awaiting_qr'&&<div className="space-y-2">{line.qr?<img src={line.qr} alt={'QR para vincular '+line.label} className="h-56 w-56 rounded bg-white p-2"/>:<p role="status">Preparando el QR…</p>}<p className="text-sm">En ese celular: WhatsApp → Dispositivos vinculados → Vincular dispositivo. Escanea este QR y comprueba el número que aparece.</p></div>}
