@@ -6,7 +6,7 @@
 
 El punto de entrada es **CRM → Bot multicanal → Mis WhatsApps**. La computadora conserva las sesiones, pero el propietario gestiona el vínculo desde el CRM por HTTPS; no debe copiar tokens ni vínculos. Si la computadora aparece sin conexión, ejecutar **ABRIR_BOT.cmd** en el Escritorio/wacrm y regresar al CRM. Mantenerla encendida hasta migrar el ejecutor a Contabo.
 
-1. En una línea sin teléfono, pulsar **Vincular y mostrar QR**. Para crear otra pestaña, **Vincular otro WhatsApp**, poner nombre y pulsar **Crear y mostrar QR**.
+1. En una línea sin teléfono, pulsar **Vincular y mostrar QR**. **Vincular otro WhatsApp** reutiliza primero un espacio libre; si no hay uno preparado, permite crear otra línea. Escanear solo su tarjeta actual, nunca el historial.
 2. En el celular: WhatsApp → Dispositivos vinculados → Vincular dispositivo. Escanear el QR dentro del CRM y comprobar el número mostrado.
 3. El número confirmado se registra automáticamente **en pausa**. Pulsar **Habilitar automatizaciones** en su tarjeta. No basta con escanear.
 4. En el orden de atención, añadir el número como respaldo y guardar. Mantener 933691668 primero mientras sea la prioridad elegida por el propietario.
@@ -38,9 +38,9 @@ Los tres minutos son el plazo configurado para clasificar. La ejecución y la en
 
 - **Conectar esta línea**: intenta usar el vínculo guardado. Si WhatsApp lo revocó, muestra QR para escanear desde el teléfono → Dispositivos vinculados → Vincular dispositivo.
 - **Detener línea**: cierra su ejecución y conserva vínculo e historial. No significa desvincular el teléfono.
-- **Desvincular WhatsApp**: revoca el vínculo. Para otro número, usa esa acción y después conecta/escanea el nuevo QR. Cambia solamente la pestaña elegida.
+- **Desvincular WhatsApp**: revoca el vínculo y conserva el historial. Para reemplazar el teléfono por otro número, usar **Cambiar número con QR nuevo** en la tarjeta actual; se crea una identidad independiente. No reutilizar el diario de un número para otro.
 - Confirma siempre el teléfono que aparece tras escanear. No registres dos veces el mismo número en distintas líneas.
-- Tras añadir un teléfono, regístralo/habilítalo en **Bot multicanal → Mis números de WhatsApp** y, si será respaldo, añádelo al orden de atención.
+- El teléfono confirmado se registra automáticamente; habilitarlo en **Bot multicanal → Mis WhatsApps** y, si será respaldo, añadirlo al orden de atención.
 
 ## Pausar y recuperar
 
@@ -56,7 +56,7 @@ Los tres minutos son el plazo configurado para clasificar. La ejecución y la en
 - Los mensajes escritos directamente desde el teléfono también se sincronizan con el CRM. El historial se conserva al detener/desvincular; no se promete recuperar lo que WhatsApp nunca cargó.
 - La computadora y el ejecutor deben estar encendidos en esta instalación. El traslado a Contabo todavía es un trabajo separado.
 - Grupos tendrán reglas distintas de los estudiantes: selector por número, empezando por 933691668, y grupos autorizados para responder frente a grupos de solo consulta. La interfaz completa dentro del CRM está pendiente. No activar un bot en todos los grupos por defecto.
-- Archivos/stickers, control completo de vouchers duplicados, campañas y SMS físicos siguen pendientes de terminar y comprobar. No aprobar otra matrícula ni otro pago por recibir de nuevo un comprobante.
+- Cinco campañas de un destinatario con texto tienen entrega comprobada; secuencias de medios, listas mayores, archivos/stickers, control completo de vouchers duplicados y SMS físicos siguen pendientes de terminar y comprobar. No aprobar otra matrícula ni otro pago por recibir de nuevo un comprobante.
 
 ## Prueba de aceptación pendiente
 

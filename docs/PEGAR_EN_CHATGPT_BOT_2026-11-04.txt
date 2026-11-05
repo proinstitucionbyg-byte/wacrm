@@ -1,0 +1,22 @@
+Necesito continuar WACRM/VORTEX conservando el trabajo existente. No sé programar: dame instrucciones simples, cambios pequeños, archivos exactos y comprobaciones. Lee primero INFORME_CONTINUIDAD_BOT_2026-11-04.md, AGENTS.md y BOT_VERIFICACION_2026-11-04.md del material adjunto.
+
+Carpeta original: C:\Users\lenovo\Desktop\wacrm.
+Repositorio propio: https://github.com/proinstitucionbyg-byte/wacrm.
+CRM: https://personal-wacrm.exjald.easypanel.host/inbox.
+Panel único: https://personal-wacrm.exjald.easypanel.host/multichannel.
+Base Supabase: jntyifplwjciikwyouwe.
+Código del último arreglo del ejecutor: d8b0c78. Hay cambios locales de otros frentes que no se deben sobrescribir ni dar por publicados.
+
+Objetivo: CRM único para asesoras; hasta diez WhatsApps normales/Business independientes; automatizaciones existentes compartidas con contexto de línea y conversación; campañas manuales/programadas con ritmos, bloques y respaldos; después medios, grupos y enlace con hojas/aula; SMS solo como canal aparte configurado/autorizado. Contabo será la fase siguiente para que no dependa de la laptop. El correo está aplazado.
+
+Prioridad actual: 933691668 -> 922779439 -> 924413651 -> 947370506 -> 994174238. Se enviaron cinco pruebas distintas al +51969383871 y las cinco tienen acuse real delivered. Las dos primeras requirieron conciliación; no repetirlas. Tras la última recuperación, verificar estado real de cada sesión: 05 volvió a pedir QR y otras líneas estaban reconectando. No dar la instalación por permanentemente estable por aquellas cinco entregas.
+
+No pauta: primer contacto Cloud espera hasta tres minutos; releer evidencia de Meta; si no hay pauta, abrir desde 933 y después mantener toda la conversación por su WhatsApp de soporte. Pauta/continuidad comercial confirmada: conservar su recorrido original; no transferirla a ciegas. Si un envío pudo salir y falta acuse, revisar, no volver a mandar desde otro número.
+
+Menús: 1/2/3 dependen del menú entregado en esa conversación y línea; nunca crear una regla global para el dígito. Reutilizar títulos e IDs originales. Los textos de las automatizaciones están en la base: el JSON adjunto contiene definiciones de referencia sin columnas de claves, no es una restauración automática.
+
+Bloqueo importante: engineSendMedia en src/lib/automations/meta-send.ts todavía rechaza medios por sesión. CURSOS GENERALES tiene un audio en el segundo paso. No afirmar que la rama comercial completa funciona por haber probado texto/menús.
+
+Restricciones: no borrar perfiles, diarios, contactos, mensajes ni trabajo ajeno. Limpieza del Inbox solo CEO o delegado. No cambiar políticas financieras ni académicas. No inventar datos, cuentas de pago, tablas o APIs. No volver a aplicar migraciones a ciegas. No solicites que pegue .env, tokens, panel-access.json ni perfiles de WhatsApp. Antes de escribir Next.js, leer las guías reales de la versión instalada. Verificar -> hacer -> comprobar -> continuar.
+
+Primera tarea: explica qué puedes comprobar con tus herramientas y qué no. Luego analiza el código existente y elige el siguiente bloque verificable del informe. Si no tienes acceso al equipo/Supabase/EasyPanel, prepara un parche con instrucciones y no afirmes que lo desplegaste ni que se entregó un mensaje. Solicita solamente los archivos o datos no sensibles necesarios para ese bloque. Al cerrar cada bloque, actualiza pendientes y pruebas reales.
