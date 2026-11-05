@@ -1,5 +1,8 @@
 import {installMessageModelCompatibility} from './message-model-compat.mjs';
 import {observeNativeQr} from './native-qr.mjs';
+import {installMediaModelCompatibility} from './media-model-compat.mjs';
+import {createHash} from 'node:crypto';
+import {snapshotMediaReceipts} from './media-receipt.mjs';
 // whatsapp-web.js 1.34.7 polls with evaluate() before the page has stabilized.
 // waitForFunction survives a page navigation; keep vendor source unmodified.
 export function navigationSafeClient(BaseClient) {
@@ -29,7 +32,19 @@ export function navigationSafeClient(BaseClient) {
     }
     async sendMessage(...args) {
       await this.pupPage.evaluate(installMessageModelCompatibility);
-      return super.sendMessage(...args);
+      const media=args[1]?.mimetype?args[1]:args[2]?.media;
+      if(!media)return super.sendMessage(...args);
+      await this.pupPage.evaluate(installMediaModelCompatibility);
+      const proof={chatId:args[0],filehash:createHash('sha256').update(Buffer.from(media.data,'base64')).digest('base64')};
+      const before=await this.pupPage.evaluate(snapshotMediaReceipts,proof);
+      let sent,failure;
+      try{sent=await super.sendMessage(...args);}catch(error){failure=error;}
+      if(sent?.id?._serialized)return sent;
+      const after=await this.pupPage.evaluate(snapshotMediaReceipts,proof);
+      const created=after.chatId===before.chatId?after.ids.filter(id=>!before.ids.includes(id)):[];
+      if(created.length===1)return this.getMessageById(created[0]);
+      if(failure)throw failure;
+      return sent; // An ambiguous outcome stays reserved; never send again here.
     }
     async inject() {
       for (let attempt = 0; attempt < 3; attempt++) {

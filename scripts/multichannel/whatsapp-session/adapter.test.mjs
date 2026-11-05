@@ -30,6 +30,12 @@ async function ready(s){await s.adapter.start();s.client.emit('ready');await s.a
 async function inbound(s,id='inbound-one',chat=chatId){s.client.emit('message_create',message(id,false,chat));await s.adapter.idle();}
 const job=(key='job-one')=>({key,accountId,lineKey,chatId,inboundId:'inbound-one',body:'Respuesta ficticia'});
 const campaignJob=()=>({id:'campaign-job',key:'campaign:campaign-job',campaignId:'campaign-1',accountId,lineKey,chatId,body:'Campaña ficticia'});
+
+test('encryption and protocol notifications never become customer inputs, human pauses or CRM conversations',async()=>{
+ const synced=[];const s=setup({onInbound:async value=>{synced.push(value);return{state:'synced'};}});await ready(s);
+ for(const type of ['e2e_notification','protocol','ciphertext','reaction'])for(const own of [true,false])s.client.emit('message_create',{...message(type+own,own),type,body:''});
+ await s.adapter.idle();assert.equal(s.adapter.status().received,0);assert.equal(s.adapter.status().pausedChats,0);assert.equal(synced.length,0);assert.equal(s.records.some(row=>['human','inbound'].includes(row.kind)),false);await s.adapter.stop();
+});
 test('media sends the authorized file object and options, never the internal body as a text replacement',async()=>{
  const media={kind:'audio',url:'https://assets.example.test/storage/v1/object/public/course.ogg'},content={data:'AUDIO'};let sent;
  const s=setup({prepareMedia:async value=>{assert.deepEqual(value,media);return{content,options:{sendAudioAsVoice:true}};}});await ready(s);await inbound(s);

@@ -2,6 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { navigationSafeClient } from './navigation-client.mjs';
+test('an empty media return is reconciled only to a unique new native receipt with the exact file proof, without resending',async()=>{
+ let sends=0,reads=0;const provider={id:{_serialized:'true_verified-media',fromMe:true}};
+ class Base extends EventEmitter{pupPage={evaluate:async(fn,proof)=>{if(!proof)return;assert.match(proof.filehash,/^[A-Za-z0-9+/]{43}=$/);return{chatId:'51900000002@c.us',ids:reads++?['true_old','true_verified-media']:['true_old']};}};async sendMessage(){sends++;return undefined;}async getMessageById(id){assert.equal(id,provider.id._serialized);return provider;}}
+ const client=new(navigationSafeClient(Base))();assert.equal(await client.sendMessage('51900000002@c.us',{mimetype:'audio/ogg',data:'aGVsbG8='}),provider);assert.equal(sends,1);
+});
+test('several new media candidates remain uncertain and never trigger another send',async()=>{
+ let sends=0,reads=0;class Base extends EventEmitter{pupPage={evaluate:async(fn,proof)=>proof?{chatId:'51900000002@c.us',ids:reads++?['true_one','true_two']:[]}:undefined};async sendMessage(){sends++;return undefined;}async getMessageById(){throw Error('Ambiguous receipt must not be selected');}}
+ const client=new(navigationSafeClient(Base))();assert.equal(await client.sendMessage('51900000002@c.us',{mimetype:'audio/ogg',data:'aGVsbG8='}),undefined);assert.equal(sends,1);
+});
 test('an own LID is normalized only from the official paired phone, never its digits',async()=>{
  let paired=null;class Base extends EventEmitter{info={wid:{server:'lid',user:'123456789012345'}};pupPage={evaluate:async()=>paired};async getState(){return 'CONNECTED';}}
  const client=new(navigationSafeClient(Base))();await client.getState();assert.equal(client.info.wid.server,'lid');

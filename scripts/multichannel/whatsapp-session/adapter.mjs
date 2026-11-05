@@ -36,6 +36,7 @@ function safeInitializationDetail(error) {
 }
 
 function snapshot(message, now) {
+  if(['e2e_notification','notification','notification_template','broadcast_notification','group_notification','gp2','protocol','ciphertext','debug','call_log','revoked','reaction'].includes(message?.type))return null;
   const own = message?.fromMe === true || message?.id?.fromMe === true;
   const chatId = own ? message.to : message?.from;
   const timestamp = Number(message?.timestamp) * 1000;
