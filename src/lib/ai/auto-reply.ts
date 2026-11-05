@@ -14,8 +14,9 @@ import {
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
-import { engineSendText } from '@/lib/flows/meta-send'
-import { runAutomationById } from '@/lib/automations/engine'
+import { engineSendText as sendAiText } from '@/lib/flows/meta-send'
+import { runAutomationById as runAiAutomation } from '@/lib/automations/engine'
+import {claimAiReplyTurn} from './reply-turn'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { academicContext } from '@/lib/matriculas/calendar'
 import { studentSupportArea } from './student-support'
@@ -84,6 +85,16 @@ export async function dispatchInboundToAiReply(
     if (convErr || !conv) return
     if (conv.ai_autoreply_disabled) return
     if (conv.ai_enabled === false) return // turned off here
+
+    const turn=await claimAiReplyTurn(db,accountId,conversationId)
+    if(!turn)return
+    const ensureCurrent=async()=>{if(!await turn())throw Error('AI_REPLY_TURN_SUPERSEDED')}
+    const engineSendText=async(input:Parameters<typeof sendAiText>[0])=>{
+      await ensureCurrent();return sendAiText(input)
+    }
+    const runAutomationById=async(input:Parameters<typeof runAiAutomation>[0])=>{
+      await ensureCurrent();return runAiAutomation(input)
+    }
 
     const handedOffAt = conv.ai_handed_off_at
       ? new Date(conv.ai_handed_off_at).getTime()
@@ -358,6 +369,7 @@ export async function dispatchInboundToAiReply(
       })
     }
   } catch (err) {
+    if(err instanceof Error&&err.message==='AI_REPLY_TURN_SUPERSEDED')return
     console.error('[ai auto-reply] dispatch failed:', err)
   }
 }

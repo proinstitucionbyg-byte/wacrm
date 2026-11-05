@@ -25,6 +25,7 @@ vi.mock('./config', () => ({ loadAiConfig: h.loadAiConfig }))
 vi.mock('./context', () => ({ buildConversationContext: h.buildConversationContext }))
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
+vi.mock('./reply-turn',()=>({claimAiReplyTurn:async()=>async()=>true}))
 vi.mock('@/lib/automations/engine', () => ({ runAutomationById: h.runAutomation }))
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('./admin-client', () => ({

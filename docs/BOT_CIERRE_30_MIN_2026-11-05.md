@@ -10,6 +10,13 @@ La configuración marcada como interna y de último contacto ya no exige `schedu
 
 Comprobaciones locales: 102 Vitest (incluye validación, límites de ventana, exclusiones y cancelación del motor) y prueba PostgreSQL temporal que compila la migración, comprueba la reserva única, el paso original y las exclusiones por pago/área/respuesta. No se enviaron pruebas a estudiantes. Publicación, aplicación de migración y resultado real deben confirmarse aparte.
 
+## Resultado publicado
+
+- Commit `778c666f606c514700a317829206c230ad3784d3`, compilación EasyPanel **Success 05/11/2026 22:29:42 UTC**, SHA confirmado. Migración `sales_last_call_30_minutes` aplicada. La automatización conserva sus cuatro pasos y sigue activa; `schedule: S` ya no existe.
+- El cron normal reservó un contacto comercial elegible mediante `912a6fce-0471-44e6-b24d-4b2021d544d2`; no se fabricó una entrada ni se modificó su fecha para probar. Log `time_based:last_call_30_minutes`, ejecución única y terminada en `success`.
+- Texto inicial 22:31:54 UTC, audio 22:32:00 UTC y texto final 22:33:24 UTC: **los tres entregados**, con acuse real de WhatsApp. Se respetó la espera durable de un minuto (el cron añade su intervalo de comprobación). Esta es operación comercial autorizada del programador, no envío manual de pruebas a estudiantes.
+- La tabla de reservas mantiene su estado técnico `sending`; para auditar el resultado real consultar el log y los mensajes anteriores. Falta conciliar ese indicador final con los acuses, sin reenviar contenido.
+
 ## Otros requisitos del adjunto que siguen pendientes
 
 - Base general y bases de asesoras: dos indicadores compactos para estado comercial y solicitud urgente. Activar promoción debe reconocer prospecto; contacto manual/no interesado/seguimiento debe actualizarse de forma coherente en CRM y Sheets.
