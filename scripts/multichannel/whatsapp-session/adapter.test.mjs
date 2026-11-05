@@ -30,6 +30,10 @@ async function ready(s){await s.adapter.start();s.client.emit('ready');await s.a
 async function inbound(s,id='inbound-one',chat=chatId){s.client.emit('message_create',message(id,false,chat));await s.adapter.idle();}
 const job=(key='job-one')=>({key,accountId,lineKey,chatId,inboundId:'inbound-one',body:'Respuesta ficticia'});
 const campaignJob=()=>({id:'campaign-job',key:'campaign:campaign-job',campaignId:'campaign-1',accountId,lineKey,chatId,body:'Campaña ficticia'});
+test('own LID digits cannot bind or reject a saved phone as a different number',async()=>{
+ const s=setup({rows:[{kind:'binding',payload:{phone}}]});s.client.info={wid:{user:'123456789012345',server:'lid'}};
+ await ready(s);assert.equal(s.adapter.status().status,'connecting');assert.equal(s.destroyed(),0);assert.equal(s.adapter.status().linkedPhone,phone);await s.adapter.stop();
+});
 
 test('a missed delivery event is recovered by reading the actual provider message, without resending',async()=>{
  const s=setup();await ready(s);await inbound(s);const key=randomUUID();const result=await s.adapter.dispatch(job(key));assert.equal(result.state,'accepted');
@@ -86,6 +90,23 @@ test('an uncertain campaign send remains reserved after restart',async()=>{
  const s=setup({campaignsEnabled:true});await ready(s);s.client.sendMessage=async()=>{throw Error('Uncertain provider result');};
  assert.equal((await s.adapter.dispatchCampaign(campaignJob())).state,'needs_review');await s.adapter.stop();
  const restored=setup({rows:s.records,campaignsEnabled:true});await ready(restored);assert.equal((await restored.adapter.dispatchCampaign(campaignJob())).state,'already_attempted');assert.equal(restored.sent(),0);await restored.adapter.stop();
+});
+
+test('first-contact campaign reconciles a verified LID echo when the send returns no result, without human pause or duplicate CRM echo',async()=>{
+ const lid='123456789012345@lid',events=[];
+ const s=setup({campaignsEnabled:true,resolveSenderPhone:async id=>id===lid?chatId.split('@')[0]:null,onInbound:async event=>{events.push(event);return{state:'synced'};}});await ready(s);let sends=0;
+ s.client.sendMessage=async(_chat,body)=>{sends++;s.client.emit('message_create',{...message('actual-campaign-provider',true,lid),body});return undefined;};
+ const j=campaignJob(),result=await s.adapter.dispatchCampaign(j);await s.adapter.idle();
+ assert.equal(result.state,'accepted');assert.equal(result.providerId,'actual-campaign-provider');assert.equal(sends,1);assert.equal(s.adapter.status().pausedChats,0);assert.equal(events.length,0);
+ s.client.getMessageById=async id=>({...message(id,true,lid),ack:2});await s.adapter.refreshReplyAcknowledgements();
+ assert.deepEqual(s.adapter.campaignAcknowledgements(),[{id:j.id,providerId:'actual-campaign-provider',state:'delivered'}]);
+ assert.equal((await s.adapter.dispatchCampaign(j)).state,'already_attempted');assert.equal(sends,1);await s.adapter.stop();
+});
+
+test('a LID belonging to another phone cannot confirm a campaign recipient',async()=>{
+ const lid='123456789012345@lid';const s=setup({campaignsEnabled:true,resolveSenderPhone:async()=> '51900000999'});await ready(s);
+ s.client.sendMessage=async(_chat,body)=>{s.client.emit('message_create',{...message('unverified-provider',true,lid),body});return undefined;};
+ assert.equal((await s.adapter.dispatchCampaign(campaignJob())).state,'needs_review');assert.deepEqual(s.adapter.campaignAcknowledgements(),[]);await s.adapter.stop();
 });
 
 test('owner pause stops automatic replies and campaigns, preserves reception and manual sends',async()=>{

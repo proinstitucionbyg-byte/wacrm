@@ -2,6 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { navigationSafeClient } from './navigation-client.mjs';
+test('an own LID is normalized only from the official paired phone, never its digits',async()=>{
+ let paired=null;class Base extends EventEmitter{info={wid:{server:'lid',user:'123456789012345'}};pupPage={evaluate:async()=>paired};async getState(){return 'CONNECTED';}}
+ const client=new(navigationSafeClient(Base))();await client.getState();assert.equal(client.info.wid.server,'lid');
+ paired={user:'51900000001',server:'c.us',_serialized:'51900000001@c.us'};await client.getState();assert.equal(client.info.wid.user,'51900000001');assert.equal(client.info.wid.server,'c.us');
+});
 test('native QR remains available while waiting for a new linked socket',async()=>{
  const calls=[];let callback;
  class Base extends EventEmitter {options={};pupPage={

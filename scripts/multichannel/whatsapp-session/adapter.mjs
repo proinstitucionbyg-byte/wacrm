@@ -112,7 +112,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       if (!previous || !['blocked', 'accepted', 'needs_review'].includes(p.state)) throw Error('Resultado persistido inválido.');
       attempts.set(p.key, { ...previous, ...p });
       if (p.state === 'accepted' && idValid(p.providerId)) bots.set(p.providerId, p.key);
-      if(p.phoneEcho){const echo=p.phoneEcho;if(echo.id!==p.providerId||echo.own!==true||!replyChatPattern.test(echo.chatId??'')||typeof echo.text!=='string'||!Number.isFinite(echo.timestamp))throw Error('Eco de envío inválido.');humanMessages.set(echo.id,echo);crmSync.set(echo.id,'retry');}
+      if(p.phoneEcho){const echo=p.phoneEcho;if(echo.id!==p.providerId||echo.own!==true||!replyChatPattern.test(echo.chatId??'')||typeof echo.text!=='string'||!Number.isFinite(echo.timestamp))throw Error('Eco de envío inválido.');if(!previous.campaignId){humanMessages.set(echo.id,echo);crmSync.set(echo.id,'retry');}}
     } else if (record.kind === 'ack') {
       const previous = attempts.get(p.key);
       if (!previous || !['accepted', 'delivered', 'read', 'failed'].includes(p.state)) throw Error('Acuse persistido inválido.');
@@ -219,6 +219,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         return;
       }
       const phone = client.info?.wid?.user;
+      if(client.info?.wid?.server==='lid'){status='connecting';qr=null;return;}
       if (!/^\d{7,15}$/.test(phone ?? '')) {
         status = 'connecting'; qr = null;
         return;
@@ -267,8 +268,13 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if (bots.has(event.id)) { pendingHuman.delete(event.id); return null; }
         if (seen.has(event.id)) return null;
         if(event.own){
+          // A first-contact send may be echoed as a LID before any inbound
+          // message has populated its verified phone mapping.
+          if(event.chatId.endsWith('@lid')&&!phoneByChat.has(event.chatId)&&typeof resolveSenderPhone==='function'){
+            try{const phone=await resolveSenderPhone(event.chatId);if(/^\d{7,15}$/.test(phone??''))phoneByChat.set(event.chatId,phone);}catch{/* An unverified echo remains a human message. */}
+          }
           const candidates=[...attempts].filter(([,p])=>!p.providerId&&p.bodyHash===replyBodyHash(event.text)&&canonicalChatId(p.chatId)===canonicalChatId(event.chatId)&&Number.isFinite(p.startedAt)&&Math.abs(p.startedAt-event.timestamp)<=120000);
-          if(candidates.length===1){const echo={...event,...(phoneByChat.get(event.chatId)?{senderPhone:phoneByChat.get(event.chatId)}:{})};await persist('result',{key:candidates[0][0],state:'accepted',providerId:event.id,phoneEcho:echo});pendingHuman.delete(event.id);return echo;}
+          if(candidates.length===1){const echo={...event,...(phoneByChat.get(event.chatId)?{senderPhone:phoneByChat.get(event.chatId)}:{})};await persist('result',{key:candidates[0][0],state:'accepted',providerId:event.id,phoneEcho:echo});pendingHuman.delete(event.id);return candidates[0][1].campaignId?null:echo;}
         }
         let stored=event;
         if (!event.chatId.endsWith('@g.us')) {
@@ -385,7 +391,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     async idle() { await tail; await Promise.resolve(); await crmSyncTail; },
     async refreshReplyAcknowledgements(){
       if(status!=='ready'||stopping||typeof client.getMessageById!=='function')return;
-      const pending=[...attempts].filter(([key,p])=>requestIdPattern.test(key)&&['accepted','delivered'].includes(p.state)&&idValid(p.providerId)&&now()-(ackCheckedAt.get(key)??0)>=15000).slice(0,3);
+      const pending=[...attempts].filter(([key,p])=>(requestIdPattern.test(key)||key.startsWith('campaign:')&&p.campaignId)&&['accepted','delivered'].includes(p.state)&&idValid(p.providerId)&&now()-(ackCheckedAt.get(key)??0)>=15000).slice(0,3);
       for(const [key,p] of pending){
         ackCheckedAt.set(key,now());
         let timeout;
@@ -472,11 +478,20 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if(!campaignsEnabled||!authorizeCampaign)return{state:'disabled'};
         if(attempts.has(job.key))return{state:'already_attempted',previous:attempts.get(job.key).state};
         if(!await campaignPermitted(job))return{state:'blocked'};
-        await persist('attempt',{key:job.key,chatId:job.chatId,campaignId:job.campaignId,bodyHash:replyBodyHash(job.body)});
+        await persist('attempt',{key:job.key,chatId:job.chatId,campaignId:job.campaignId,bodyHash:replyBodyHash(job.body),startedAt:now()});
         if(!await campaignPermitted(job)){await persist('result',{key:job.key,state:'blocked'});return{state:'blocked'};}
         let state='needs_review',providerId=null;
         try{const message=await client.sendMessage(job.chatId,job.body,{sendSeen:false});providerId=await acceptedProviderId(message,job.chatId);if(providerId)state='accepted';}catch{/* Never retry an uncertain campaign on another line. */}
         await persist('result',{key:job.key,state,providerId});return{state,providerId};
+      }).then(async result=>{
+        // The provider can emit its real outgoing message while returning no
+        // usable send result. Let the queued, identity-checked echo settle;
+        // never send again to obtain a receipt.
+        if(result.state!=='needs_review')return result;
+        await tail;
+        const observed=attempts.get(job.key);
+        return observed&&['accepted','delivered','read'].includes(observed.state)&&idValid(observed.providerId)
+          ?{state:'accepted',providerId:observed.providerId}:result;
       });
     },
     campaignAcknowledgements() {

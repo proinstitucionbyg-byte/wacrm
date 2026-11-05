@@ -15,6 +15,18 @@ export function navigationSafeClient(BaseClient) {
       try { return await super.initialize(); }
       finally { this.initializationFinished = true; }
     }
+    async getState() {
+      const state=await super.getState();
+      // The vendor can initially expose the own LID as info.wid. Its digits
+      // are not a telephone number; replace it only with WhatsApp's own PN.
+      if(state==='CONNECTED'&&this.info?.wid?.server==='lid'){
+        const own=await this.pupPage.evaluate(()=>{
+          try{const pn=window.require('WAWebUserPrefsMeUser').getMaybeMePnUser();return pn?.server==='c.us'&&/^\d{7,15}$/.test(pn.user??'')?{user:pn.user,server:'c.us',_serialized:pn.user+'@c.us'}:null;}catch{return null;}
+        });
+        if(own)this.info.wid=own;
+      }
+      return state;
+    }
     async sendMessage(...args) {
       await this.pupPage.evaluate(installMessageModelCompatibility);
       return super.sendMessage(...args);
