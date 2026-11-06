@@ -147,10 +147,10 @@ function SYNC_VENTAS_CRM() {
         salesDay_(createdAt, ss.getSpreadsheetTimeZone()),
         createdAt,
         lead.institute || 'INSTICRECE',
-        lead.commercial_status || '', // the initial CRM status; later edits sync back through sales:write
+        lead.commercial_stage || lead.commercial_status || '', // manual changes still reconcile through sales:write
         normalizeAdviser_(lead, activeAdviserByName),
         normalizeChannel_(lead.channel),
-        (lead.crm_tags || []).join(', '),
+        lead.attention_status || '', // compact second indicator; all tags remain in the CRM
         lead.assigned_at ? new Date(lead.assigned_at) : '',
         lead.last_interaction_at ? new Date(lead.last_interaction_at) : '',
         lead.operation_reference || '',

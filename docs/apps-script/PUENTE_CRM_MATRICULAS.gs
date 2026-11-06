@@ -204,7 +204,9 @@ function C_REGISTRAR_(job) {
 }
 function SINCRONIZAR_CRM_MATRICULAS() {
   return BLOQUEO_(function(){
-    C_SINCRONIZAR_CUADRO_();
+    // Calendar publication is independent of a verified enrollment. C_REGISTRAR_
+    // still validates this student's exact course/start date against the sheet.
+    try{C_SINCRONIZAR_CUADRO_();}catch(error){console.warn('CALENDARIO CRM NO ACTUALIZADO: '+String(error.message||error));}
     try{C_RECONCILIAR_HOJA_CRM_();}catch(error){console.warn('CONCILIACION DE MATRICULAS: '+String(error.message||error));}
     C_ENVIAR_DOCUMENTOS_PENDIENTES_();
     const job=C_API_('/claim',{}).job;if(!job)return;

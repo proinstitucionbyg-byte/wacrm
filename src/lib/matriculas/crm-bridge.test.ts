@@ -35,6 +35,13 @@ describe('manual enrollment welcome status', () => {
   });
 });
 describe('puente Google CRM', () => {
+  it('keeps verified registration available when calendar publication fails', () => {
+    const run = setup();
+    run("warnings=[];console={warn:function(v){warnings.push(v);}};calls=[];BLOQUEO_=function(fn){return fn();};C_SINCRONIZAR_CUADRO_=function(){throw Error('CALENDARIO INVALIDO');};C_API_=function(path,body){calls.push([path,body]);return {job:{id:'verified',lease_token:'lease'}};};C_REGISTRAR_=function(){return {registered_number:'7'};};SINCRONIZAR_CRM_MATRICULAS();");
+    expect(run('calls[0][0]')).toBe('/claim');
+    expect(run('calls[1][1].status')).toBe('registered');
+    expect(run('warnings[0]')).toContain('CALENDARIO INVALIDO');
+  });
   it('records a paid incomplete intake without changing adviser-owned state or requiring documents', () => {
     const run = setup();
     run("headers=['N°','FECHA DE HOY','HORA','INSTITUTO','ASESORA DE INGRESO','ASESORA DE VTAS.','NOMBRE COMPLETO','TIPO DE DOCUMENTO','NUMERO DE DOCUMENTO','F. NACIMIENTO','EDAD','CELULAR 1','CELULAR 2','DIRECCION','DEPARTAMENTO','DISTRITO','CORREO ELECTRONICO','LINK DE CARPETA DEL ESTUDIANTE','CURSO','FECHA DE INICIO','AGREGADOS AL WHATSAPP','PRIORIDAD','ESTADO','PROMO','OBSERVACIONES','OBSERVACION PARA FIDELIZACION','OBSERVACION PARA VENTAS','ID DE INICIO','ID MATRICULA CRM','NUMERO DE OPERACION'];map={};headers.forEach(function(x,i){map[x]=i+1;});existing=Array(30).fill('');existing[4]='ANTONELLA';existing[22]='REALIZADO';existing[24]='NOTA MANUAL';job={id:'case',payment_status:'validated',payment_purpose:'enrollment',status:'collecting',operation_reference:'000123',sales_adviser:'INSTITUCION',data:{full_name:'ESTUDIANTE',phone1:'51912345678'}};planned=C_PLAN_FILA_HOJA_(job,map,existing,14,new Date('2026-10-23T20:00:00Z'));again=C_PLAN_FILA_HOJA_(job,map,planned,15,new Date('2026-10-24T20:00:00Z'));");

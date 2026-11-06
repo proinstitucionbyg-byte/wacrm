@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeSalesCommercialStatus, SALES_COMMERCIAL_STATUSES } from './commercial-status';
 
+it.each(['CONTACTADO', 'PROSPECTO A COMPRAR'])('accepts the commercial state %s', status => {
+  expect(normalizeSalesCommercialStatus(status.toLowerCase())).toBe(status);
+});
+
 describe('normalizeSalesCommercialStatus', () => {
   it('accepts the supported status labels case-insensitively', () => {
     expect(normalizeSalesCommercialStatus('interesado')).toBe('INTERESADO');

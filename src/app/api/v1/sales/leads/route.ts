@@ -224,6 +224,9 @@ export async function GET(request: Request) {
 
       const indicators=salesLeadIndicators({tags,area:conversation?.ai_handoff_area,
         status:commercialStatus,validatedSale:!!sale,
+        statusChangedAt:commercialState?.status_changed_at??commercialTag?.created_at,
+        urgencyRequestedAt:contact.contact_tags.filter(item=>item.tag?.name==='ASESOR URGENTE').map(item=>item.created_at??'').sort().at(-1),
+        activationRequestedAt:messages.filter(message=>requestsPromotion(message.content_text??'')).map(message=>message.created_at).sort().at(-1),
         activationRequested:messages.some(message=>requestsPromotion(message.content_text??''))});
 
       return [{
