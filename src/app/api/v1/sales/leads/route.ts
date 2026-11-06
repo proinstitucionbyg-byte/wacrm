@@ -3,6 +3,7 @@ import { buildPage, keysetFilter, parseListParams } from '@/lib/api/v1/paginatio
 import { okList, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { SALES_COMMERCIAL_STATUSES } from '@/lib/sales/commercial-status';
 import { courseInterestFromMessages } from '@/lib/sales/course-interest';
+import {salesLeadIndicators,requestsPromotion} from '@/lib/sales/lead-indicators';
 
 const SALES_TAGS = new Set<string>([
   'AREA VENTAS',
@@ -24,6 +25,8 @@ type RawMessage = {
 };
 
 type RawConversation = {
+  ai_handoff_area?: string | null;
+  ai_handoff_summary?: string | null;
   id: string;
   status: string;
   assigned_agent_id: string | null;
@@ -84,7 +87,7 @@ export async function GET(request: Request) {
         contact_tags(created_at,tag:tags(name)),
         conversations(
           id, status, assigned_agent_id, created_at, last_message_at, last_message_text,
-          unread_count, automation_enabled, ai_enabled,
+          unread_count, automation_enabled, ai_enabled, ai_handoff_area, ai_handoff_summary,
           conversation_sales_routes(agent_id,state,created_at,lease_expires_at)
         )
       `)
@@ -219,7 +222,13 @@ export async function GET(request: Request) {
       const registeredPhone = (contact.channel || 'whatsapp') === 'whatsapp'
         && /^\+?\d{7,15}$/.test(candidatePhone) ? candidatePhone : '';
 
+      const indicators=salesLeadIndicators({tags,area:conversation?.ai_handoff_area,
+        status:commercialStatus,validatedSale:!!sale,
+        activationRequested:messages.some(message=>requestsPromotion(message.content_text??''))});
+
       return [{
+        ...indicators,
+        conversation_summary:conversation?.ai_handoff_summary??'',
         id: contact.id,
         name: contact.name?.trim() || 'Sin nombre',
         phone_or_user_id: contact.phone_normalized || contact.external_id || contact.phone || registeredPhone,

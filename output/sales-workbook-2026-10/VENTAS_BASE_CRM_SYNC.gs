@@ -199,6 +199,7 @@ function SYNC_VENTAS_CRM() {
       props.setProperty('SALES_SYNC_NEXT_SEQUENCE', String(sequence));
     }
     sortSalesChronologically_(sheet);
+    syncSalesVisibility_(sheet, leads, props, 'general');
     SpreadsheetApp.flush();
     const personal = advisers ? syncSalesPersonalBases_(ss, advisersSheet, advisers, leads, props) : { updated: 0, pending: 0 };
     const completedAt = new Date();
@@ -308,7 +309,7 @@ function institutionalName_(name) {
 /** Stable CRM IDs prevent namesakes or roster reordering from mixing personal bases. */
 function salesLeadsForAdviser_(adviser, leads) {
   if (!adviser.active_for_sales) return [];
-  return leads.filter(lead => lead.assigned_adviser_id === adviser.user_id || lead.sale_owner_id === adviser.user_id);
+  return leads.filter(lead => lead.commercial_exclusion !== 'OTRA AREA' && (lead.assigned_adviser_id === adviser.user_id || lead.sale_owner_id === adviser.user_id));
 }
 
 function sendSalesPersonalStatus_(base, key, contactId, status) {
@@ -528,3 +529,23 @@ function fetchSalesAdvisers_(base, key) {
   }
   return body.data.advisers;
 }
+
+/** Recompute visibility by stable CRM ID after sorting; never delete history. */
+function syncSalesVisibility_(sheet, leads, props, scope) {
+  const count = salesLastDataRow_(sheet) - SALES_SYNC.firstDataRow + 1;
+  if (count < 1) return;
+  const byId = new Map(leads.map(lead => [String(lead.id), lead]));
+  const key = 'SALES_HIDDEN_IDS:' + scope;
+  const previous = new Set(JSON.parse(props.getProperty(key) || '[]'));
+  const hidden = [];
+  const ids = sheet.getRange(SALES_SYNC.firstDataRow, SALES_SYNC.crmIdColumn, count, 1).getDisplayValues();
+  ids.forEach((row, index) => {
+    const id = String(row[0] || ''), lead = byId.get(id);
+    if (!lead) return; // A missing/partial export cannot hide or erase a contact.
+    if (lead.commercial_exclusion === 'OTRA AREA') {
+      sheet.hideRows(SALES_SYNC.firstDataRow + index); hidden.push(id);
+    } else if (previous.has(id)) sheet.showRows(SALES_SYNC.firstDataRow + index);
+  });
+  props.setProperty(key, JSON.stringify(hidden));
+}
+

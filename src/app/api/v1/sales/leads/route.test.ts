@@ -22,6 +22,12 @@ beforeEach(() => {
   h.key.mockResolvedValue({ accountId: 'account-a', supabase: { from } });
 });
 describe('commercial base export', () => {
+  it('marks an unpurchased fidelity contact inactive despite old sales status and tags',async()=>{
+    h.rows.contacts=[{...contact('moved',['ASESOR INSTITUTO','SEGUIMIENTO DE VENTAS']),conversations:[{id:'chat',ai_handoff_area:'FIDELIZACION',conversation_sales_routes:null}]}];
+    h.rows.contact_sales_states=[{contact_id:'moved',commercial_status:'SEGUIMIENTO DE VENTAS'}];
+    const result=await(await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({commercial_active:false,attention_status:'',commercial_exclusion:'OTRA AREA'});
+  });
   it('uses the registered enrollment when the contact has no phone and the latest chat has no course evidence', async () => {
     h.rows.contacts=[contact('registered',['AREA FIDELIZACION'],'')];
     const paid=payment('registered');
