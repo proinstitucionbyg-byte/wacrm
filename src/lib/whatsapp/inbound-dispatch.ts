@@ -200,7 +200,7 @@ export async function dispatchInboundThroughCrm(args: {
     if (matched) automationMatched = true
   }
 
-  if (args.conversation.ai_enabled !== false && !explicitHumanRequested && !salesDeclined &&
+  if (!allAutomaticRepliesDisabled && args.conversation.ai_enabled !== false && !explicitHumanRequested && !salesDeclined &&
       !humanRecentlyActive && !flowConsumed && !automationMatched &&
       (!interactiveReplyId || interactiveReplyId.startsWith('payment_followup_')) &&
       canAutoReplyToInboundImage(imageAnalysis) && (inboundText.trim() || imageAnalysis !== null)) {

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const h = vi.hoisted(() => ({
   auto: vi.fn(), flow: vi.fn(), tag: vi.fn(), first: vi.fn(), deferred: vi.fn(),
   explicit: vi.fn(), billing: vi.fn(), followup: vi.fn(), teacher: vi.fn(),
-  sales: vi.fn(), ai: vi.fn(),
+  sales: vi.fn(), ai: vi.fn(), support: vi.fn(),
 }))
 
 vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: h.auto }))
@@ -11,6 +11,7 @@ vi.mock('@/lib/flows/engine', () => ({ dispatchInboundToFlows: h.flow }))
 vi.mock('@/lib/sales/attribution', () => ({ tagCommercialInquiry: h.tag }))
 vi.mock('./first-inbound-routing', () => ({ pauseUnknownFirstInboundForHuman: h.first }))
 vi.mock('./deferred-keyword-openings', () => ({ hasPendingDeferredKeywordOpening: h.deferred }))
+vi.mock('./cloud-support', () => ({ routeCloudSupportOpening: h.support }))
 vi.mock('@/lib/ai/explicit-human-request', () => ({ handleExplicitHumanRequest: h.explicit }))
 vi.mock('./billing-runtime', () => ({ gateAutomaticWhatsAppConversation: h.billing }))
 vi.mock('@/lib/ai/followup', () => ({ handleIdleFollowupReply: h.followup }))
@@ -38,6 +39,7 @@ beforeEach(() => {
   h.billing.mockResolvedValue({ allowed: true })
   h.followup.mockResolvedValue(false)
   h.teacher.mockResolvedValue(false)
+  h.support.mockResolvedValue(false)
 })
 
 describe('dispatchInboundThroughCrm', () => {
@@ -71,6 +73,34 @@ describe('dispatchInboundThroughCrm', () => {
     expect(h.first).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       channel: 'cloud', messageId: 'inbound-session-id',
     }))
+  })
+
+  it('does not let the AI fallback bypass a denied Cloud billing gate', async () => {
+    h.billing.mockResolvedValue({ allowed: false })
+    await dispatchInboundThroughCrm({
+      ...common,
+      channel: 'cloud',
+      conversation: { ...common.conversation, ai_enabled: true, automation_enabled: true },
+    })
+    expect(h.billing).toHaveBeenCalledOnce()
+    expect(h.flow).not.toHaveBeenCalled()
+    expect(h.auto).not.toHaveBeenCalled()
+    expect(h.ai).not.toHaveBeenCalled()
+  })
+
+  it('does not let the AI fallback answer while an unknown first Cloud inbound is deferred', async () => {
+    h.first.mockResolvedValue('deferred')
+    await dispatchInboundThroughCrm({
+      ...common,
+      channel: 'cloud',
+      isFirstInboundMessage: true,
+      conversation: { ...common.conversation, ai_enabled: true, automation_enabled: true },
+    })
+    expect(h.first).toHaveBeenCalledOnce()
+    expect(h.billing).not.toHaveBeenCalled()
+    expect(h.flow).not.toHaveBeenCalled()
+    expect(h.auto).not.toHaveBeenCalled()
+    expect(h.ai).not.toHaveBeenCalled()
   })
 
   it('preserves an existing conversation automation pause for either channel', async () => {
