@@ -1199,3 +1199,11 @@ describe("triggerMatches — interactive_reply", () => {
     expect(triggerMatches(automation([]), { interactive_reply_id: "yes" })).toBe(false);
   });
 });
+
+it('keeps a prepared-menu choice in the source offer variant',async()=>{
+ h.state.owned={id:'c1'};
+ const base=automationWithUpdateStep();
+ h.state.automations=[{...base,id:'source-course',trigger_type:'keyword_match',trigger_config:{keywords:['Farmacia'],match_type:'exact',offer_variant:'49.90'}},{...base,id:'old-malla',created_at:'2020-01-01',trigger_type:'keyword_match',trigger_config:{keywords:['Malla de Farmacia'],match_type:'exact',offer_variant:'79.90'}},{...base,id:'correct-malla',created_at:'2026-01-01',trigger_type:'keyword_match',trigger_config:{keywords:['Malla de Farmacia'],match_type:'exact',offer_variant:'49.90'}}];
+ await runAutomationsForTrigger({accountId:ACCOUNT,contactId:'c1',triggerType:'keyword_match',context:{conversation_id:'chat',message_text:'Malla de Farmacia',manual_agent_id:'agent',manual_command_run_id:'command',manual_source_automation_id:'source-course'}});
+ expect(h.state.logAutomationIds).toEqual(['correct-malla']);
+});

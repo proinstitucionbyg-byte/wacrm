@@ -177,7 +177,7 @@ describe('complete course journey: real catalog, local dispatch → waits → de
       context:{conversation_id:CHAT,message_text:(route.trigger_config as Row).keywords[0],inbound_at:new Date().toISOString()}})
     // A route's existing short wait still finishes before the saved course resumes.
     for(let n=0;saved.status==='cancelled'&&n<10;n++) await tick()
-    expect(saved.status).toBe('pending');expect(saved.next_step_position).toBe(position)
+    expect(saved.status).toBe('pending');expect(saved.next_step_position).toBe(route.name.startsWith('MALLAS')&&(link.step_config as Row).start_step===8?Math.max(position,7):position)
     await finish()
     expect(h.sends.filter(s=>s.mediaUrl===(c.steps[0].step_config as Row).url)).toHaveLength(1)
     expect(h.tables.automation_logs.every(r=>r.status==='success')).toBe(true)
@@ -237,7 +237,7 @@ describe('complete course journey: real catalog, local dispatch → waits → de
     await runAutomationsForTrigger(event)
     const sent=h.sends.length
     await Promise.all([runAutomationsForTrigger(event),runAutomationsForTrigger(event)])
-    expect(h.sends).toHaveLength(sent);expect(saved.status).toBe('pending');expect(saved.next_step_position).toBe(position)
+    expect(h.sends).toHaveLength(sent);expect(saved.status).toBe('pending');expect(saved.next_step_position).toBe(Math.max(position,7))
     expect(h.tables.automation_logs.filter(r=>r.automation_id===route.id)).toHaveLength(1)
   })
   it('a later opening keyword cannot restart an already launched complete course',async()=>{
@@ -283,7 +283,7 @@ describe('complete course journey: real catalog, local dispatch → waits → de
       await runAutomationsForTrigger({accountId:A,contactId:C,triggerType:'keyword_match',context:{conversation_id:CHAT,
         message_text:text,inbound_at:new Date().toISOString(),inbound_message_id:`click-${route.id}`}})
       for(let n=0;saved.status==='cancelled'&&n<10;n++)await tick()
-      expect(saved.status).toBe('pending');expect(saved.next_step_position).toBe(position)
+      expect(saved.status).toBe('pending');expect(saved.next_step_position).toBe(Math.max(position,7))
     }
     await finish();expect(h.sends.filter(s=>s.mediaUrl===(c.steps[0].step_config as Row).url)).toHaveLength(1)
     expect(h.tables.automation_logs.every(r=>r.status==='success')).toBe(true)

@@ -1,3 +1,4 @@
+import {activeConversationPayments} from './test-session'
 import type {
   Automation,
   AutomationLogStepResult,
@@ -19,6 +20,7 @@ import type {
   RunAutomationStepConfig,
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
+import { withSessionCommand } from '@/lib/whatsapp/session-command-context'
 import {
   engineSendText,
   engineSendTemplate,
@@ -56,6 +58,8 @@ export interface AutomationContext {
   enrollment_sequence_id?: string
   /** Explicit adviser command; set only by the authenticated server endpoint. */
   manual_agent_id?: string
+  manual_source_automation_id?: string
+  manual_command_run_id?: string
   /** Raw message text, for keyword_match + message_content conditions. */
   message_text?: string
   /** Previous customer message, captured before inserting this inbound. */
@@ -187,6 +191,13 @@ export async function runAutomationsForTrigger(
     // One inbound text chooses one route. A broad keyword can otherwise run
     // beside a course-specific block and send two incompatible sequences.
     if (input.triggerType === 'keyword_match') {
+      const source = input.context?.manual_source_automation_id
+        ? (automations as Automation[]).find(a => a.id === input.context?.manual_source_automation_id) : undefined;
+      const variant = (source?.trigger_config as Record<string,unknown>|undefined)?.offer_variant;
+      if (typeof variant === 'string' && ordinaryMatches.some(a => (a.trigger_config as Record<string,unknown>)?.offer_variant === variant)) {
+        const matching = ordinaryMatches.filter(a => (a.trigger_config as Record<string,unknown>)?.offer_variant === variant);
+        ordinaryMatches.splice(0,ordinaryMatches.length,...matching);
+      }
       ordinaryMatches.sort((left, right) =>
         matchingKeywordSpecificity(right, input.context?.message_text) - matchingKeywordSpecificity(left, input.context?.message_text)
         || (left.created_at ?? '').localeCompare(right.created_at ?? '')
@@ -266,7 +277,9 @@ export async function runAutomationsForTrigger(
           .eq("account_id", input.accountId)
           .eq("status", "pending")
           .is('context->>enrollment_sequence_id', null);
-        if (detour) cancelQuery.is('context->>manual_agent_id', null)
+        // A course started manually still has an automatic wait. The material
+        // detour must own that cursor as well, or both sequences send at once.
+        if (detour) cancelQuery.eq('context->>conversation_id', input.context!.conversation_id!)
         const {error:cancelError}=await cancelQuery
         if(cancelError)throw cancelError
       }
@@ -361,6 +374,7 @@ export async function runAutomationById(input: {
   conversationId: string
   messageText?: string
   manualAgentId?: string
+  manualCommandId?: string
   sequenceId?: string
   requireComplete?: boolean
 }): Promise<boolean> {
@@ -425,6 +439,7 @@ export async function runAutomationById(input: {
           payment_activation_at: new Date().toISOString(),
         } : {}),
         ...(input.manualAgentId ? { manual_agent_id: input.manualAgentId } : {}),
+        ...(input.manualAgentId && input.manualCommandId ? { manual_command_run_id: input.manualCommandId } : {}),
         ...(input.sequenceId ? { enrollment_sequence_id: input.sequenceId } : {}),
       },
     })
@@ -508,7 +523,8 @@ export async function resumePendingExecution(pending: {
       pending.context = { ...pending.context, course_detour_capture: false, course_checkpoint: state.checkpoint }
       const { error: cancelError } = await db.from('automation_pending_executions').update({ status: 'cancelled' })
         .eq('account_id', pending.account_id).eq('contact_id', pending.contact_id).eq('status', 'pending')
-        .neq('id', pending.id).is('context->>enrollment_sequence_id', null).is('context->>manual_agent_id', null)
+        .neq('id', pending.id).is('context->>enrollment_sequence_id', null)
+        .eq('context->>conversation_id', pending.context.conversation_id)
       if (cancelError) throw cancelError
     } catch {
       await markPending(pending.id, 'failed')
@@ -551,8 +567,7 @@ export async function resumePendingExecution(pending: {
     // A reply ends the redundant payment reminder, not the saved course.
     // Restore its exact cursor through the same guarded path as the final wait.
     if (newerCustomer || pending.context.payment_resume_previous === true) {
-      const { data: payment, error: paymentError } = await db.from('payment_reviews').select('id')
-        .eq('account_id', pending.account_id).eq('conversation_id', pending.context.conversation_id)
+      const { data: payment, error: paymentError } = await activeConversationPayments(db,pending.account_id,pending.context.conversation_id!)
         .in('status', ['pending', 'validated']).limit(1).maybeSingle()
       if (paymentError) {
         await markPending(pending.id, 'failed')
@@ -993,8 +1008,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     && (args.automation.trigger_config as Record<string, unknown>)?.payment_only_unpaid === true
   if ((cadence || unpaidPaymentFlow) && args.context.conversation_id) {
     // A receipt awaiting review is already a payment case, not a silent lead.
-    const { data: payment, error: paymentError } = await db.from('payment_reviews').select('id')
-      .eq('account_id', args.automation.account_id).eq('conversation_id', args.context.conversation_id)
+    const { data: payment, error: paymentError } = await activeConversationPayments(db,args.automation.account_id,args.context.conversation_id)
       .in('status', ['pending', 'validated']).limit(1).maybeSingle()
     if (paymentError) throw paymentError
     const startedAt = args.context.commercial_started_at?.[args.automation.id]
@@ -1332,6 +1346,13 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
 }
 
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string | { detail: string; childLogId: string }> {
+  const requestId = args.context.manual_command_run_id;
+  const conversationId = args.context.conversation_id;
+  if (requestId && args.context.manual_agent_id && conversationId) return withSessionCommand({ accountId: args.automation.account_id, conversationId, requestId }, () => runStepWithinScope(step, args));
+  return runStepWithinScope(step, args);
+}
+
+async function runStepWithinScope(step: AutomationStep, args: ExecuteArgs): Promise<string | { detail: string; childLogId: string }> {
   const db = supabaseAdmin()
 
   switch (step.step_type) {
@@ -1648,7 +1669,23 @@ case 'send_media': {
         if (responseError || !responseSteps?.length) throw new Error('No se pudo comprobar el bloque solicitado')
         const firstWait = responseSteps.find(row => row.step_type === 'wait')
         responseEnd = firstWait ? firstWait.position - 1 : (cfg.end_step ?? 1) - 1
-        if (responseEnd < (cfg.start_step ?? 1) - 1) return 'Respuesta enviada; conservar la posición guardada del curso'
+        if (responseEnd < (cfg.start_step ?? 1) - 1) {
+          // The material route already sent the requested image and audio.
+          // Its linked range begins at the following wait, so a saved course
+          // cursor at that same material must advance past it once.
+          if (checkpoint?.pending_ids.length) {
+            const { error: skipError } = await db.from('automation_pending_executions')
+              .update({ next_step_position: (cfg.start_step ?? 1) - 1 })
+              .eq('account_id', args.automation.account_id)
+              .eq('contact_id', args.contactId!)
+              .eq('automation_id', targetId)
+              .eq('status', 'cancelled')
+              .in('id', checkpoint.pending_ids)
+              .lte('next_step_position', responseEnd)
+            if (skipError) throw skipError
+          }
+          return 'Respuesta enviada; conservar la posición guardada del curso'
+        }
       }
 
       if (hasRange) {

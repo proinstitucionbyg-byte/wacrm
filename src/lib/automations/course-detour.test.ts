@@ -51,6 +51,15 @@ describe('saved course detours',()=>{
   expect(state.automation_pending_executions.map(r=>r.status)).toEqual(['cancelled','cancelled'])
   expect(state.automation_pending_executions.map(r=>[r.run_at,r.next_step_position])).toEqual(before)
  })
+ it('pauses a saved course started manually when the customer opens its material',async()=>{
+  const {db,state}=fixture()
+  state.automation_pending_executions=[{id:'manual-course',account_id:'a',contact_id:'c',automation_id:'course',
+   status:'pending',run_at:'2026-10-19T18:10:00Z',next_step_position:5,
+   context:{conversation_id:'chat',manual_agent_id:'advisor'}}]
+  const result=await captureCourseCheckpoint(db,'a','c','chat')
+  expect(result.checkpoint?.pending_ids).toEqual(['manual-course'])
+  expect(state.automation_pending_executions[0]).toMatchObject({status:'cancelled',next_step_position:5})
+ })
  it('recognizes the actual Administrativo name and its generic linked parent',async()=>{
   const {db,state}=fixture();state.automation_pending_executions.forEach(r=>r.status='pending')
   state.automations[0].name='🎁 Ver beneficios (49.90)';state.automations[1].name='ASISTENTE A 19.90 (49.90)'

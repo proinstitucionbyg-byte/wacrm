@@ -31,7 +31,7 @@ export async function captureCourseCheckpoint(db: SupabaseClient, account: strin
     .in('status', ['pending', 'running']).order('created_at', { ascending: false }).limit(100)
   if (error) throw error
   const rows = ((data ?? []) as WaitRow[]).filter(row => row.context?.conversation_id === chat
-    && !row.context?.enrollment_sequence_id && !row.context?.manual_agent_id)
+    && !row.context?.enrollment_sequence_id)
   const inherited = rows.find(row => row.context?.course_checkpoint)?.context?.course_checkpoint as CourseCheckpoint | undefined
   const { data: flows, error: flowError } = rows.length ? await db.from('automations').select('id,name,trigger_config')
     .eq('account_id', account).in('id', [...new Set(rows.map(row => row.automation_id))]) : { data: [], error: null }

@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl } from '@/lib/whatsapp/meta-api'
+import { recordBusinessAppEchoes } from '@/lib/whatsapp/business-app-echo'
 import { deliveryStatusPatch, type WhatsAppDeliveryStatus } from '@/lib/whatsapp/delivery-status'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
@@ -87,6 +88,7 @@ interface WhatsAppWebhookEntry {
         wa_id: string
       }>
       messages?: WhatsAppMessage[]
+      message_echoes?: unknown[]
       statuses?: WhatsAppDeliveryStatus[]
     }
     field: string
@@ -246,7 +248,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       if (!phoneNumberId) continue
       // Status-only webhook deliveries also need the phone/account lookup so
       // billing evidence can never be applied across WhatsApp numbers.
-      if (!value.statuses?.length && !value.messages?.length) continue
+      if (!value.statuses?.length && !value.messages?.length && !value.message_echoes?.length) continue
 
       // Find user's config by phone_number_id. `.single()` returns
       // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
@@ -284,6 +286,17 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       }
 
       const config = configRows[0]
+
+      if (change.field === 'smb_message_echoes') {
+        await recordBusinessAppEchoes({
+          db: supabaseAdmin(), enabled: process.env.WHATSAPP_BUSINESS_APP_ECHOES_ENABLED === 'true',
+          accountId: config.account_id, wabaId: entry.id,
+          phoneNumberId, businessPhone: value.metadata.display_phone_number,
+          echoes: value.message_echoes ?? [],
+        })
+        continue // Business-sent app messages must never enter customer automation.
+      }
+      if (change.field !== 'messages') continue
 
       if (value.statuses) {
         for (const status of value.statuses) {

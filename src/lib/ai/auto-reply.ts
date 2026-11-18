@@ -1,3 +1,4 @@
+import {automationTestSession} from '@/lib/automations/test-session'
 import { supabaseAdmin } from './admin-client'
 import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
@@ -72,8 +73,9 @@ export async function dispatchInboundToAiReply(
   try {
     const db = supabaseAdmin()
 
-    const config = await loadAiConfig(db, accountId)
-    if (!config || !config.autoReplyEnabled) return
+    const testSession=automationTestSession(accountId,conversationId)
+    const config = await loadAiConfig(db, accountId, testSession?.allowAi?{requireActive:false}:{})
+    if (!config || (!config.autoReplyEnabled && !testSession?.allowAi)) return
 
     const { data: conv, error: convErr } = await db
       .from('conversations')

@@ -17,6 +17,8 @@ import { pauseUnknownFirstInboundForHuman } from './first-inbound-routing'
 import { handleIdleFollowupReply } from '@/lib/ai/followup'
 import type { ImageAnalysis } from '@/lib/ai/analyze-image'
 import {routeCloudSupportOpening} from './cloud-support'
+import { pauseNoncampaignFidelity } from './noncampaign-fidelity'
+import { gateNewNumberWelcome } from './universal-welcome'
 
 type ConversationControls = {
   ai_enabled?: boolean | null
@@ -46,14 +48,21 @@ export async function dispatchInboundThroughCrm(args: {
   contactCreated: boolean
   hasConfirmedAdOrigin: boolean
   interactiveReplyId?: string | null
+  /** Verified delivered prepared-menu reply; never provided by a browser. */
+  preparedCommand?: { requestId: string; actorId: string; automationId: string }
+  /** Internal durable welcome continuation; never accepted from browser input. */
+  welcomeContinuation?: boolean
   conversation: ConversationControls
 }): Promise<void> {
   const { db } = args
-  if(args.channel==='cloud'&&await routeCloudSupportOpening(db,args))return
+  const welcome = args.welcomeContinuation ? 'enrolled' : await gateNewNumberWelcome(args)
+  if (welcome === 'held') return
+  if (welcome !== 'enrolled' && !args.preparedCommand && await pauseNoncampaignFidelity(db, args)) return
+  if(welcome !== 'enrolled' && args.channel==='cloud'&&await routeCloudSupportOpening(db,args))return
   const lastHuman = args.conversation.last_human_message_at
     ? Date.parse(args.conversation.last_human_message_at)
     : 0
-  const humanRecentlyActive = Date.now() - lastHuman < HUMAN_PAUSE_MS
+  const humanRecentlyActive = !args.preparedCommand && Date.now() - lastHuman < HUMAN_PAUSE_MS
   const inboundText = inboundRoutingText(args.contentText, args.audioTranscript)
   const automatedInbound = isLikelyAutomatedInbound(inboundText)
   const imageAnalysis = args.imageAnalysis ?? null
@@ -68,7 +77,7 @@ export async function dispatchInboundThroughCrm(args: {
     hasAdReferral: args.hasConfirmedAdOrigin,
   })
 
-  const firstInboundDisposition = await pauseUnknownFirstInboundForHuman(db, {
+  const firstInboundDisposition = welcome === 'enrolled' ? 'continue' : await pauseUnknownFirstInboundForHuman(db, {
     accountId: args.accountId,
     conversationId: args.conversationId,
     contactId: args.contactId,
@@ -110,7 +119,11 @@ export async function dispatchInboundThroughCrm(args: {
 
   let billingBlockedForThisInbound = false
   const automaticWasEnabled = args.conversation.ai_enabled !== false || args.conversation.automation_enabled !== false
-  if (args.channel === 'cloud' && !explicitHumanRequested && !unknownFirstInboundNeedsHuman &&
+  const supportRouted = welcome === 'enrolled' && args.channel === 'cloud'
+    ? await db.from('conversations').select('whatsapp_support_line_key').eq('id', args.conversationId).eq('account_id', args.accountId).single()
+    : null
+  if (supportRouted?.error) throw supportRouted.error
+  if (args.channel === 'cloud' && !supportRouted?.data?.whatsapp_support_line_key && !explicitHumanRequested && !unknownFirstInboundNeedsHuman &&
       !keywordOpeningDeferred && !salesDeclined && automaticWasEnabled) {
     const billingGate = await gateAutomaticWhatsAppConversation(db, {
       accountId: args.accountId,
@@ -189,6 +202,7 @@ export async function dispatchInboundThroughCrm(args: {
       triggerType,
       contactId: args.contactId,
       context: {
+        ...(args.preparedCommand ? {manual_agent_id: args.preparedCommand.actorId, manual_command_run_id: args.preparedCommand.requestId, manual_source_automation_id: args.preparedCommand.automationId} : {}),
         message_text: inboundText,
         conversation_id: args.conversationId,
         interactive_reply_id: interactiveReplyId ?? undefined,
