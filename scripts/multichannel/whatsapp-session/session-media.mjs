@@ -1,8 +1,12 @@
 import {createHash} from 'node:crypto';
 
+/** Only expiring private enrollment PDFs may carry a query token. */
+export function isSignedEnrollmentDocument(url,kind){
+ return kind==='document'&&/^\/storage\/v1\/object\/sign\/social-media\/[0-9a-f-]{36}\/enrollments\/[0-9a-f-]{36}\/[0-9a-f]{64}\.pdf$/.test(url.pathname)&&url.searchParams.size===1&&/^[A-Za-z0-9._-]{20,3000}$/.test(url.searchParams.get('token')??'');
+}
 export function normalizeSessionMedia(value){
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['kind','url','caption','filename'].includes(k))||!['audio','image','video','document'].includes(value.kind)||typeof value.url!=='string'||value.url.length>4096)throw Error('Archivo de WhatsApp inválido.');
- const url=new URL(value.url);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash||url.port&&url.port!=='443')throw Error('El archivo requiere un enlace HTTPS sin credenciales.');
+ const url=new URL(value.url);if(url.protocol!=='https:'||url.username||url.password||(url.search&&!isSignedEnrollmentDocument(url,value.kind))||url.hash||url.port&&url.port!=='443')throw Error('El archivo requiere un enlace HTTPS sin credenciales.');
  if(value.caption!==undefined&&(typeof value.caption!=='string'||value.caption.length>4000)||value.filename!==undefined&&(typeof value.filename!=='string'||value.filename.length>200||/[\\/\r\n\0]/.test(value.filename)||['.','..'].includes(value.filename)))throw Error('Nombre o texto de archivo inválido.');
  return {kind:value.kind,url:url.href,...(value.caption?{caption:value.caption}:{}),...(value.filename?{filename:value.filename}:{})};
 }
@@ -18,7 +22,7 @@ export function createSessionMediaLoader({allowedOrigins,makeMedia,fetchImpl=fet
  const origins=new Set(allowedOrigins.map(origin=>{const u=new URL(origin);if(u.protocol!=='https:'||u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw Error('Origen inválido.');return u.origin;}));
  return async value=>{
   const media=normalizeSessionMedia(value),url=new URL(media.url);
-  if(!origins.has(url.origin)||!url.pathname.startsWith('/storage/v1/object/public/'))throw Error('Este archivo no pertenece al almacenamiento autorizado.');
+  if(!origins.has(url.origin)||(!url.pathname.startsWith('/storage/v1/object/public/')&&!isSignedEnrollmentDocument(url,media.kind)))throw Error('Este archivo no pertenece al almacenamiento autorizado.');
   const response=await fetchImpl(url,{redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
   if(!response.ok||!response.body)throw Error('No se pudo descargar el archivo.');
   const limit=Math.min(maxBytes,media.kind==='audio'?16*1024*1024:maxBytes);
@@ -29,6 +33,8 @@ export function createSessionMediaLoader({allowedOrigins,makeMedia,fetchImpl=fet
   const reader=response.body.getReader(),parts=[];let size=0;
   while(true){const chunk=await reader.read();if(chunk.done)break;size+=chunk.value.byteLength;if(size>limit){await reader.cancel();throw Error('El archivo supera el tamaño permitido.');}parts.push(chunk.value);}
   if(!size)throw Error('El archivo está vacío.');
-  return {content:makeMedia(mime,Buffer.concat(parts).toString('base64'),media.filename),options:{sendSeen:false,...(media.caption&&media.kind!=='audio'?{caption:media.caption}:{}),...(media.kind==='audio'?{sendAudioAsVoice:true}:{})}};
+  // Keep uploaded audio as a normal audio attachment. Marking arbitrary MP3/WAV
+  // files as voice notes can make WhatsApp's mobile client play them silently.
+  return {content:makeMedia(mime,Buffer.concat(parts).toString('base64'),media.filename),options:{sendSeen:false,...(media.caption&&media.kind!=='audio'?{caption:media.caption}:{})}};
  };
 }
