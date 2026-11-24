@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/automations/admin-client';
 import { whatsappSessionLineKeySchema } from '@/lib/multichannel/whatsapp-session-protocol';
 import { z } from 'zod';
 import {managementAction,managementSnapshotLine} from '@/lib/multichannel/whatsapp-management';
+import {visibleSessionLines,canEnableSessionLine} from '@/lib/multichannel/session-line-visibility';
 
 const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('register_worker'), name: z.string().trim().min(1).max(80) }).strict(),
@@ -39,7 +40,7 @@ export async function GET() {
       const valid=managementSnapshotLine.array().safeParse(s.snapshot);
       return {worker_id:s.worker_id,online,lines:valid.success?valid.data.map(l=>({...l,qr:online?l.qr:null})):[]};
     });
-    return NextResponse.json({ lines: lines.data, workers: workers.data,snapshots,commands:commands.data }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ lines: visibleSessionLines(lines.data??[],states.data??[]), workers: workers.data,snapshots,commands:commands.data }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return toErrorResponse(error); }
 }
 
@@ -54,17 +55,17 @@ export async function POST(request: Request) {
     if(input.data.action==='manage_line'){
       const action=input.data;
       const worker=await db.from('multichannel_workers').select('id').eq('id',action.worker_id).eq('account_id',ctx.accountId).eq('enabled',true).maybeSingle();
-      if(worker.error)throw worker.error;if(!worker.data)return NextResponse.json({error:'Computadora no disponible en esta cuenta.'},{status:404});
+      if(worker.error)throw worker.error;if(!worker.data)return NextResponse.json({error:'Servidor del bot no disponible en esta cuenta.'},{status:404});
       const state=await db.from('whatsapp_management_state').select('snapshot,seen_at').eq('account_id',ctx.accountId).eq('worker_id',worker.data.id).maybeSingle();
       if(state.error)throw state.error;
-      if(!state.data||Date.now()-Date.parse(state.data.seen_at)>20000)return NextResponse.json({error:'La computadora del bot no está disponible. Enciéndela y ejecuta ABRIR_BOT.cmd; después vuelve aquí.'},{status:409});
-      const snapshot=managementSnapshotLine.array().safeParse(state.data.snapshot);if(!snapshot.success)throw Error('Invalid management state');
+      if(action.operation!=='recover_all'&&(!state.data||Date.now()-Date.parse(state.data.seen_at)>20000))return NextResponse.json({error:'El servidor del bot no está disponible. Actualiza el estado; si continúa, el administrador debe revisar el servicio de WhatsApp en Contabo. No inicies otro bot en la laptop.'},{status:409});
+      const snapshot=managementSnapshotLine.array().safeParse(state.data?.snapshot??[]);if(!snapshot.success)throw Error('Invalid management state');
       const line=snapshot.data.find(l=>l.lineKey===action.line_key);
-      if(action.operation!=='create'&&!line)return NextResponse.json({error:'Esa línea no pertenece a esta computadora.'},{status:404});
+      if(!['create','recover_all'].includes(action.operation)&&!line)return NextResponse.json({error:'Esa línea no pertenece a este servidor del bot.'},{status:404});
       if(line&&(line.archived===true||line.label.startsWith('Historial '))&&action.operation!=='stop')return NextResponse.json({error:'Ese número ya está archivado. Escanea el QR de su tarjeta actual; no necesitas volver a cambiarlo.'},{status:409});
       if(['unlink','replace'].includes(action.operation)&&line?.linkedPhone!==action.expected_phone)return NextResponse.json({error:'El número cambió. Actualiza y comprueba el teléfono antes de continuar.'},{status:409});
       const inserted=await db.from('whatsapp_management_commands').insert({account_id:ctx.accountId,worker_id:worker.data.id,operation:action.operation,line_key:action.line_key,label:action.label,expected_phone:action.expected_phone}).select('id').single();
-      if(inserted.error?.code==='23505')return NextResponse.json({error:'Espera a que termine la acción anterior de esta computadora.'},{status:409});
+      if(inserted.error?.code==='23505')return NextResponse.json({error:'Espera a que termine la acción anterior de este servidor.'},{status:409});
       if(inserted.error)throw inserted.error;
       return NextResponse.json({command:inserted.data},{status:202,headers:{'Cache-Control':'no-store'}});
     }
@@ -95,6 +96,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ line: inserted.data }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
     }
 
+    if(!input.data.value){
+      const line=await db.from('multichannel_whatsapp_session_lines').select('line_key,linked_phone,worker_id').eq('account_id',ctx.accountId).eq('line_key',input.data.line_key).maybeSingle();
+      if(line.error)throw line.error;
+      if(!line.data)return NextResponse.json({error:'Línea no encontrada.'},{status:404});
+      const state=await db.from('whatsapp_management_state').select('snapshot,seen_at').eq('account_id',ctx.accountId).eq('worker_id',line.data.worker_id).maybeSingle();
+      if(state.error)throw state.error;
+      if(!canEnableSessionLine(line.data,state.data))return NextResponse.json({error:'Primero conecta y verifica esta línea. Los números archivados no se pueden reactivar.'},{status:409});
+    }
     const changed = await db.from('multichannel_whatsapp_session_lines').update({
       paused: input.data.value, updated_at: new Date().toISOString(),
     }).eq('account_id', ctx.accountId).eq('line_key', input.data.line_key)

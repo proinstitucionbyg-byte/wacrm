@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useState} from 'react';
+import {Smartphone,Wifi,PauseCircle,ShieldCheck} from 'lucide-react';
 type Line={lineKey:string;label:string;status:string;linkedPhone:string|null;active:boolean;qr:string|null;archived?:boolean};
 type Registered={line_key:string;worker_id:string;linked_phone:string;paused:boolean};
 type Snapshot={worker_id:string;online:boolean;lines:Line[]};
@@ -9,31 +10,32 @@ type Data={lines:Registered[];workers:{id:string;name:string;enabled:boolean}[];
 const button='rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40';
 const labels:Record<string,string>={ready:'Conectado',stopped:'Detenido',connecting:'Conectando…',awaiting_qr:'Escanea el QR',duplicate_number:'Número ya vinculado en otra línea',wrong_number:'Revisar número',auth_failure:'No se pudo vincular',disconnected:'Desconectado',connection_error:'Error de conexión',storage_error:'Historial requiere revisión'};
 
-export function WhatsappConnectionManager(){
+export function WhatsappConnectionManager({active=true}:{active?:boolean}){
  const [data,setData]=useState<Data|null>(null),[worker,setWorker]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[creating,setCreating]=useState(false),[name,setName]=useState('');
  const refresh=useCallback(async()=>{
-  const response=await fetch('/api/multichannel/whatsapp/control',{cache:'no-store'});
+  const response=await fetch('/api/multichannel/whatsapp/control',{cache:'no-store',signal:AbortSignal.timeout(15000)});
   const body=await response.json();if(!response.ok)throw Error(body.error||'No se pudo comprobar la conexión.');
   setData(body);setError('');setWorker(current=>current||(body.workers.filter((w:{enabled:boolean})=>w.enabled).length===1?body.workers.find((w:{enabled:boolean})=>w.enabled).id:''));
  },[]);
- useEffect(()=>{let stopped=false;let timer:ReturnType<typeof setTimeout>;const poll=async()=>{try{await refresh();}catch(e){if(!stopped)setError(e instanceof Error?e.message:'No se pudo actualizar.');}if(!stopped)timer=setTimeout(poll,5000);};void poll();return()=>{stopped=true;clearTimeout(timer);};},[refresh]);
+ useEffect(()=>{if(!active)return;let stopped=false;let timer:ReturnType<typeof setTimeout>;const poll=async()=>{if(document.visibilityState==='visible'){try{await refresh();}catch(e){if(!stopped)setError(e instanceof Error?e.message:'No se pudo actualizar.');}}if(!stopped)timer=setTimeout(poll,15000);};void poll();return()=>{stopped=true;clearTimeout(timer);};},[refresh,active]);
  const state=data?.snapshots.find(s=>s.worker_id===worker);
  const pending=data?.commands.find(c=>c.worker_id===worker&&['pending','running'].includes(c.status));
  const latest=data?.commands.find(c=>c.worker_id===worker);
  const online=state?.online===true&&!error;
- const currentLines=state?.lines.filter(line=>!line.archived&&!line.label.startsWith('Historial '))??[];
+ const fallbackLines:Line[]=(data?.lines.filter(line=>line.worker_id===worker)??[]).map(line=>({lineKey:line.line_key,label:'WhatsApp registrado',status:'disconnected',linkedPhone:line.linked_phone,active:false,qr:null}));
+ const currentLines=(state?.lines.length?state.lines:fallbackLines).filter(line=>!line.archived&&!line.label.startsWith('Historial '));
  const unusedLines=currentLines.filter(line=>!line.active&&!line.linkedPhone&&line.label!=='Principal');
  const visibleLines=currentLines.filter(line=>!unusedLines.includes(line)).sort((a,b)=>Number(b.label==='Principal')-Number(a.label==='Principal')||a.label.localeCompare(b.label,'es',{numeric:true}));
  async function request(body:unknown){const response=await fetch('/api/multichannel/whatsapp/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw Error(result.error||'No se pudo solicitar la acción.');return result;}
  async function manage(operation:string,line?:Line){
-  if((operation==='unlink'||operation==='replace')&&!window.confirm(operation==='unlink'?`¿Desvincular +${line?.linkedPhone}? Se cerrará su vínculo con WhatsApp y se conservará el historial.`:`¿Cambiar +${line?.linkedPhone} por otro teléfono? Se abrirá un perfil nuevo; el historial anterior se conserva separado.`))return;
+  if((operation==='unlink'||operation==='replace')&&!window.confirm(operation==='unlink'?`¿Volver a vincular +${line?.linkedPhone}? Se cerrará esta conexión y se mostrará un QR para el MISMO número. Su historial se conserva.`:`¿Cambiar +${line?.linkedPhone} por otro teléfono? Se abrirá un perfil nuevo; el historial anterior se conserva separado.`))return;
   setBusy(true);setNotice('');
   try{await request({action:'manage_line',worker_id:worker,operation,...(line?{line_key:line.lineKey}:{}),...(operation==='create'?{label:name.trim()}:{}),...(['unlink','replace'].includes(operation)?{expected_phone:line?.linkedPhone}:{})});setNotice('Solicitud recibida. El estado y el QR se actualizarán aquí, sin recargar la página.');if(operation==='create'){setCreating(false);setName('');}await refresh();}
   catch(e){setNotice(e instanceof Error?e.message:'No se completó la solicitud.');}finally{setBusy(false);}
  }
  async function toggleBot(line:Registered){setBusy(true);try{await request({action:'pause_line',line_key:line.line_key,value:!line.paused});setNotice(line.paused?'Automatizaciones habilitadas para este número.':'Automatizaciones pausadas para este número.');await refresh();}catch(e){setNotice(e instanceof Error?e.message:'No se pudo cambiar la pausa.');}finally{setBusy(false);}}
- return <section className="space-y-4 rounded-xl border border-border p-4" aria-label="Mis WhatsApps">
-  <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Mis WhatsApps</h2><p className="text-sm text-muted-foreground">Escanea únicamente la tarjeta que dice «Escanea el QR». Si ya muestra tu número y «Conectado», no necesitas escanear otra vez.</p></div><button className={button} disabled={!online||busy||!!pending} onClick={()=>unusedLines.length?void manage('connect',unusedLines[0]):setCreating(v=>!v)}>Vincular otro WhatsApp</button></div>
+ return <section className="crm-connections-workspace space-y-4 rounded-xl border border-border p-4" aria-label="Mis WhatsApps">
+  <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="crm-connections-heading text-xl font-semibold"><Smartphone aria-hidden="true"/>Mis WhatsApps</h2><div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={()=>void refresh().catch(e=>setError(e instanceof Error?e.message:"No se pudo actualizar."))}>Actualizar conexiones</button><button className={button} disabled={busy||!!pending||!worker} onClick={()=>void manage('recover_all')}>Recuperar servidor y conexiones</button></div><p className="text-sm text-muted-foreground">La recuperación conserva vínculos, chats, historial y pausas. Solo aparecerá QR si WhatsApp perdió realmente la sesión.</p></div><button className={button} disabled={!online||busy||!!pending} onClick={()=>unusedLines.length?void manage('connect',unusedLines[0]):setCreating(v=>!v)}>Vincular otro WhatsApp</button></div>
   <p className="text-sm text-muted-foreground">Las asesoras atienden desde Inbox. Puedes mantener hasta diez números conectados; cada uno conserva su vínculo e historial.</p>
   {data&&data.workers.filter(w=>w.enabled).length>1&&<label className="block text-sm">Servidor del bot<select className="ml-2 rounded border bg-background p-2" value={worker} onChange={e=>setWorker(e.target.value)}><option value="">Seleccionar servidor</option>{data.workers.filter(w=>w.enabled).map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>}
   {!data&&!error&&<p role="status">Comprobando tus WhatsApps…</p>}
@@ -43,20 +45,20 @@ export function WhatsappConnectionManager(){
   {pending&&<p role="status" className="text-sm">Procesando la acción solicitada. Las demás líneas mantienen su conexión.</p>}
   {latest?.result&&!pending&&<p role="status" className="text-sm">{latest.result}</p>}
   {creating&&<form className="flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void manage('create');}}><input aria-label="Nombre del nuevo WhatsApp" className="rounded border bg-background p-2" placeholder="Ej. Soporte 2" maxLength={60} required value={name} onChange={e=>setName(e.target.value)}/><button className={button} disabled={!online||busy||!!pending||!name.trim()}>Crear y mostrar QR</button><button type="button" className={button} onClick={()=>setCreating(false)}>Cancelar</button></form>}
-  <div className="grid gap-3 md:grid-cols-2">{visibleLines.map(line=>{
+  <div className="crm-connection-summary"><span><Wifi aria-hidden="true"/>{online?visibleLines.filter(line=>line.status==='ready').length:0} conectados</span><span><PauseCircle aria-hidden="true"/>{data?.lines.filter(line=>line.paused).length??0} con automatización en pausa</span><span><ShieldCheck aria-hidden="true"/>Vínculos e historial conservados</span></div>
+  <div className="crm-connection-grid grid gap-3 md:grid-cols-2">{visibleLines.map(line=>{
    const registered=data?.lines.find(r=>r.line_key===line.lineKey&&r.worker_id===worker&&r.linked_phone===line.linkedPhone);
-   return <article key={line.lineKey} className="space-y-3 rounded-lg border border-border p-3"><div><h3 className="font-semibold">{line.label}</h3><p className="text-lg font-semibold tabular-nums">{line.linkedPhone?'+'+line.linkedPhone:'Teléfono por vincular'}</p><p className="text-sm">{online?(labels[line.status]??'Revisar estado'):'Sin conexión confirmada'}</p></div>
+   return <article key={line.lineKey} className="crm-connection-card space-y-3 rounded-lg border border-border p-3" data-status={online?line.status:'unconfirmed'}><div><h3 className="font-semibold"><Smartphone aria-hidden="true"/>{line.label}</h3><p className="text-lg font-semibold tabular-nums">{line.linkedPhone?'+'+line.linkedPhone:'Teléfono por vincular'}</p><p className="text-sm">{online?(labels[line.status]??'Revisar estado'):'Sin conexión confirmada'}</p></div>
     {online&&line.status==='awaiting_qr'&&<div className="space-y-2">{line.qr?<img src={line.qr} alt={'QR para vincular '+line.label} className="h-56 w-56 rounded bg-white p-2"/>:<p role="status">Preparando el QR…</p>}<p className="text-sm">En ese celular: WhatsApp → Dispositivos vinculados → Vincular dispositivo. Escanea este QR y comprueba el número que aparece.</p></div>}
-    <div className="flex flex-wrap gap-2">{!line.active&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('connect',line)}>{line.linkedPhone?'Conectar vínculo guardado':'Vincular y mostrar QR'}</button>}
+    <div className="flex flex-wrap gap-2">{!line.active&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('connect',line)}>{line.linkedPhone?'Reconectar sin escanear':'Vincular y mostrar QR'}</button>}
      {line.active&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('stop',line)}>Detener sin desvincular</button>}
-     {line.active&&line.status==='ready'&&line.linkedPhone&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('unlink',line)}>Desvincular</button>}
-     {line.linkedPhone&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('replace',line)}>Cambiar número con QR nuevo</button>}
-     {line.active&&line.status!=='awaiting_qr'&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('recover',line)}>Revisar y recuperar</button>}
+     {line.linkedPhone&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('unlink',line)}>Volver a vincular el mismo número (QR)</button>}
+     {line.linkedPhone&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('replace',line)}>Usar otro número distinto</button>}
+     {line.active&&line.status!=='awaiting_qr'&&<button className={button} disabled={!online||busy||!!pending} onClick={()=>void manage('recover',line)}>Reiniciar conexión (conserva vínculo)</button>}
     </div>
     {registered&&<div className="flex flex-wrap items-center gap-2 border-t pt-2"><span className="text-sm">{registered.paused?'Bot en pausa':'Bot habilitado'}</span><button className={button} disabled={busy} onClick={()=>void toggleBot(registered)}>{registered.paused?'Habilitar automatizaciones':'Pausar automatizaciones'}</button></div>}
     {online&&line.status==='ready'&&!registered&&<p role="status" className="text-sm">Registrando este número en el CRM…</p>}
    </article>;
   })}</div>
-  {!!state?.lines.some(line=>line.archived||line.label.startsWith('Historial '))&&<details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-sm">Números anteriores · historial conservado</summary><p className="mt-2 text-sm text-muted-foreground">Estos números ya fueron reemplazados. No se conectan ni generan otro QR. Para vincular el nuevo celular, utiliza su tarjeta actual de arriba.</p><ul className="mt-2 space-y-1 text-sm">{state.lines.filter(line=>line.archived||line.label.startsWith('Historial ')).map(line=><li key={line.lineKey}>{line.linkedPhone?'+'+line.linkedPhone:'Perfil anterior sin teléfono'} · Solo historial</li>)}</ul></details>}
  </section>;
 }

@@ -5,12 +5,29 @@ const accountId='11111111-1111-4111-8111-111111111111',id='22222222-2222-4222-82
 const line={lineKey:'WA-test',label:'Soporte',status:'ready',active:true,linkedPhone:'51911111111'};
 const command={id,account_id:accountId,status:'running',operation:'connect',line_key:line.lineKey};
 
+test('group requests stay on the selected ready phone and return only requested metadata',async()=>{
+ let selected,change;
+ const manager={list:()=>[line],get:key=>{selected=key;return{getGroupController:async phone=>{assert.equal(phone,line.linkedPhone);return{list:async()=>({total:1,offset:0,groups:[{id:'123456789@g.us',name:'Grupo',participantsLoaded:2}]}),mutate:async value=>{change=value;return{state:'needs_review'};}};}};}};
+ const base={...command,expected_phone:line.linkedPhone};
+ const list=await executeManagementCommand(manager,{...base,operation:'group_list',payload:{kind:'list',offset:0,limit:30,search:''}},accountId);
+ assert.equal(selected,line.lineKey);assert.equal(list.data.kind,'list');assert.equal(list.data.groups.length,1);
+ await executeManagementCommand(manager,{...base,operation:'group_mutate',payload:{kind:'mutate',group_id:'123456789@g.us',change:{operation:'subject',value:'Nuevo'}}},accountId);
+ assert.equal(change.requestId,id);assert.equal(change.groupId,'123456789@g.us');
+ await assert.rejects(executeManagementCommand(manager,{...base,expected_phone:'51922222222',operation:'group_list',payload:{kind:'list'}},accountId),/número cambiado/);
+});
+
 test('management rejects another account and a changed phone before touching a profile',async()=>{
  let calls=0;const manager={list:()=>[line],connect:async()=>calls++,unlink:async()=>calls++};
  await assert.rejects(executeManagementCommand(manager,{...command,account_id:id},accountId));
  await assert.rejects(executeManagementCommand(manager,{...command,operation:'unlink',expected_phone:'51922222222'},accountId));
  assert.equal(calls,0);
  await executeManagementCommand(manager,command,accountId);assert.equal(calls,1);
+});
+test('general recovery reviews every active current line and preserves stopped or archived profiles',async()=>{
+ const lines=[line,{...line,lineKey:'WA-error',status:'connection_error'},{...line,lineKey:'WA-stopped',active:false,status:'stopped'},{...line,lineKey:'WA-old',archived:true}];
+ const recovered=[];const manager={list:()=>lines,recover:async key=>recovered.push(key)};
+ const result=await executeManagementCommand(manager,{...command,operation:'recover_all',line_key:null},accountId);
+ assert.deepEqual(recovered,['WA-test','WA-error']);assert.match(result,/2 de 2/);
 });
 test('a management snapshot contains connection details and an expiring QR, never chat content',async()=>{
  let calls=0;const ready={...line,secret:'must-not-leave',messages:['private']};
@@ -40,4 +57,11 @@ test('a lost command acknowledgement is retried without executing the action aga
   }});
  await Promise.race([done,new Promise((_,reject)=>setTimeout(()=>reject(Error('No retry')),4000))]);
  await poller.stop();assert.equal(calls,1);
+});
+test('management watchdog requests a safe process restart after sustained CRM failures',async()=>{
+ let fatal=0,errors=0;
+ const poller=startCrmManagement({accountId,origin:'https://crm.example.test',token:'wcm_'+'a'.repeat(64),manager:{list:()=>[]},qrToDataUrl:async()=>null,pollMs:1000,maxFailures:2,
+  fetchImpl:async()=>{throw Error('offline')},onError:()=>errors++,onFatal:()=>fatal++});
+ await new Promise(resolve=>setTimeout(resolve,2300));await poller.stop();
+ assert.equal(errors,2);assert.equal(fatal,1);
 });

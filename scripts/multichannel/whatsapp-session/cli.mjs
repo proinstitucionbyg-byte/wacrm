@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { createRequire } from 'node:module';
 import wwebjs from 'whatsapp-web.js';
 import QRCode from 'qrcode';
+import { resetSessionAuthentication } from './reset-authentication.mjs';
 import { openSessionStore, sessionScope } from './store.mjs';
 import { createSessionAdapter } from './adapter.mjs';
 import { startSessionPanel } from './panel.mjs';
@@ -12,6 +13,7 @@ import { navigationSafeClient } from './navigation-client.mjs';
 import { createChatReader } from './chat-reader.mjs';
 import { createCachedChatSource } from './cached-chat-source.mjs';
 import { openLineManager } from './line-manager.mjs';
+import {createReceivedMediaSync} from './received-media-sync.mjs';
 import { createCrmInboundSync } from './crm-inbound.mjs';
 import { createCrmOutboundClient, startCrmOutboundPoller } from './crm-outbound.mjs';
 import { createSessionPhoneResolver } from './phone-resolver.mjs';
@@ -19,6 +21,7 @@ import { createInboundPoller } from './inbound-poller.mjs';
 import { createCampaignClient, startCampaignPoller } from './campaign-client.mjs';
 import {openAutomationControl} from './automation-control.mjs';
 import {openHistoryArchive,createArchivedReader,archiveJournalMessage} from './history-archive.mjs';
+import{createGroupController,openGroupCommandJournal}from'./group-controller.mjs';
 import{retainingLocalAuth}from'./retaining-local-auth.mjs';
 import {startCrmManagement} from './crm-management.mjs';
 import {createSessionMediaLoader} from './session-media.mjs';
@@ -40,6 +43,23 @@ async function browserPath() {
 }
 let startupStage='resolve_browser';
 async function main() {
+  // The linked production executor was moved to Contabo. Keep Windows launchers
+  // from opening a second executor against the same account and journals.
+  if (process.platform === 'win32' && positionals[0] === 'connect') {
+    startupStage = 'verify_executor_location';
+    let assignedToContabo = false;
+    try {
+      const assignment = JSON.parse(await readFile(join(privateRoot, 'contabo-executor-active.json'), 'utf8'));
+      assignedToContabo = assignment.active === true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (assignedToContabo) {
+      console.error('El bot está asignado a Contabo. El inicio en esta laptop está bloqueado para evitar duplicados. Administra tus líneas desde Multicanal → Mis WhatsApps en el CRM.');
+      process.exitCode = 1;
+      return;
+    }
+  }
   const executablePath = await browserPath();
   startupStage='load_worker_config';
   if (positionals[0] === 'doctor') {
@@ -76,7 +96,7 @@ async function main() {
   const createRuntime=async({accountId,lineKey,expectedPhone})=>{
     startupStage='open_session_store';
     const store=await openSessionStore({baseDir:privateRoot,accountId,lineKey});
-    let adapter,outboundPoller,inboundPoller,campaignPoller,historyTimer,chatReader;
+    let adapter,outboundPoller,inboundPoller,campaignPoller,historyTimer,chatReader,receivedMediaSync;
     try{
     const archive=await openHistoryArchive({accountId,lineKey,path:join(privateRoot,sessionScope(accountId,lineKey),'history.jsonl')});
     for(const row of store.records())if(['inbound','human'].includes(row.kind))await archiveJournalMessage(archive,row.payload);
@@ -100,7 +120,7 @@ async function main() {
     startupStage='create_whatsapp_client';
     const client = new Client({
       authStrategy: new Auth({ clientId: 'worker', dataPath: store.authDir }),
-      puppeteer: { executablePath, headless: true, dumpio: false },
+      puppeteer: { executablePath, headless: true, dumpio: false, protocolTimeout: 60_000 },
       webVersionCache: { type: 'none' },
       takeoverOnConflict: false, qrMaxRetries: 0,
     });
@@ -114,7 +134,14 @@ async function main() {
     const isReady=async()=>{await adapter.refreshConnection();return adapter.status().status==='ready';};
     const liveReader=createChatReader({client:chatSource,isReady,resolvePhone});
     chatReader=createArchivedReader({archive,reader:liveReader,source:chatSource,isReady});
-    historyTimer=setInterval(()=>{void chatReader.capture();},10000);historyTimer.unref?.();
+    const groupControllers=new Map();
+    const getGroupController=async phone=>{
+      if(adapter.status().linkedPhone!==phone)throw Error('La línea cambió de teléfono.');
+      if(!groupControllers.has(phone))groupControllers.set(phone,createGroupController({client,isReady,expectedPhone:phone,prepareMedia,resolvePhone,claimCommand:await openGroupCommandJournal({baseDir:privateRoot,accountId,lineKey})}));
+      return groupControllers.get(phone);
+    };
+    historyTimer=setInterval(()=>{void chatReader.capture().catch(()=>{});},10000);historyTimer.unref?.();
+    if(onInbound){try{receivedMediaSync=await createReceivedMediaSync({store,client,getConnection:()=>adapter.status(),...ownerConfig.crmBridge,lineKey,journalPath:join(privateRoot,sessionScope(accountId,lineKey),'received-media.v1.json'),onError:detail=>console.error('Archivo de WhatsApp pendiente de sincronizar; el chat conserva su mensaje.',detail?.stage||'poll',detail?.reason||'not_confirmed')});}catch{console.error('Sincronización de archivos no disponible; la recepción de chats continúa.');}}
     void adapter.start();
     if (outboundClient) outboundPoller = startCrmOutboundPoller({ adapter, client: outboundClient,
       onError: () => console.error('Cola de respuestas CRM temporalmente no disponible.') });
@@ -122,19 +149,20 @@ async function main() {
       isReady:()=>adapter.status().status==='ready'});
     inboundPoller.start();
     if(campaignClient)campaignPoller=startCampaignPoller({adapter,client:campaignClient,onError:()=>console.error('Campañas CRM temporalmente no disponibles.')});
-    return {adapter,chatReader,stop:async()=>{clearInterval(historyTimer);inboundPoller?.stop();await campaignPoller?.stop();await outboundPoller?.stop();await chatReader.close();await adapter.stop();},unlink:async()=>{
+    return {adapter,chatReader,getGroupController,stop:async()=>{await receivedMediaSync?.stop();clearInterval(historyTimer);inboundPoller?.stop();await campaignPoller?.stop();await outboundPoller?.stop();await chatReader.close();await adapter.stop();},unlink:async()=>{
       const owned=resolve(join(store.authDir,'session-worker'));
       const actual=client.authStrategy?.userDataDir;
       if(typeof actual!=='string'||resolve(actual).toLowerCase()!==owned.toLowerCase())throw Error('Perfil de desvinculación sin dueño confirmado.');
-      clearInterval(historyTimer);inboundPoller?.stop();await campaignPoller?.stop();await outboundPoller?.stop();await chatReader.capture();await chatReader.close();return adapter.unlink();
+      await receivedMediaSync?.stop();clearInterval(historyTimer);inboundPoller?.stop();await campaignPoller?.stop();await outboundPoller?.stop();await chatReader.capture();await chatReader.close();return adapter.unlink();
     }};
-    }catch(error){clearInterval(historyTimer);if(inboundPoller)inboundPoller.stop();if(campaignPoller)await campaignPoller.stop();if(outboundPoller)await outboundPoller.stop();await chatReader?.close();if(adapter)await adapter.stop();else await store.close();throw error;}
+    }catch(error){await receivedMediaSync?.stop();clearInterval(historyTimer);if(inboundPoller)inboundPoller.stop();if(campaignPoller)await campaignPoller.stop();if(outboundPoller)await outboundPoller.stop();await chatReader?.close();if(adapter)await adapter.stop();else await store.close();throw error;}
   };
   try {
     startupStage='start_whatsapp_adapter';
     primary=await createRuntime({accountId,lineKey,expectedPhone:values['expected-phone']});
     startupStage='open_line_manager';
     lineManager=await openLineManager({accountId,primary:{lineKey,runtime:primary},createRuntime,
+      resetAuthentication:args=>resetSessionAuthentication({baseDir:privateRoot,...args}),
       registryPath:join(privateRoot,'accounts',accountId,'lines.json'),
       readBoundPhone:async key=>{
         let journal;try{journal=await readFile(join(privateRoot,sessionScope(accountId,key),'events.jsonl'),'utf8');}catch(error){if(error.code==='ENOENT')return null;throw error;}
@@ -154,7 +182,7 @@ async function main() {
     const access=JSON.stringify({ url: panel.url, origin: panel.origin, token: panel.token, pid: process.pid });
     await writeFile(join(privateRoot, sessionScope(accountId,lineKey), 'panel-access.json'), access, { mode: 0o600 });
     if(ownerConfig.accountId===accountId&&ownerConfig.crmOutbound?.enabled===true){
-      management=startCrmManagement({accountId,origin:ownerConfig.crmOutbound.origin,token:ownerConfig.crmOutbound.token,manager:lineManager,qrToDataUrl:qr=>QRCode.toDataURL(qr),onError:()=>console.error('Gestión de WhatsApp desde CRM temporalmente no disponible.')});
+      management=startCrmManagement({accountId,origin:ownerConfig.crmOutbound.origin,token:ownerConfig.crmOutbound.token,manager:lineManager,qrToDataUrl:qr=>QRCode.toDataURL(qr),onError:()=>console.error('Gestión de WhatsApp desde CRM temporalmente no disponible.'),onFatal:()=>{console.error('Gestión de WhatsApp sin respuesta sostenida; reinicio seguro solicitado.');process.kill(process.pid,'SIGTERM');}});
     }
     // Existing local launchers locate the panel through the configured bootstrap line.
     if(ownerConfig.accountId===accountId&&ownerConfig.lineKey&&ownerConfig.lineKey!==lineKey){
