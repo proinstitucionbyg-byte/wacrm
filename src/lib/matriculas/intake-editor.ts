@@ -7,6 +7,7 @@ export interface IntakeEditorDraft {
   baseVersion: number;
   data: EnrollmentData;
   confirmedFields: string[];
+  editedFields?: (keyof EnrollmentData)[];
 }
 
 /** Reapply only fields the operator edited over a newer server snapshot. */
@@ -49,6 +50,7 @@ export function readIntakeEditorDraft(
       intakeId,
       baseVersion: version,
       data: value.data,
+      editedFields: Array.isArray(value.editedFields)?value.editedFields.filter((field):field is keyof EnrollmentData=>typeof field==='string'&&field in value.data!):undefined,
       confirmedFields: value.confirmedFields.filter((field): field is string => typeof field === 'string'),
     };
   } catch {
@@ -58,4 +60,18 @@ export function readIntakeEditorDraft(
 
 export function intakeEditorStorageKey(intakeId: string): string {
   return `wacrm:intake-editor:${intakeId}`;
+}
+
+/** Saving a draft may detach an outdated confirmation; it never deletes the evidence file. */
+export function prepareIntakeDraft(data:EnrollmentData,previous:EnrollmentData):EnrollmentData{
+ const normalize=(field:string,value:unknown)=>String(value??'').trim().replace(/\s+/g,' ').toLocaleUpperCase('es');
+ const changed=(fields:string[])=>fields.some(field=>normalize(field,data[field as keyof EnrollmentData])!==normalize(field,previous[field as keyof EnrollmentData]));
+ const sameOldDeclaration=!!data.declaration_message_ids?.length&&data.declaration_message_ids.every(id=>previous.declaration_message_ids?.includes(id));
+ const staleDeclaration=sameOldDeclaration&&changed(['full_name','document_type','document_number','email']);
+ const stalePhoto=!!data.identity_confirmed&&!!data.identity_message_ids?.length&&changed(['full_name','document_type','document_number']);
+ if(!staleDeclaration&&!stalePhoto)return data;
+ return {...data,...(staleDeclaration?{declaration_message_ids:[]}:{}),identity_confirmed:false};
+}
+export function sameIntakeData(left:EnrollmentData,right:EnrollmentData){
+ return (Object.keys({...left,...right}) as (keyof EnrollmentData)[]).every(key=>JSON.stringify(left[key])===JSON.stringify(right[key]));
 }

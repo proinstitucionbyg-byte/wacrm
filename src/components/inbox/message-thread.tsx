@@ -1,4 +1,5 @@
 'use client';
+import {ContinueConversation} from './continue-conversation';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -20,6 +21,8 @@ import type {
 } from '@/types';
 import {
   MessageSquare,
+  MessageCircle,
+  BellRing,
   ChevronDown,
   UserPlus,
   Check,
@@ -242,7 +245,8 @@ export function MessageThread({
   >([]);
   const canAssign = useCan('inbox.assign');
   const canHideMessages = useCan('inbox_management.messages');
-  const sessionOriginLine = useMemo(() => latestSessionOrigin(messages,conversation?.whatsapp_support_line_key), [messages,conversation?.whatsapp_support_line_key]);
+  const [manualSupport,setManualSupport]=useState<{id:string;line:string}|null>(null);
+  const sessionOriginLine = useMemo(() => latestSessionOrigin(messages,manualSupport?.id===conversation?.id?manualSupport?.line:conversation?.whatsapp_support_line_key), [messages,conversation?.id,conversation?.whatsapp_support_line_key,manualSupport]);
 
   useEffect(() => {
     let cancelled = false;
@@ -684,8 +688,9 @@ export function MessageThread({
               request_id: crypto.randomUUID(),
             }),
           });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error);
+          const result = await response.json().catch(() => null);
+          if (!result) throw new Error('No se pudo confirmar el envío del bloque. Revisa los mensajes del chat antes de repetirlo.');
+          if (!response.ok) throw new Error(result.error ?? 'No se pudo iniciar el bloque seleccionado.');
           toast.success(result.message);
         } catch (error) {
           toast.error(
@@ -1254,7 +1259,7 @@ export function MessageThread({
           </div>
         </div>
       ) : (
-        <div className="border-border bg-card flex flex-wrap items-center gap-2 border-b px-3 py-3 sm:px-4">
+        <div className="crm-thread-header border-border bg-card flex flex-wrap items-center gap-2 border-b px-3 py-3 sm:px-4">
           <div className="mr-auto flex min-w-0 flex-1 basis-48 items-center gap-2 sm:gap-3">
             {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -1285,6 +1290,7 @@ export function MessageThread({
             {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
             <Badge
+              data-linked={!!sessionOriginLine}
               variant="outline"
               className={cn(
                 'ml-2 hidden max-w-40 shrink-0 gap-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] xl:inline-flex',
@@ -1293,16 +1299,16 @@ export function MessageThread({
                   : 'border-sky-500/40 bg-sky-500/10 text-sky-300 light:text-sky-700'
               )}
             >
-              <Clock className="h-3 w-3" />
+              {sessionOriginLine?<MessageCircle className="h-3.5 w-3.5"/>:<Clock className="h-3 w-3"/>}
               {sessionInfo.remaining}
             </Badge>
           </div>
 
           <ThreadSearch key={conversation.id} conversationId={conversation.id} />
-          <button type="button" onClick={() => setMobileActionsOpen(true)} aria-label="Más opciones del chat" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-foreground hover:bg-muted lg:hidden">
+          <button type="button" onClick={() => setMobileActionsOpen(true)} aria-label="Más opciones del chat" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-foreground hover:bg-muted xl:hidden">
             <MoreVertical className="h-5 w-5" />
           </button>
-          <div className="hidden shrink-0 flex-wrap items-center gap-2 lg:flex">
+          <div className="hidden shrink-0 flex-wrap items-center gap-2 xl:flex">
             {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just
@@ -1460,9 +1466,10 @@ export function MessageThread({
       )}
 
       <Sheet open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
-        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:hidden">
+        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] xl:hidden">
           <SheetHeader className="px-0 pt-0 pr-12"><SheetTitle>Opciones del chat</SheetTitle></SheetHeader>
           <div className="grid gap-3">
+            <button type="button" onClick={()=>{setMobileActionsOpen(false);window.dispatchEvent(new Event('wacrm:open-reminders'));}} className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 text-left text-sm"><BellRing className="h-4 w-4"/>Recordatorios</button>
             {onOpenContactInfo && <button type="button" onClick={() => { setMobileActionsOpen(false); onOpenContactInfo(); }} className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 text-left text-sm"><ContactRound className="h-4 w-4" /> Información del contacto</button>}
             {onRefresh && <button type="button" onClick={() => { handleRefreshClick(); setMobileActionsOpen(false); }} className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 text-left text-sm"><RefreshCw className="h-4 w-4" /> Actualizar conversación</button>}
             <label className="text-sm">Estado
@@ -1653,6 +1660,7 @@ export function MessageThread({
         {billingPreflightError && <span className="text-destructive">{billingPreflightError}</span>}
       </div>}
 
+      {contact?.channel==='whatsapp'&&<ContinueConversation key={'continue:'+conversation.id} conversationId={conversation.id} onQueued={(line,message)=>{setManualSupport({id:conversation.id,line});if(message)onNewMessage(message);onRefresh?.();}}/>}
       {/* Composer */}
       <EnrollmentWelcomeCheck conversationId={conversation.id} />
       {conversation?.whatsapp_support_wait_until&&!sessionOriginLine&&<div role="status" className="mx-3 mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200 light:text-amber-900">⏳ Verificando el origen de Meta durante tres minutos antes de elegir el número de respuesta. Puedes preparar tu texto; el envío queda protegido hasta completar la verificación.</div>}

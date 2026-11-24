@@ -1,3 +1,5 @@
+import {manualEvidenceIssue} from '@/lib/matriculas/manual-evidence';
+import {declarationImage} from '@/lib/matriculas/declaration-image';
 import {randomUUID} from 'node:crypto';
 import {NextResponse} from 'next/server';
 import {requirePermission} from '@/lib/auth/permissions';
@@ -33,17 +35,28 @@ export async function POST(request:Request){
     const {data:visible,error:visibleError}=await ctx.supabase.from('conversations').select('id').eq('id',conversation).eq('account_id',ctx.accountId).maybeSingle();
     if(visibleError)throw visibleError;if(!visible)return NextResponse.json({error:'No tienes acceso al chat.'},{status:403});
     const files=['front','back','voucher','declaration','guardian'].map(kind=>({kind,file:form.get(kind)})).filter((x):x is {kind:string;file:File}=>x.file instanceof File&&x.file.size>0);
-    if(!files.some(x=>x.kind==='voucher')||!files.some(x=>['front','declaration'].includes(x.kind)))return NextResponse.json({error:'Sube el voucher y el DNI/CE o el pantallazo de los datos del estudiante.'},{status:400});
+    if(!files.some(x=>x.kind==='voucher'))return NextResponse.json({error:'Adjunta el comprobante del pago. El documento o captura de identidad son opcionales si confirmas los datos por llamada u otro WhatsApp.'},{status:400});
+    let staffAnalysis:Record<string,unknown>|null=null;
+    if(!files.some(x=>['front','declaration'].includes(x.kind))){
+      const source=form.get('confirmation_source'),phone=String(form.get('confirmation_phone')||data.phone1||'').replace(/[\s()-]/g,'');
+      const issue=manualEvidenceIssue(data,source,phone,form.get('confirmation_checked')==='true');
+      if(issue)return NextResponse.json({error:issue},{status:400});
+      const at=new Date().toISOString(),note=String(form.get('confirmation_note')||'').slice(0,1000);
+      const text=['NOMBRE: '+data.full_name,'DOCUMENTO: '+data.document_type+' '+data.document_number,'CORREO: '+data.email,'ORIGEN: '+(source==='call'?'LLAMADA':'OTRO WHATSAPP'),'TELEFONO: '+phone,'REGISTRADO POR: '+ctx.userId,'NOTA: '+note].join('\n');
+      const image=declarationImage({content_text:text,created_at:at},{title:'DATOS CONFIRMADOS POR LA ASESORA',subtitle:'REGISTRO MANUAL. NO ES UN MENSAJE ESCRITO POR EL ESTUDIANTE NI FOTO DE SU DOCUMENTO.'});
+      files.push({kind:'declaration',file:new File([await image.arrayBuffer()],'confirmacion-manual.png',{type:'image/png'})});
+      staffAnalysis={category:'staff_confirmed_identity',fields:{full_name:data.full_name,document_type:data.document_type,document_number:data.document_number,email:data.email},source,source_phone:phone,note,recorded_by:ctx.userId,recorded_at:at};
+    }
     if(files.some(x=>x.file.size>10*1024*1024||!['image/jpeg','image/png','image/webp'].includes(x.file.type)))return NextResponse.json({error:'Solo imagenes JPG, PNG o WEBP de hasta 10 MB.'},{status:400});
     db=supabaseAdmin();const batch=randomUUID(),evidence=[];
     for(const {kind,file} of files){
       const id=randomUUID(),path=`${ctx.accountId}/manual/${batch}/${id}`;
       const buffer=Buffer.from(await file.arrayBuffer());
       const {error}=await db.storage.from('enrollment-evidence').upload(path,buffer,{contentType:file.type,upsert:false});if(error)throw error;uploaded.push(path);
-      const {analysis}=await analyzeInboundImage({db,accountId:ctx.accountId,media:{buffer,contentType:file.type}});
+      const {analysis}=kind==='declaration'&&staffAnalysis ? {analysis:staffAnalysis} : await analyzeInboundImage({db,accountId:ctx.accountId,media:{buffer,contentType:file.type}});
       evidence.push({id,kind,storage_path:path,mime_type:file.type,image_analysis:analysis});
-      if(kind==='front'||kind==='back')data=suggestIdentityData(data,analysis);
-      if(kind==='voucher')data=collectPaymentData(data,analysis.fields);
+      if(kind==='front'||kind==='back')data=suggestIdentityData(data,analysis as Parameters<typeof suggestIdentityData>[1]);
+      if(kind==='voucher')data=collectPaymentData(data,analysis.fields as Record<string,unknown>);
     }
     data.identity_confirmed=false;
     data.identity_message_ids=evidence.filter(x=>['front','back'].includes(x.kind)).map(x=>x.id);

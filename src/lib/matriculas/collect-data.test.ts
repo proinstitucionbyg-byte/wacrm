@@ -366,3 +366,5 @@ describe('deterministic chat intake', () => {
     });
   });
 });
+
+ describe('student data sent as a short block',()=>{it('does not call an academic sentence a person',()=>{expect(collectEnrollmentData({},[{id:'x',content_text:'La docente de farmacia'}]).full_name).toBeUndefined()});it('extracts a three-word name and neighbouring DNI without validating identity',()=>{const d=collectEnrollmentData({},[{id:'x',content_text:'Piero Palacios Calvanapon\n23018826\n940966875\nSurco - Lima'}]);expect(d.full_name).toBe('PIERO PALACIOS CALVANAPON');expect(d.document_number).toBe('23018826');expect(d.document_type).toBe('DNI');expect(d.identity_confirmed).not.toBe(true)});});

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const h = vi.hoisted(() => ({ key: vi.fn(), rows: {} as Record<string, unknown[]>, calls: [] as unknown[] }));
+const h = vi.hoisted(() => ({ key: vi.fn(), rows: {} as Record<string, unknown[]>, counts: {} as Record<string, number>, calls: [] as unknown[] }));
 vi.mock('@/lib/auth/api-context', () => ({ requireApiKey: h.key }));
 import { GET } from './route';
 const contact = (id: string, tags: string[] = ['AREA VENTAS'], phone = '51911111111') => ({
@@ -11,17 +11,28 @@ const payment = (contact_id: string, purpose = 'enrollment', status = 'registere
   operation_reference: '00123', sales_adviser: 'INSTITUCION', enrollments: { status, data: { prices: [19.9,49.9,49.9,49.9,49.9,49.9] }, student_folder_url: 'https://drive.google.com/drive/folders/student' },
 });
 beforeEach(() => {
-  vi.resetAllMocks(); h.rows = {}; h.calls = [];
+  vi.resetAllMocks(); h.rows = {}; h.counts = {}; h.calls = [];
   const from = (table: string) => {
     const chain: Record<string, unknown> = {};
-    for (const method of ['select', 'eq', 'order', 'limit', 'in', 'or'])
+    for (const method of ['select', 'eq', 'order', 'limit', 'in', 'or', 'gt'])
       chain[method] = (...args: unknown[]) => { h.calls.push([table, method, args]); return chain; };
-    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: h.rows[table] ?? [], error: null }).then(resolve);
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: h.rows[table] ?? [], count: h.counts[table] ?? (h.rows[table] ?? []).length, error: null }).then(resolve);
     return chain;
   };
   h.key.mockResolvedValue({ accountId: 'account-a', supabase: { from } });
 });
 describe('commercial base export', () => {
+  it('exports an explicit exclusion after all incorrect sales labels are removed',async()=>{
+    h.rows.contacts=[contact('cleared',[])];
+    h.rows.contact_sales_states=[{contact_id:'cleared',commercial_status:null,explicitly_cleared:false}];
+    const result=await(await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({id:'cleared',commercial_active:false,commercial_exclusion:'OTRA AREA',commercial_sale_countable:false});
+  });
+  it('exports fidelity-only contacts as exclusions so prior spreadsheet rows can be hidden',async()=>{
+    h.rows.contacts=[contact('fidelity',['AREA FIDELIZACION'])];
+    const result=await(await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();
+    expect(result.data[0]).toMatchObject({id:'fidelity',commercial_active:false,commercial_exclusion:'OTRA AREA'});
+  });
   it('marks an unpurchased fidelity contact inactive despite old sales status and tags',async()=>{
     h.rows.contacts=[{...contact('moved',['ASESOR INSTITUTO','SEGUIMIENTO DE VENTAS']),conversations:[{id:'chat',ai_handoff_area:'FIDELIZACION',conversation_sales_routes:null}]}];
     h.rows.contact_sales_states=[{contact_id:'moved',commercial_status:'SEGUIMIENTO DE VENTAS'}];
@@ -129,3 +140,10 @@ describe('commercial base export', () => {
     expect(result.meta.next_cursor).toEqual(expect.any(String));
   });
 });
+
+it('exports stable manual observation numbers and an explicit empty list after deletion',async()=>{
+ h.rows.contacts=[contact('lead-a'),contact('lead-b')];h.rows.contact_notes=[{id:'n3',contact_id:'lead-a',note_number:3,note_text:'Llamar mañana'},{id:'auto',contact_id:'lead-a',note_number:null,note_text:'Resumen automático'}];
+ const result=await(await GET(new Request('https://crm.example/api/v1/sales/leads'))).json();expect(result.data.find((r:{id:string})=>r.id==='lead-a').observations).toEqual([{id:'n3',number:3,text:'Llamar mañana'}]);expect(result.data.find((r:{id:string})=>r.id==='lead-b').observations).toEqual([]);expect(h.calls).toContainEqual(['contact_notes','eq',['account_id','account-a']]);expect(h.calls).toContainEqual(['contact_notes','in',['contact_id',['lead-a','lead-b']]]);
+});
+
+it('refuses a truncated notes snapshot instead of exporting a deletion',async()=>{h.rows.contacts=[contact('lead-a')];h.rows.contact_notes=[{id:'n1',contact_id:'lead-a',note_number:1,note_text:'Conservar'}];h.counts.contact_notes=1001;const response=await GET(new Request('https://crm.example/api/v1/sales/leads'));expect(response.status).toBe(500);const result=await response.json();expect(result.data).toBeUndefined();});

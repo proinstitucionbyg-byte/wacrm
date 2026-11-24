@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   intakeEditorStorageKey,
+  prepareIntakeDraft,
+  sameIntakeData,
   readIntakeEditorDraft,
   rebaseIntakeEditorData,
   visibleIntakeFields,
@@ -61,4 +63,12 @@ describe('inbox enrollment missing-data editor', () => {
       identity_confirmed: true,
     });
   });
+});
+
+describe('draft save with updated identity',()=>{
+ it('detaches only the outdated declaration and never mutates its stored reference',()=>{const old={full_name:'NOMBRE ANTERIOR',email:'prueba@example.com',declaration_message_ids:['evidence-old']};const edit={...old,full_name:'NOMBRE CORREGIDO'};const result=prepareIntakeDraft(edit,old);expect(result.declaration_message_ids).toEqual([]);expect(result.identity_confirmed).toBe(false);expect(old.declaration_message_ids).toEqual(['evidence-old']);expect(edit.declaration_message_ids).toEqual(['evidence-old']);});
+ it('keeps the confirmation when only the course changes',()=>{const old={full_name:'NOMBRE DE PRUEBA',declaration_message_ids:['proof']};const edit={...old,course:'CURSO NUEVO'};expect(prepareIntakeDraft(edit,old)).toBe(edit);});
+ it('preserves a newly obtained confirmation for the corrected data',()=>{const old={full_name:'NOMBRE ANTERIOR',declaration_message_ids:['old']};const edit={full_name:'NOMBRE CORREGIDO',declaration_message_ids:['new']};expect(prepareIntakeDraft(edit,old)).toBe(edit);});
+ it('requires reviewing a photo again when the name changes without deleting it',()=>{const old={full_name:'NOMBRE ANTERIOR',identity_message_ids:['photo'],identity_confirmed:true};expect(prepareIntakeDraft({...old,full_name:'OTRO NOMBRE'},old)).toMatchObject({identity_message_ids:['photo'],identity_confirmed:false});});
+ it('compares saved data independently from JSON key ordering',()=>{expect(sameIntakeData({email:'a@b.com',course:'CURSO'},{course:'CURSO',email:'a@b.com'})).toBe(true);expect(sameIntakeData({course:'A'},{course:'B'})).toBe(false);});
 });

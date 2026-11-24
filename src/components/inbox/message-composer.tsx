@@ -648,7 +648,7 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className={cn('border-border bg-card relative min-h-16 shrink-0 overflow-y-auto border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:p-3', draft ? 'max-h-[45dvh]' : 'max-h-[30dvh]')}>
+    <div className={cn('crm-composer border-border bg-card relative min-h-16 shrink-0 overflow-y-auto border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:max-h-none lg:overflow-visible lg:p-3', draft ? 'max-h-[45dvh]' : 'max-h-[30dvh]')}>
       {needsAdviserNickname && !readOnly && (
         <p className="text-muted-foreground mb-2 text-sm">
           Completa y guarda tu apodo en{' '}
@@ -788,7 +788,7 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="bg-card sticky bottom-0 z-10 flex min-w-0 items-end gap-1.5 pt-1 lg:static lg:gap-2 lg:pt-0">
+        <div className="crm-compose-row bg-card sticky bottom-0 z-10 flex min-w-0 items-end gap-1.5 pt-1 lg:static lg:gap-2 lg:pt-0">
           <Popover>
             <PopoverTrigger disabled={inputsDisabled||busy} aria-label="Elegir emoji" title="Emojis" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 lg:h-9 lg:w-9">
               <Smile className="h-5 w-5" />
@@ -809,6 +809,7 @@ export function MessageComposer({
           {/* Attach menu — photo / video / document / voice. */}
           <DropdownMenu>
             <DropdownMenuTrigger
+              data-compose-role="attach"
               disabled={inputsDisabled || busy}
               title={
                 readOnly
@@ -858,6 +859,7 @@ export function MessageComposer({
           <DropdownMenu>
             <DropdownMenuTrigger
               disabled={inputsDisabled}
+              data-compose-role="more"
               aria-label="Más acciones de mensaje"
               title={
                 readOnly
@@ -885,10 +887,10 @@ export function MessageComposer({
               <DropdownMenuItem className="min-h-11 lg:min-h-0" onClick={() => setCommandPickerOpen(true)}>
                 <Zap className="mr-2 h-4 w-4" /> BLOQUES PREPARADOS
               </DropdownMenuItem>
-              <DropdownMenuItem className="min-h-11 lg:hidden" onClick={onOpenTemplates}>
+              <DropdownMenuItem className="min-h-11" onClick={onOpenTemplates}>
                 <LayoutTemplate className="mr-2 h-4 w-4" /> Plantillas
               </DropdownMenuItem>
-              <DropdownMenuItem className="min-h-11 lg:hidden" disabled={drafting} onClick={() => void handleDraft()}>
+              <DropdownMenuItem className="min-h-11" disabled={drafting} onClick={() => void handleDraft()}>
                 <Sparkles className="mr-2 h-4 w-4" /> Redactar con IA
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -899,8 +901,9 @@ export function MessageComposer({
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
+            data-compose-role="template"
             title={readOnly ? undefined : t('sendTemplate')}
-            className="text-muted-foreground hover:text-foreground hidden h-9 w-9 shrink-0 p-0 lg:inline-flex"
+            className="text-muted-foreground hover:text-foreground hidden h-9 w-9 shrink-0 p-0 xl:inline-flex"
             onClick={onOpenTemplates}
           >
             <LayoutTemplate className="h-4 w-4" />
@@ -912,8 +915,9 @@ export function MessageComposer({
             canAct={!readOnly}
             gateReason="send messages"
             disabled={drafting}
+            data-compose-role="draft-assist"
             title={readOnly ? undefined : t('draftWithAI')}
-            className="text-muted-foreground hover:text-primary hidden h-9 w-9 shrink-0 p-0 lg:inline-flex"
+            className="text-muted-foreground hover:text-primary hidden h-9 w-9 shrink-0 p-0 xl:inline-flex"
             onClick={handleDraft}
           >
             {drafting ? (
@@ -949,6 +953,7 @@ export function MessageComposer({
 
           <button
             type="button"
+            data-compose-role="microphone"
             aria-label={t('voiceNote')}
             title={t('voiceNote')}
             disabled={inputsDisabled || busy}
@@ -962,6 +967,7 @@ export function MessageComposer({
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
+            data-compose-role="send"
             aria-label="Enviar mensaje"
             disabled={!text.trim() || text.startsWith('/') || sessionExpired || sending}
             onClick={handleSend}

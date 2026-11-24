@@ -1,3 +1,4 @@
+import {routeOrganicManualReply} from './manual-continuation';
 import { resolveWhatsAppRecipient } from './recipient';
 // ============================================================
 // Outbound message send — the core that both the dashboard's
@@ -284,11 +285,17 @@ export async function sendMessageToConversation(
   } catch {
     throw new SendMessageError('channel_check_failed', 'No se pudo confirmar el canal del chat. No se envió ningún mensaje.', 503);
   }
+  if (!sessionOriginLine && params.senderId) {
+    try {
+      const redirected=await routeOrganicManualReply(supabaseAdmin(),{accountId,conversationId,senderId:params.senderId,text:contentText??'',messageType});
+      if(redirected)return redirected;
+    } catch(error) {throw new SendMessageError('linked_reply_unavailable',error instanceof Error?error.message:'No se pudo abrir la línea vinculada. No se enviará por Meta.',503);}
+  }
   if (sessionOriginLine) {
-    if (messageType !== 'text') {
+    if (messageType !== 'text' && !isMediaKind) {
       throw new SendMessageError(
         'session_transport_unsupported',
-        `Este chat pertenece a la sesión ${sessionOriginLine}. Por ahora solo se pueden responder textos desde el CRM; no se enviará por otro número.`,
+        `Este formato no está disponible en la sesión ${sessionOriginLine}.`,
         409,
       );
     }
@@ -301,7 +308,8 @@ export async function sendMessageToConversation(
     try {
       const queued = await enqueueSessionManualText(supabaseAdmin(), {
         accountId, conversationId, senderId: params.senderId,
-        lineKey: sessionOriginLine, text: contentText ?? '',
+        lineKey: sessionOriginLine, text: contentText || (isMediaKind ? `[${messageType}]` : ''),
+        ...(isMediaKind?{media:{kind:messageType as 'audio'|'image'|'video'|'document',url:mediaUrl!,...(filename?{filename}:{}),...(contentText?{caption:contentText}:{})}}:{}),
       });
       return queued;
     } catch (error) {

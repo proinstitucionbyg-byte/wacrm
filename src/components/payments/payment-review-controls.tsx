@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { PaymentStatusNotice } from './payment-status-notice';
 import { Button } from '@/components/ui/button';
 import { useMemberPermissions } from '@/hooks/use-member-permissions';
-import { PAYMENT_LABELS, PAYMENT_PURPOSES, oldReceiptDate, type PaymentPurpose, type PaymentReview, type PaymentStatus } from '@/lib/payments/review';
+import { PAYMENT_PURPOSES, oldReceiptDate, type PaymentPurpose, type PaymentReview, type PaymentStatus } from '@/lib/payments/review';
 
 export function PaymentDecision({ review, canReview, onChanged }: { review: PaymentReview; canReview: boolean; onChanged: () => void }) {
   const { can } = useMemberPermissions();
@@ -25,7 +26,7 @@ export function PaymentDecision({ review, canReview, onChanged }: { review: Paym
     finally { setSaving(false); }
   }
   return <div className="mt-3 space-y-2">
-    <p className="font-semibold">{PAYMENT_LABELS[review.status]}</p>
+    <PaymentStatusNotice status={review.status}/>
     {oldReceiptDate(review.evidence.fields?.date)&&<p className="rounded border border-amber-500 bg-amber-500/10 p-2 font-bold text-amber-600">COMPROBANTE CON MAS DE UNA SEMANA. REVISAR FECHA; NO CADUCA.</p>}
     <p className="text-xs text-muted-foreground">Origen: {review.origin} · {review.source_area}{review.source_adviser ? ` · ${review.source_adviser}` : ''}</p>
     {review.note && <p className="whitespace-pre-wrap text-sm">Motivo: {review.note}</p>}
@@ -39,9 +40,9 @@ export function PaymentDecision({ review, canReview, onChanged }: { review: Paym
       </label>
       <p className="text-xs text-muted-foreground">Valida despues de comprobar el abono. Solo una nueva matricula genera registro y documentos. Las pensiones y otros pagos pasan a fidelizacion, sin contarse como venta.</p>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" disabled={saving} onClick={() => decide('validated')}>✓ VALIDADO</Button>
-        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => decide('rejected')}>NO VALIDADO</Button>
-        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => decide('observation')}>EN OBSERVACION</Button>
+        <Button type="button" size="sm" disabled={saving} onClick={() => decide('validated')}>Validar pago</Button>
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => decide('rejected')}>Rechazar pago</Button>
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => decide('observation')}>Observar pago</Button>
       </div>
     </>}
     {!canReview && <p className="text-xs text-muted-foreground">Solo las personas autorizadas pueden decidir sobre este pago.</p>}
@@ -77,9 +78,9 @@ export function PaymentReviewControls({ messageId }: { messageId: string }) {
     finally { setReferring(false); }
   }
   if (permissionsLoading) return null;
-  if (!canView) return can('payments', 'refer') ? <div className="mt-2">{referred ? <p className="text-xs">Comprobante derivado a revisión.</p> : <Button size="sm" variant="outline" disabled={referring} onClick={refer}>Enviar comprobante a Finanzas</Button>}</div> : null;
+  if (!canView) return can('payments', 'refer') ? <div className="mt-2">{referred ? <p className="text-xs">Comprobante derivado a revisión.</p> : <><PaymentStatusNotice status="received"/><Button size="sm" variant="outline" disabled={referring} onClick={refer}>Enviar comprobante a Finanzas</Button></>}</div> : null;
   if (loading) return <p className="mt-2 text-xs text-muted-foreground">Consultando revisión…</p>;
-  if (failed) return <Button size="sm" variant="outline" onClick={load}>Reintentar revisión de pago</Button>;
+  if (failed) return <div role="alert" className="mt-2 space-y-2"><p className="text-xs">No se pudo consultar el estado del pago. No debe darse por validado.</p><Button size="sm" variant="outline" onClick={load}>Reintentar revisión de pago</Button></div>;
   return <div className="mt-2 max-w-sm rounded-md border border-border p-3" onClick={(event) => event.stopPropagation()}>
     {review ? <PaymentDecision key={`${review.id}:${review.version}`} review={review} canReview={canReview} onChanged={load} /> : <Button size="sm" variant="outline" disabled={referring} onClick={refer}>Enviar comprobante a Finanzas</Button>}
     <Link href="/payments" className="mt-2 block text-xs underline">Abrir bandeja de pagos</Link>

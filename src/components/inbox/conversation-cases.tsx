@@ -93,6 +93,8 @@ export function ConversationCases({
         Registra solo casos reales. Un mensaje sin respuesta no se cuenta
         automáticamente como queja.
       </p>
+      <p className="mt-2 text-xs text-muted-foreground">Se guarda en este chat. Pendiente = falta resolverlo; Resuelto = ya registraste la solución. No envía mensajes al estudiante.</p>
+      <a className="mt-2 inline-block text-xs text-sky-500 underline" href="/reports#quejas-y-soluciones">Ver informes: Estadísticas de primeras frases → Quejas y soluciones</a>
       <div className="mt-3 space-y-2">
         {rows.map((row) => (
           <article

@@ -1,3 +1,4 @@
+import {isConversationInsteadOfName} from './person-name';
 export const ENROLLMENT_FIELDS = {
   full_name: 'NOMBRE COMPLETO',
   document_type: 'TIPO DE DOCUMENTO',
@@ -139,6 +140,7 @@ export function isMinor(birthDate: string | undefined, today = new Date()): bool
 }
 export function enrollmentIssues(data: EnrollmentData): string[] {
   const issues: string[] = [];
+  if(data.full_name&&isConversationInsteadOfName(data.full_name)) issues.push('REVISAR NOMBRE COMPLETO: contiene una frase de conversación; escribe el nombre real del estudiante.');
   for (const key of [
     'full_name',
     'document_type',

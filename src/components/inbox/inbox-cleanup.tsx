@@ -32,7 +32,7 @@ export function InboxBulkCleanup({ ids, onCleared }: { ids: string[]; onCleared:
 }
 
 export function InboxCleanup({ conversationId, onCleared, onRefresh }: {conversationId:string;onCleared:()=>void;onRefresh?:()=>void}) {
-  const canClear=useCan('inbox_management.conversations'),canHide=useCan('inbox_management.messages');
+  const canClear=useCan('inbox_management.conversations'),canHide=useCan('inbox_management.messages'),canRead=useCan('inbox.view');
   const [open,setOpen]=useState(false),[busy,setBusy]=useState(false);
   async function clear() {
     setBusy(true);
@@ -41,6 +41,13 @@ export function InboxCleanup({ conversationId, onCleared, onRefresh }: {conversa
     if(error) {toast.error('No se pudo eliminar el chat. Comprueba tu permiso.');return;}
     setOpen(false);toast.success('Chat eliminado del Inbox. Puedes recuperarlo.');onCleared();onRefresh?.();
   }
+  async function markUnread(){
+    if(!canRead||busy)return;
+    setBusy(true);onCleared();
+    const {error}=await createClient().from('conversations').update({unread_count:1}).eq('id',conversationId).eq('unread_count',0);
+    if(error)toast.error('No se pudo marcar como no leído.');else toast.success('Conversación marcada como no leída.');
+    onRefresh?.();
+  }
   async function restoreHidden() {
     setBusy(true);
     // RLS restricts the deletion to this user's own hide markers.
@@ -48,7 +55,7 @@ export function InboxCleanup({ conversationId, onCleared, onRefresh }: {conversa
     setBusy(false);
     if(error) toast.error('No se pudieron recuperar los mensajes ocultos.');else {toast.success('Mensajes visibles nuevamente para ti.');onRefresh?.();}
   }
-  return <>{(canClear||canHide)&&<DropdownMenu><DropdownMenuTrigger className="h-10 shrink-0 whitespace-nowrap rounded-xl border border-border px-3 text-sm" disabled={busy}>Gestionar chat</DropdownMenuTrigger><DropdownMenuContent align="end">{canClear&&<DropdownMenuItem className="text-destructive" onClick={()=>setOpen(true)}>Eliminar conversación del equipo</DropdownMenuItem>}{canHide&&<DropdownMenuItem onClick={()=>void restoreHidden()}>Mostrar mis mensajes ocultos</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}
+  return <>{(canClear||canHide||canRead)&&<DropdownMenu><DropdownMenuTrigger className="h-10 shrink-0 whitespace-nowrap rounded-xl border border-border px-3 text-sm" disabled={busy}>Gestionar chat</DropdownMenuTrigger><DropdownMenuContent align="end">{canRead&&<DropdownMenuItem onClick={()=>void markUnread()}>Marcar como no leído</DropdownMenuItem>}{canClear&&<DropdownMenuItem className="text-destructive" onClick={()=>setOpen(true)}>Eliminar conversación del equipo</DropdownMenuItem>}{canHide&&<DropdownMenuItem onClick={()=>void restoreHidden()}>Mostrar mis mensajes ocultos</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}
    <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>¿Eliminar la conversación del Inbox de todo el equipo?</DialogTitle><DialogDescription>Las asesoras dejarán de ver el historial actual. Los nuevos mensajes aparecerán como una conversación nueva. Puedes recuperar el historial en RECUPERAR CHATS. No se eliminan vouchers, matrículas ni archivos de Drive. Tampoco se borra el chat del teléfono del estudiante.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={()=>setOpen(false)}>CANCELAR</Button><Button variant="destructive" disabled={busy} onClick={()=>void clear()}>{busy?'ELIMINANDO…':'ELIMINAR DEL EQUIPO'}</Button></DialogFooter></DialogContent></Dialog>
   </>;
 }

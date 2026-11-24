@@ -133,6 +133,7 @@ export async function POST(request: Request) {
       contactId: conversation.contact_id,
       conversationId: conversation.id,
       manualAgentId: ctx.userId,
+      manualCommandId: body.request_id,
     });
     await db
       .from('inbox_command_runs')

@@ -3,8 +3,10 @@ import {campaignPhone} from './campaign-phone';
 
 export async function resolveCampaignAudience(db:SupabaseClient,accountId:string,phones:string[]){
  const found=new Map<string,{id:string;name:string|null;phone:string;phone_normalized:string}>();
- for(let offset=0;offset<phones.length;offset+=200){
-  const variants=phones.slice(offset,offset+200).flatMap(phone=>[phone,phone.slice(1),...(phone.startsWith('+519')&&phone.length===12?[phone.slice(3)]:[])]);
+ // Keep the PostgREST URL below the gateway limit even when every phone has
+ // three lookup variants. Large pasted lists are resolved in small batches.
+ for(let offset=0;offset<phones.length;offset+=40){
+  const variants=phones.slice(offset,offset+40).flatMap(phone=>[phone,phone.slice(1),...(phone.startsWith('+519')&&phone.length===12?[phone.slice(3)]:[])]);
   const [normalized,legacy]=await Promise.all([
    db.from('contacts').select('id,name,phone,phone_normalized').eq('account_id',accountId).in('phone_normalized',variants).limit(1000),
    db.from('contacts').select('id,name,phone,phone_normalized').eq('account_id',accountId).in('phone',variants).limit(1000),

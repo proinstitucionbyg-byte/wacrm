@@ -65,7 +65,7 @@ export async function buildConversationContext(
     .filter(m=>m.sender_type==='customer'||m.status!=='failed')
     .map((m) => {
       const content = [
-        m.content_text?.trim(),
+        m.content_type==='image'&&!m.image_analysis?'[Imagen recibida en el CRM; lectura pendiente. El archivo ya fue enviado.]':m.content_text?.trim(),
         m.content_type === 'image' ? imageEvidenceText(m.image_analysis) : null,
       ]
         .filter(Boolean)

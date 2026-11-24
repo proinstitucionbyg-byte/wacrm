@@ -1,3 +1,4 @@
+import {isConversationInsteadOfName} from './person-name';
 import { parseEnrollmentData, type EnrollmentData } from './enrollment';
 import { isGuardianMessage } from './identity-evidence';
 import { intakeText } from './intake-text';
@@ -28,9 +29,9 @@ const normalizeIdentityName = (value: unknown) => {
 const isConversationalAcknowledgement = (value: string) =>
   /\b(?:YA|LISTO|PAGUE|PAGO|PAGADO|PAGAR|VERIFIQUE|VERIFICAR|LLEGO|LLEGARON|ENVIE|ENVIADO|MANDE|MANDADO)\b/.test(key(value));
 const isBarePersonName = (value: string) =>
-  /^[\p{L}]+(?:[ -][\p{L}]+){3,5}$/u.test(value) &&
-  !isConversationalAcknowledgement(value) &&
-  !/\b(ES|UN|UNA|MI|SOY|TENGO|QUIERO|COMO|CUANDO|CURSO|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL|DISTRITO|DEPARTAMENTO|DIRECCION|DOCUMENTO|CELULAR|TELEFONO|OK|POR|FAVOR|INFORMACION|CONGREGACION)\b|\b(?:INSCRIB|MATRICUL)\w*/.test(key(value));
+  /^[\p{L}]+(?:[ -][\p{L}]+){2,5}$/u.test(value) &&
+  !isConversationalAcknowledgement(value) && !isConversationInsteadOfName(value) &&
+  !/\b(ES|UN|UNA|MI|SOY|TENGO|QUIERO|COMO|CUANDO|CURSO|NECESITO|HOLA|GRACIAS|AYUDA|PUEDO|CLASES|NOMBRE|CORREO|EMAIL|DISTRITO|DEPARTAMENTO|DIRECCION|DOCUMENTO|CELULAR|TELEFONO|OK|POR|FAVOR|INFORMACION|CONGREGACION|DOCENTE|PROFESOR|PROFESORA|ASESOR|ASESORA|BUENAS|TARDES|ESTIMADA|ESTIMADO)\b|\b(?:INSCRIB|MATRICUL)\w*/.test(key(value));
 const courses = [
   [/\bNUTRICION(?: Y DIETETICA)?\b/, 'NUTRICION Y DIETETICA'],
   [/\b(?:AUXILIAR DE )?FARMACIA\b/, 'AUXILIAR DE FARMACIA'],
@@ -103,6 +104,7 @@ export function collectEnrollmentData(
       const date = bare.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
       if (date) add('birth_date', `${date[3]}-${date[2].padStart(2,'0')}-${date[1].padStart(2,'0')}`, true);
       if (!data.phone1 && /^9\d{8}$/.test(bare)) add('phone1', bare);
+      if(/^\d{8}$/.test(bare)&&text.split(/\r?\n/).some(part=>isBarePersonName(part.trim()))){add('document_type','DNI');add('document_number',bare);}
     }
     // Students often answer the prompted fields as separate bare messages.
     // Accept only unambiguous shapes; a question or conversational sentence
@@ -219,7 +221,7 @@ export function collectEnrollmentData(
   const next = { ...data };
   // Repair an earlier provisional chat-phrase extraction, preserving names
   // whose identity was explicitly confirmed by a person.
-  if (!data.identity_confirmed && next.full_name && isConversationalAcknowledgement(next.full_name))
+  if (!data.identity_confirmed && next.full_name && (isConversationalAcknowledgement(next.full_name)||isConversationInsteadOfName(next.full_name)))
     delete next.full_name;
   // While identity is still pending, recalculate identity fields from the
   // newest front/back batch. This repairs an earlier bad OCR attempt instead
@@ -268,7 +270,7 @@ export function collectPaymentData(
   fields: Record<string, unknown> = {}
 ): EnrollmentData {
   const next = { ...data };
-  const amount = fields.amount;
+  const amount = typeof fields.amount==='number'&&Number.isFinite(fields.amount)?String(fields.amount):fields.amount;
   if (
     !next.amount &&
     typeof amount === 'string' &&
@@ -280,7 +282,8 @@ export function collectPaymentData(
     typeof fields.institution === 'string' ? key(fields.institution) : '';
   if (!next.payment_method && ['YAPE', 'PLIN', 'INTERBANK', 'BBVA', 'BCP'].includes(institution))
     next.payment_method = institution;
-  const rawDate = typeof fields.date === 'string' ? key(fields.date) : '';
+  const receiptDate=fields.date??fields.payment_date;
+  const rawDate = typeof receiptDate === 'string' ? key(receiptDate) : '';
   const months = [
     'ENE',
     'FEB',
@@ -298,6 +301,8 @@ export function collectPaymentData(
   // Receipt OCR often includes the time (for example, "2026-10-20 20:50").
   // Keep only its ISO calendar date; the full timestamp is not needed here.
   let iso = rawDate.match(/^(\d{4}-\d{2}-\d{2})(?:[ T].*)?$/)?.[1] ?? '';
+  const calendarDate=rawDate.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s|$)/);
+  if(!iso&&calendarDate)iso=calendarDate[3]+'-'+calendarDate[2].padStart(2,'0')+'-'+calendarDate[1].padStart(2,'0');
   const spanish = rawDate.match(
     /^(\d{1,2})\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)[A-Z]*\.?\s+(\d{4})(?:\s|$)/
   );

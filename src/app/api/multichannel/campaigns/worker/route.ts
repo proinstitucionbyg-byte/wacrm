@@ -1,6 +1,7 @@
 import{createHash}from'node:crypto';import{NextResponse}from'next/server';import{z}from'zod';
 import{supabaseAdmin}from'@/lib/automations/admin-client';
 import{readQueueJson}from'@/lib/multichannel/bounded-json';
+import{sessionPayloadHash}from'../../../../../../scripts/multichannel/whatsapp-session/session-media.mjs';
 export const runtime='nodejs';
 const base={line_key:z.string().regex(/^WA-[A-Za-z0-9_-]{1,60}$/),session_phone:z.string().regex(/^\d{7,15}$/)};
 const ref={job_id:z.string().uuid(),claim_token:z.string().uuid()};
@@ -28,7 +29,9 @@ export async function POST(request:Request){
  });
  if(error)return reply({error:'No se confirmó la transición de campaña.'},error.code==='42501'?403:503);
  if(a.action==='authorize'){
-  if(!data?.allowed||data.job_id!==a.job_id||data.chat_id!==a.chat_id||createHash('sha256').update(data.body??'').digest('hex')!==a.body_hash)return reply({permit:{allowed:false}});
+  let payloadHash;try{payloadHash=sessionPayloadHash(data?.body??'',data?.media??undefined);}catch{return reply({permit:{allowed:false}});}
+  const expiresAt=Date.parse(data?.expires_at);
+  if(!data?.allowed||data.account_id!==w.data.account_id||data.line_key!==a.line_key||data.session_phone!==a.session_phone||data.job_id!==a.job_id||data.chat_id!==a.chat_id||payloadHash!==a.body_hash||!Number.isFinite(expiresAt)||expiresAt<=Date.now()||expiresAt>Date.now()+30000)return reply({permit:{allowed:false}});
   return reply({permit:{allowed:true,permissionConfirmed:true,paused:false,accountId:data.account_id,lineKey:data.line_key,sessionPhone:data.session_phone,jobId:data.job_id,campaignId:data.campaign_id,chatId:data.chat_id,bodyHash:a.body_hash,expiresAt:Date.parse(data.expires_at)}});
  }
  return reply({[a.action==='claim'?'job':'receipt']:data});

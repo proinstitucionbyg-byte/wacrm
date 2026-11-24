@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import "@/app/crm-workspace.css";
+import { usePathname, useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { IncomingMessageSoundProvider } from "@/components/media/incoming-message-sound";
+import { WorkspaceAudioProvider, WorkspaceAudioPlayer } from "@/components/media/workspace-audio";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
-import { LocationConsentBanner } from "@/components/presence/location-consent-banner";
 import { PendingInboxTitle } from '@/components/inbox/pending-title';
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
@@ -14,8 +16,9 @@ import { PendingInboxTitle } from '@/components/inbox/pending-title';
 // client components can't export Next's metadata object.
 
 function DashboardShellInner({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, accountId } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   // Sidebar drawer state — only used on mobile. On lg+ the sidebar is
   // always visible and this stays at `false` (ignored by the component).
@@ -42,19 +45,21 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background max-lg:h-dvh">
+    <WorkspaceAudioProvider key={user.id+":"+accountId}><IncomingMessageSoundProvider>
+    <div className="crm-shell flex h-screen overflow-hidden bg-background max-lg:h-dvh" data-crm-section={pathname.split("/")[1]}>
       {/* Reports this tab's online/away presence once we know a user is
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
       <PendingInboxTitle />
       <Sidebar open={sidebarOpen} onClose={closeSidebar} />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="crm-content flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
-        <LocationConsentBanner />
+        <WorkspaceAudioPlayer/>
         {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+        <main className="crm-main flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
+    </IncomingMessageSoundProvider></WorkspaceAudioProvider>
   );
 }
 

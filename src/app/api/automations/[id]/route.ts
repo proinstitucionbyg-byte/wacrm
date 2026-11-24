@@ -125,7 +125,10 @@ export async function PATCH(
       const snapshot=await automationSnapshot(existing.account_id,id)
       const plan=buildSaveImpact(snapshot,body.steps as BuilderStepInput[],update)
       if(body.steps_revision!==plan.revision)return NextResponse.json({error:'Los bloques cambiaron o este editor es antiguo. Recarga antes de guardar.'},{status:409})
-      if(body.preview)return NextResponse.json({token:plan.token,impacts:plan.impacts,problems:plan.problems,summary:plan.summary})
+      if(body.preview){
+        const linkedAutomations=[...new Set(snapshot.expected.links.map(link=>link.automation_id))].map(linkedId=>({id:linkedId,...(snapshot.names.get(linkedId)??{name:'Automatización conectada',folder:'Sin carpeta'})}))
+        return NextResponse.json({token:plan.token,impacts:plan.impacts,problems:plan.problems,summary:plan.summary,linkedAutomations})
+      }
       if(plan.problems.length)return NextResponse.json({error:plan.problems[0],problems:plan.problems},{status:409})
       if(plan.impacts.length && body.impact_token!==plan.token)return NextResponse.json({error:'Revisa y acepta la actualización de los enlaces antes de guardar.'},{status:409})
       if(body.impact_token && body.impact_token!==plan.token)return NextResponse.json({error:'Los datos cambiaron desde la revisión. Vuelve a guardar para ver la lista actualizada.'},{status:409})

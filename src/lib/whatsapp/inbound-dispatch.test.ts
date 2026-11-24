@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const h = vi.hoisted(() => ({
   auto: vi.fn(), flow: vi.fn(), tag: vi.fn(), first: vi.fn(), deferred: vi.fn(),
   explicit: vi.fn(), billing: vi.fn(), followup: vi.fn(), teacher: vi.fn(),
-  sales: vi.fn(), ai: vi.fn(), support: vi.fn(),
+  sales: vi.fn(), ai: vi.fn(), support: vi.fn(), organic: vi.fn(), welcome: vi.fn(),
 }))
 
 vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: h.auto }))
@@ -12,6 +12,8 @@ vi.mock('@/lib/sales/attribution', () => ({ tagCommercialInquiry: h.tag }))
 vi.mock('./first-inbound-routing', () => ({ pauseUnknownFirstInboundForHuman: h.first }))
 vi.mock('./deferred-keyword-openings', () => ({ hasPendingDeferredKeywordOpening: h.deferred }))
 vi.mock('./cloud-support', () => ({ routeCloudSupportOpening: h.support }))
+vi.mock('./universal-welcome', () => ({ gateNewNumberWelcome: h.welcome }))
+vi.mock('./noncampaign-fidelity', () => ({ pauseNoncampaignFidelity: h.organic }))
 vi.mock('@/lib/ai/explicit-human-request', () => ({ handleExplicitHumanRequest: h.explicit }))
 vi.mock('./billing-runtime', () => ({ gateAutomaticWhatsAppConversation: h.billing }))
 vi.mock('@/lib/ai/followup', () => ({ handleIdleFollowupReply: h.followup }))
@@ -40,9 +42,16 @@ beforeEach(() => {
   h.followup.mockResolvedValue(false)
   h.teacher.mockResolvedValue(false)
   h.support.mockResolvedValue(false)
+  h.welcome.mockResolvedValue('legacy')
+  h.organic.mockResolvedValue(false)
 })
 
 describe('dispatchInboundThroughCrm', () => {
+  it('does not tag sales or run any reply engine for organic fidelity contacts', async () => {
+    h.organic.mockResolvedValue(true)
+    await dispatchInboundThroughCrm({ ...common, channel: 'session' })
+    for (const fn of [h.tag, h.sales, h.flow, h.auto, h.ai, h.support]) expect(fn).not.toHaveBeenCalled()
+  })
   it('runs the same stored CRM Flows and automation branches for a session without applying Meta Cloud billing', async () => {
     await dispatchInboundThroughCrm({ ...common, channel: 'session' })
     expect(h.tag).toHaveBeenCalledWith(common.db, expect.objectContaining({
@@ -109,3 +118,10 @@ describe('dispatchInboundThroughCrm', () => {
     expect(h.auto).not.toHaveBeenCalled()
   })
 })
+
+describe('verified prepared menu continuation',()=>{
+ const command={requestId:'command',actorId:'agent',automationId:'source-course'};
+ it('routes a verified choice immediately without removing the normal human pause',async()=>{h.organic.mockResolvedValue(true);await dispatchInboundThroughCrm({...common,channel:'session',contentText:'Malla de Farmacia',interactiveReplyId:'btn_1',preparedCommand:command,conversation:{...common.conversation,last_human_message_at:new Date().toISOString()}});expect(h.organic).not.toHaveBeenCalled();expect(h.auto).toHaveBeenCalledWith(expect.objectContaining({triggerType:'keyword_match',context:expect.objectContaining({manual_agent_id:'agent',manual_command_run_id:'command',manual_source_automation_id:'source-course',message_text:'Malla de Farmacia'})}));});
+ it('keeps ordinary human attention paused when there is no verified menu command',async()=>{await dispatchInboundThroughCrm({...common,channel:'session',interactiveReplyId:'btn_1',conversation:{...common.conversation,last_human_message_at:new Date().toISOString()}});expect(h.auto).not.toHaveBeenCalled();});
+ it('does not reactivate explicitly disabled automation for a verified menu',async()=>{await dispatchInboundThroughCrm({...common,channel:'session',interactiveReplyId:'btn_1',preparedCommand:command,conversation:{...common.conversation,automation_enabled:false}});expect(h.auto).not.toHaveBeenCalled();});
+});

@@ -60,7 +60,7 @@ export function CaseReports({ accountId }: { accountId: string }) {
     URL.revokeObjectURL(url);
   }
   return (
-    <section className="space-y-3 border-t pt-5">
+    <section id="quejas-y-soluciones" className="space-y-3 border-t pt-5">
       <h2 className="text-xl font-bold">QUEJAS, MOTIVOS Y SOLUCIONES</h2>
       <p className="text-muted-foreground text-sm">
         Casos registrados por el equipo en la ficha lateral del chat. Informe
@@ -75,7 +75,7 @@ export function CaseReports({ accountId }: { accountId: string }) {
       )}
       {!rows.length && !error && (
         <p className="text-sm">
-          El primer informe se generará el próximo sábado.
+          Todavía no hay informes publicados. Los casos guardados siguen disponibles en cada chat.
         </p>
       )}
       {rows.map((report) => (

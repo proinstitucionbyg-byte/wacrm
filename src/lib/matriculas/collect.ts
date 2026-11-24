@@ -7,6 +7,7 @@ import {
 import { prepareAutomaticIntake, type IntakeEvidence } from './auto-intake';
 import { loadAcademicCalendar } from './calendar';
 import { enrollmentIssues } from './enrollment';
+import { manualEvidenceMatches } from './manual-evidence';
 import { syncPaidEnrollmentHandoff } from './paid-intake-handoff';
 
 /** Only queues a complete, consistent intake after human payment validation. */
@@ -68,6 +69,17 @@ export async function collectConversationEnrollments(
       await loadAcademicCalendar(db, accountId),
       review.created_at
     );
+  // Staff confirmation is a private, attributed record, not a fabricated chat message.
+  // Re-reading later chat must not erase it or revive old contradictory OCR.
+  if (draft.data.declaration_message_ids?.length) {
+    const {data: uploads,error: uploadError} = await db.from('enrollment_uploads').select('id,image_analysis').eq('account_id',accountId).eq('review_id',draft.review_id).in('id',draft.data.declaration_message_ids).eq('kind','declaration');
+    if(uploadError)throw uploadError;
+    const confirmed = uploads?.find(file => manualEvidenceMatches(draft.data,file.image_analysis));
+    if(confirmed) {
+      for(const [field,value] of Object.entries(draft.data)) if(typeof value==='string'&&value.trim()) Object.assign(next,{[field]:value});
+      next.declaration_message_ids=[confirmed.id];next.identity_message_ids=[];next.identity_confirmed=false;
+    }
+  }
   const ready = enrollmentIssues(next).length === 0;
   if (ready || JSON.stringify(next) !== JSON.stringify(draft.data)) {
     const { error: saveError } = await db

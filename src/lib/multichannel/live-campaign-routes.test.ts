@@ -4,6 +4,7 @@ vi.mock('@/lib/auth/account',()=>({requireRole:h.role,toErrorResponse:()=>Respon
 vi.mock('@/lib/automations/admin-client',()=>({supabaseAdmin:()=>({rpc:h.rpc,from:h.from})}));
 import{POST as owner}from'@/app/api/multichannel/campaigns/route';
 import{POST as worker}from'@/app/api/multichannel/campaigns/worker/route';
+import{sessionPayloadHash}from'../../../scripts/multichannel/whatsapp-session/session-media.mjs';
 const id='00000000-0000-4000-8000-000000000001',account='00000000-0000-4000-8000-000000000002';
 const plan=()=>({request_id:id,name:'Aviso',purpose:'notice',body:'Aviso revisado',routes:[{channel:'whatsapp_support',line_key:'WA-one'}],run_at:'2027-01-01T09:00:00-05:00',expires_at:'2027-01-01T10:00:00-05:00',interval_seconds:20,block_size:50,block_pause_seconds:300,recipients:[{contact_id:id,permission_expires_at:'2027-01-02T00:00:00Z',evidence:'Permiso revisado por el propietario'}]});
 const request=(body:unknown,auth='Bearer wcm_'+'a'.repeat(64))=>new Request('https://crm.example/api/multichannel/campaigns',{method:'POST',headers:{'Content-Type':'application/json',Authorization:auth},body:JSON.stringify(body)});
@@ -29,6 +30,17 @@ describe('campaign owner boundary',()=>{
  });
 });
 describe('campaign worker boundary',()=>{
+ it('binds attachment permissions to the stored payload, line, account and session',async()=>{
+  const media={kind:'image' as const,url:'https://assets.example.test/storage/v1/object/public/course.png',caption:'Curso'};
+  const permit={allowed:true,account_id:account,line_key:'WA-one',session_phone:'51900000001',job_id:id,chat_id:'51900000002@c.us',body:'Original',media,expires_at:new Date(Date.now()+20000).toISOString()};
+  const action={action:'authorize',line_key:'WA-one',session_phone:'51900000001',job_id:id,claim_token:id,chat_id:permit.chat_id,body_hash:sessionPayloadHash(permit.body,media)};
+  h.rpc.mockResolvedValue({data:permit,error:null});
+  expect((await (await worker(request(action))).json()).permit.allowed).toBe(true);
+  for(const patch of [{media:{...media,caption:'Alterado'}},{line_key:'WA-other'},{account_id:id},{session_phone:'51900000003'},{expires_at:new Date(Date.now()-1000).toISOString()},{media:{...media,url:'http://invalid.example/a.png'}}]){
+   h.rpc.mockResolvedValue({data:{...permit,...patch},error:null});
+   expect(await (await worker(request(action))).json()).toEqual({permit:{allowed:false}});
+  }
+ });
  it('rejects missing worker credentials and unknown fields',async()=>{
   expect((await worker(request({action:'claim',line_key:'WA-one',session_phone:'51900000001'},''))).status).toBe(401);
   expect((await worker(request({action:'claim',line_key:'WA-one',session_phone:'51900000001',account_id:account}))).status).toBe(400);expect(h.rpc).not.toHaveBeenCalled();

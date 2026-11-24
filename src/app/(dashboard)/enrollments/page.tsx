@@ -1,10 +1,13 @@
 'use client';
+import {RegisteredCorrectionEditor} from '@/components/enrollments/registered-correction-editor';
+import{CourseSelect}from'@/components/enrollments/course-select';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from '@/components/ui/dialog';
+import { EnrollmentEvidenceEditor } from '@/components/enrollments/enrollment-evidence-editor';
 import {ManualEnrollment} from '@/components/enrollments/manual-enrollment';
 import {
   ENROLLMENT_FIELDS,
@@ -14,6 +17,7 @@ import {
   type EnrollmentDraft,
 } from '@/lib/matriculas/enrollment';
 import { restoreEnrollmentEditorData } from '@/lib/matriculas/editor-draft';
+import {prepareIntakeDraft} from '@/lib/matriculas/intake-editor';
 
 type Evidence = {
   id: string;
@@ -150,7 +154,7 @@ function EnrollmentEditor({
       const res = await fetch(`/api/enrollments/${draft.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data, version: draft.version }),
+        body: JSON.stringify({ data:prepareIntakeDraft(data,draft.data), version: draft.version }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
@@ -161,7 +165,7 @@ function EnrollmentEditor({
       setConfirmedMissing([]);
       setIssues(json.issues);
       setError('');
-      toast.success('Datos guardados. El pago conserva su validación.');
+      toast.success('Borrador guardado. Todavía no se envió a registro.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar');
     } finally {
@@ -176,7 +180,7 @@ function EnrollmentEditor({
       const savedResponse = await fetch(`/api/enrollments/${draft.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data, version: draft.version }),
+        body: JSON.stringify({ data:prepareIntakeDraft(data,draft.data), version: draft.version }),
       });
       const saved = await savedResponse.json();
       if (!savedResponse.ok) throw new Error(saved.error);
@@ -226,7 +230,7 @@ function EnrollmentEditor({
         </p>
       )}
       <p className="text-muted-foreground text-sm">
-        PAGO VALIDADO ·{' '}
+        FICHA DE MATRÍCULA ·{' '}
         {draft.status === 'registered'
           ? `REGISTRO ${draft.registered_number}`
           : draft.status === 'processing'
@@ -238,7 +242,7 @@ function EnrollmentEditor({
       {draft.status === 'collecting' && issues.length > 0 && (
         <section className="rounded border border-amber-500/40 p-3" aria-label="Observación para fidelización">
           <h3 className="text-sm font-semibold">OBSERVACIÓN PARA FIDELIZACIÓN</h3>
-          <p className="mt-1 text-xs">El pago ya fue validado. Revisar lo recibido, llamar para pedir solo los datos realmente ausentes y completar esta ficha. Los documentos se emitirán al cerrar el registro.</p>
+          <p className="mt-1 text-xs">Revisa lo recibido y pide por llamada solo los datos que falten. Puedes completar esta ficha manualmente. Los documentos requieren pago validado y datos completos.</p>
           <ul className="mt-2 list-disc pl-5 text-xs">
             {issues.map((issue) => <li key={issue}>{issue}</li>)}
           </ul>
@@ -258,6 +262,7 @@ function EnrollmentEditor({
       )}
       {draft.status === 'registered' && (
         <section className="border-border rounded border p-3">
+          {process.env.NEXT_PUBLIC_ENROLLMENT_CORRECTIONS_ENABLED === 'true' && canEdit && <RegisteredCorrectionEditor enrollmentId={draft.id}/>} 
           <h3 className="mb-2 text-sm font-semibold">
             DOCUMENTOS EN EL CHAT DEL ESTUDIANTE
           </h3>
@@ -294,7 +299,7 @@ function EnrollmentEditor({
               <div key={key} className="min-w-0 rounded-md border border-border/70 p-2 text-xs">
                 <label htmlFor={`missing-${key}`}>
                 {ENROLLMENT_FIELDS[key]}
-                {key === 'document_type' ? (
+                {key === 'course' ? <CourseSelect value={data.course??''} disabled={locked||saving} onChange={course=>setData(current=>({...current,course,start_date:''}))}/> : key === 'document_type' ? (
                   <select id={`missing-${key}`} disabled={saving} value={data[key] ?? ''} onChange={(event) => updateMissingField(key, event.target.value)} className="border-border bg-background mt-1 block w-full rounded border px-2 py-1.5">
                     <option value="">Seleccionar</option>
                     {['DNI', 'CARNE DE EXTRANJERIA', 'PASAPORTE', 'OTRO'].map((type) => <option key={type}>{type}</option>)}
@@ -401,9 +406,10 @@ function EnrollmentEditor({
           ))}
         </div>
       </fieldset>
+      <EnrollmentEvidenceEditor key={draft.id} id={draft.id} version={draft.version} data={data} disabled={locked || saving} onChange={patch=>setData(current=>({...current,...patch}))} />
       <fieldset className="space-y-2">
         <legend className="text-sm font-semibold">FOTOS DEL DOCUMENTO</legend>
-        {!!data.declaration_message_ids?.length && <p className="rounded border border-amber-500/40 p-2.5 text-xs text-amber-600">No hay foto del documento. Se está usando como respaldo el nombre, documento y correo escritos por el estudiante en este chat.</p>}
+        {!!data.declaration_message_ids?.length && <p className="rounded border border-amber-500/40 p-2.5 text-xs text-amber-600">Hay un respaldo seleccionado. Puede proceder del chat, de una imagen adjuntada o de datos confirmados por una asesora. No es obligatorio pedir que el estudiante lo vuelva a escribir.</p>}
         <p className="text-muted-foreground text-xs">
           Selecciona las fotos del documento de identidad. La lectura completa
           solamente campos vacíos; compara siempre con los datos escritos.
@@ -489,11 +495,11 @@ function EnrollmentEditor({
           {hasIdentityPhotos
             ? 'Revisé que el nombre y número coincidan con la foto seleccionada.'
             : hasWrittenEvidence
-              ? 'Revisé que el nombre y número coincidan con los datos escritos que dejó el estudiante.'
+              ? 'Revisé que el nombre y número coincidan con el respaldo seleccionado.'
               : 'Confirmar identidad (requiere seleccionar una foto del documento arriba).'}
         </label>
         {!hasIdentityPhotos && !hasWrittenEvidence && (
-          <p className="mt-1 text-muted-foreground">Este control no compara por sí solo. Si no hay foto, solo se acepta el respaldo escrito completo que el sistema detecte en el chat.</p>
+          <p className="mt-1 text-muted-foreground">Si no tienes foto, usa «Datos por llamada / otro WhatsApp» para registrar la confirmación o adjuntar una captura.</p>
         )}
       </div>
       <label className="flex gap-2 text-sm">

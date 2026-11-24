@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash, randomUUID } from 'node:crypto';
 import{currentSessionInbound}from'./session-inbound-context';
-import {normalizeSessionMedia,type SessionMedia} from '../../../scripts/multichannel/whatsapp-session/session-media.mjs';
+import { currentSessionCommand } from './session-command-context';
+import {normalizeSessionMedia,isSignedEnrollmentDocument,type SessionMedia} from '../../../scripts/multichannel/whatsapp-session/session-media.mjs';
 
 /** Prevents an unimplemented session channel from silently falling back to
  * the account's Meta Cloud number. The lookup stays dormant until the bridge
@@ -62,6 +63,18 @@ export async function enqueueSessionTextIfRequired(
   if (sourceError) throw new Error('No se pudo verificar con seguridad el canal de esta conversación.');
   if(pinned&&(!source||source.id!==pinned.messageRowId||source.whatsapp_session_line_key!==pinned.lineKey))throw Error('No se pudo comprobar el origen exacto de la consulta.');
   const lineKey = source?.whatsapp_session_line_key;
+  const command = currentSessionCommand(args.conversationId);
+  if (command) {
+    if (command.accountId !== args.accountId) throw Error('El bloque pertenece a otra cuenta.');
+    if (process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED !== 'true') throw Error('La salida de WhatsApp vinculado aún no está habilitada.');
+    const senderLine = lineKey ?? await getSessionOriginLineForConversation(db, args.conversationId);
+    if (senderLine) {
+      const dedupKey = createHash('sha256').update(args.idempotencyKey ?? command.requestId + '\0' + args.text + '\0' + JSON.stringify(args.media ?? args.menuOptions ?? null)).digest('hex');
+      const {data, error} = await db.rpc('enqueue_whatsapp_session_command', {p_account_id: args.accountId, p_conversation_id: args.conversationId, p_line_key: senderLine, p_command_id: command.requestId, p_body: args.text, p_dedup_key: dedupKey, p_media: args.media ?? null, p_options: args.menuOptions ?? null});
+      if (error || typeof data?.message_id !== 'string' || !data.message_id.startsWith('waweb-job:')) throw Error('No se pudo guardar el bloque seleccionado. Revisa la conexión y sus permisos antes de repetirlo.');
+      return {whatsapp_message_id: data.message_id};
+    }
+  }
   if (!lineKey) {
     const supportLine=await getSessionOriginLineForConversation(db,args.conversationId);
     if(!supportLine)return null;
@@ -109,7 +122,7 @@ export async function enqueueSessionMediaIfRequired(db:SupabaseClient,args:{acco
  if(process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED!=='true')throw Error('La salida de archivos por sesión aún no está habilitada.');
  const media=normalizeSessionMedia({kind:args.mediaType,url:args.mediaUrl,...(args.caption?{caption:args.caption}:{}),...(args.filename?{filename:args.filename}:{})});
  const origin=process.env.NEXT_PUBLIC_SUPABASE_URL;
- if(!origin||new URL(media.url).origin!==new URL(origin).origin||!new URL(media.url).pathname.startsWith('/storage/v1/object/public/'))throw Error('El archivo requiere el almacenamiento autorizado del CRM; no se enviará por Cloud.');
+ if(!origin||new URL(media.url).origin!==new URL(origin).origin||(!new URL(media.url).pathname.startsWith('/storage/v1/object/public/')&&!(isSignedEnrollmentDocument(new URL(media.url),media.kind)&&new URL(media.url).pathname.startsWith(`/storage/v1/object/sign/social-media/${args.accountId}/enrollments/`))))throw Error('El archivo requiere el almacenamiento autorizado del CRM; no se enviará por Cloud.');
  const text=(args.caption?.trim()||args.transcript?.trim()||`[${media.kind}]`).slice(0,4000);
  return enqueueSessionTextIfRequired(db,{accountId:args.accountId,conversationId:args.conversationId,text,idempotencyKey:args.idempotencyKey,media});
 }
@@ -119,7 +132,7 @@ export async function enqueueSessionMediaIfRequired(db:SupabaseClient,args:{acco
  * the CRM engines inside the transactional database function. */
 export async function enqueueSessionManualText(
   db: SupabaseClient,
-  args: { accountId: string; conversationId: string; senderId: string; lineKey: string; text: string },
+  args: { accountId: string; conversationId: string; senderId: string; lineKey: string; text: string; media?: SessionMedia },
 ): Promise<{ messageId: string; whatsappMessageId: string }> {
   if (process.env.MULTICHANNEL_WHATSAPP_SESSION_SEND_ENABLED !== 'true') {
     throw new Error(`La conversación pertenece a la sesión ${args.lineKey}; la salida aún no está habilitada.`);
@@ -128,13 +141,20 @@ export async function enqueueSessionManualText(
   const dedupKey = createHash('sha256').update(
     `${args.senderId}\0${args.conversationId}\0${randomUUID()}`,
   ).digest('hex');
-  const { data, error } = await db.rpc('enqueue_whatsapp_session_manual_text', {
+  const media=args.media?normalizeSessionMedia(args.media):undefined;
+  if(media){
+    const origin=process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const url=new URL(media.url);
+    if(!origin||url.origin!==new URL(origin).origin||!url.pathname.startsWith('/storage/v1/object/public/'))throw Error('El archivo requiere el almacenamiento autorizado del CRM.');
+  }
+  const { data, error } = await db.rpc(media?'enqueue_whatsapp_session_manual_media':'enqueue_whatsapp_session_manual_text', {
     p_account_id: args.accountId,
     p_conversation_id: args.conversationId,
     p_line_key: args.lineKey,
     p_sender_id: args.senderId,
     p_body: args.text,
     p_dedup_key: dedupKey,
+    ...(media?{p_media:media}:{}),
   });
   if (error || typeof data?.message_row_id !== 'string' || typeof data?.message_id !== 'string') {
     throw new Error('No se pudo encolar la respuesta en su sesión WhatsApp.');

@@ -1,6 +1,8 @@
 /** Normalize list formatting only; preserve the student's values and message IDs. */
 export function intakeText(value: string | null | undefined): string {
-  const lines = (value ?? '').replace(/\\n/g, '\n').split(/\r?\n/)
+  const lines = (value ?? '').replace(/\\n/g, '\n')
+    .replace(/\s+[-–—]\s+(?=(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CELULAR|TEL[EÉ]FONO|CORREO(?: ELECTR[OÓ]NICO)?|EMAIL)\s*:)/gi,'\n')
+    .replace(/^.*?\ba nombre\s*:\s*/gim,'Nombre completo: ').split(/\r?\n/)
     .map(line => line.replace(/^\s*[-*•]\s+/, '').trim());
   const documentLabel = /^(?:DNI|DOCUMENTO(?: DE IDENTIDAD)?|CARN[EÉ] DE EXTRANJER[IÍ]A|PASAPORTE)\s*:?$/i;
   const documentLine = lines.findIndex(line => documentLabel.test(line));

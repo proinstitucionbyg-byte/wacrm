@@ -1,9 +1,12 @@
 import{beforeEach,afterEach,describe,it,expect,vi}from'vitest';
+const policyGuard=vi.hoisted(()=>vi.fn());
+vi.mock('./noncampaign-fidelity',()=>({pauseNoncampaignFidelity:policyGuard}));
 const h=vi.hoisted(()=>({rpc:vi.fn(),from:vi.fn(),policy:{enabled:true} as {enabled:boolean}|null,referral:null as unknown,steps:[{step_type:'send_message',step_config:{text:'Bienvenido. ¿En qué te ayudamos?'}},{step_type:'send_buttons',step_config:{kind:'buttons',body:'Elige',buttons:[{id:'actual-sales-branch',title:'Ventas'},{id:'actual-support-branch',title:'Soporte'}]}}]}));
 vi.mock('./billing-runtime',()=>({readConversationBillingPreflight:vi.fn(async()=>({automatic_send_allowed:true}))}));
 import{routeCloudSupportOpening}from'./cloud-support';
 const args={accountId:'account',conversationId:'chat',contactId:'contact',userId:'owner',messageId:'wamid.original',hasConfirmedAdOrigin:false,metaWaitExpired:true};
 beforeEach(()=>{
+ policyGuard.mockResolvedValue(false);
  vi.clearAllMocks();vi.stubEnv('MULTICHANNEL_CLOUD_SUPPORT_ENABLED','true');h.policy={enabled:true};h.referral=null;
  h.rpc.mockResolvedValue({data:{handled:true,state:'queued',waiting:true},error:null});
  h.from.mockImplementation((table:string)=>{
@@ -14,6 +17,12 @@ beforeEach(()=>{
 });afterEach(()=>vi.unstubAllEnvs());
 const db={from:h.from,rpc:h.rpc}as never;
 describe('Cloud to owner-configured support line',()=>{
+ it('does not enqueue the old greeting when the organic fidelity policy handles the contact',async()=>{
+  policyGuard.mockResolvedValue(true);
+  expect(await routeCloudSupportOpening(db,args)).toBe(true);
+  expect(h.rpc).not.toHaveBeenCalled();
+  expect(h.from).not.toHaveBeenCalled();
+ });
  it('durably waits before transferring a first non-campaign question and does not send a greeting yet',async()=>{
   expect(await routeCloudSupportOpening(db,{...args,metaWaitExpired:false,isFirstInboundMessage:true,contentText:'Quiero información de farmacia'})).toBe(true);
   expect(h.rpc).toHaveBeenCalledWith('enqueue_whatsapp_support_wait',expect.objectContaining({p_provider_id:'wamid.original',p_first_inbound:true}));

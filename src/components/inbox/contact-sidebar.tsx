@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type { Contact, Deal, ContactNote } from "@/types";
 import {
   Phone,
   Mail,
@@ -14,13 +14,16 @@ import {
   Tag as TagIcon,
   DollarSign,
   StickyNote,
+  PhoneCall,
   Plus,
   Trash2,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
+import {ContactTagsEditor} from './contact-tags-editor';
 import { ConversationCases } from "./conversation-cases";
 import { toast } from "sonner";
 
@@ -34,13 +37,16 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
-  const { accountId } = useAuth();
+  const { accountId, user, accountRole } = useAuth();
   const [copied, setCopied] = useState(false);
+  const observationInputRef=useRef<HTMLTextAreaElement>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
-  const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [editingNote, setEditingNote] = useState<ContactNote | null>(null);
+  const [editedNote, setEditedNote] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
 
   const fetchNotes = useCallback(async () => {
@@ -57,7 +63,7 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
     const supabase = createClient();
 
     // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    const [dealsRes, notesRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -68,23 +74,12 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
         .select("*")
         .eq("contact_id", contact.id)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("contact_tags")
-        .select("id, tag_id, tags(*)")
-        .eq("contact_id", contact.id),
+
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
     if (notesRes.data) setNotes(notesRes.data);
-    if (tagsRes.data) {
-      const mapped = tagsRes.data
-        .filter((ct: Record<string, unknown>) => ct.tags)
-        .map((ct: Record<string, unknown>) => ({
-          ...(ct.tags as Tag),
-          contact_tag_id: ct.id as string,
-        }));
-      setTags(mapped);
-    }
+
   }, [contact]);
 
   // Load on contact change. setContactData/setTags run inside async
@@ -145,20 +140,28 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
     setAddingNote(false);
   }, [contact, newNote, accountId]);
 
-  const handleDeleteAutoNote = useCallback(async (note: ContactNote) => {
-    if (!contact || !accountId || !note.note_text.startsWith("RESUMEN AUTOMÁTICO DE DERIVACIÓN")) return;
-    if (!window.confirm("¿Eliminar este resumen automático?")) return;
+  const canManageNote = (note: ContactNote) => note.user_id === user?.id || accountRole === 'owner' || accountRole === 'admin';
+  async function handleDeleteNote(note: ContactNote) {
+    if (!contact || !accountId || !canManageNote(note)) return;
+    if (!window.confirm('¿Eliminar esta observación?')) return;
     setDeletingNoteId(note.id);
-    const { error } = await createClient().from("contact_notes").delete()
-      .eq("account_id", accountId).eq("contact_id", contact.id).eq("id", note.id);
-    if (error) toast.error("No se pudo eliminar el resumen.");
-    else setNotes((prev) => prev.filter((item) => item.id !== note.id));
+    const {data,error}=await createClient().from('contact_notes').delete().eq('account_id',accountId).eq('contact_id',contact.id).eq('id',note.id).eq('note_text',note.note_text).select('id').single();
+    if(error||!data)toast.error('No se eliminó: puede haber cambiado o no tienes permiso. Actualiza y revisa.');
+    else{setNotes(prev=>prev.filter(item=>item.id!==note.id));if(editingNote?.id===note.id)setEditingNote(null);window.dispatchEvent(new Event('wacrm:contact-notes-updated'));}
     setDeletingNoteId(null);
-  }, [contact, accountId]);
+  }
+  async function handleSaveNote(){
+    if(!editingNote||!contact||!accountId||!editedNote.trim()||!canManageNote(editingNote))return;
+    setSavingNote(true);
+    const {data,error}=await createClient().from('contact_notes').update({note_text:editedNote.trim()}).eq('account_id',accountId).eq('contact_id',contact.id).eq('id',editingNote.id).eq('note_text',editingNote.note_text).select('*').single();
+    if(error||!data)toast.error('No se guardó: la observación cambió o no tienes permiso.');
+    else{setNotes(prev=>prev.map(item=>item.id===data.id?data:item));setEditingNote(null);window.dispatchEvent(new Event('wacrm:contact-notes-updated'));}
+    setSavingNote(false);
+  }
 
   if (!contact) {
     return (
-      <div className={cn("flex h-full items-center justify-center border-l border-border bg-card", mobile ? "w-full" : "w-70")}>
+      <div className={cn("crm-contact-panel flex h-full items-center justify-center border-l border-border bg-card", mobile ? "w-full" : "w-70")}>
         <p className="text-sm text-muted-foreground">{tThread("selectConversation")}</p>
       </div>
     );
@@ -168,12 +171,13 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className={cn("flex h-full flex-col border-l border-border bg-card", mobile ? "w-full" : "w-70")}>
-      <ScrollArea className="flex-1">
-        <div className="p-4">
+    <div className={cn("crm-contact-panel flex h-full min-h-0 flex-col overflow-hidden border-l border-border bg-card", mobile ? "w-full" : "w-70")}>
+      <div className="crm-contact-scroll min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Notas e información del contacto" tabIndex={0}>
+        <div className="crm-contact-content">
+          <div className="crm-contact-heading">Información del contacto</div>
           {/* Contact Info */}
-          <div className="flex flex-col items-center text-center">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-700 text-xl font-bold text-white shadow-xl shadow-sky-500/30">
+          <div className="crm-contact-identity">
+            <div className="crm-contact-avatar flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-700 text-xl font-bold text-white shadow-xl shadow-sky-500/30">
               {contact.avatar_url ? (
                 <img
                   src={contact.avatar_url}
@@ -193,13 +197,13 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
           </div>
 
           {/* Phone */}
-          <div className="mt-4 space-y-2">
+          <div className="crm-contact-phone mt-2 space-y-2">
             <button
               onClick={handleCopyPhone}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
             >
               <Phone className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left text-lg font-semibold tabular-nums text-foreground">{contact.phone}</span>
+              <span className="flex-1 text-left text-sm font-semibold tabular-nums text-foreground">{contact.phone}</span>
               {copied ? (
                 <Check className="h-3 w-3 text-primary" />
               ) : (
@@ -215,40 +219,24 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
             )}
           </div>
 
+          <div className="crm-contact-quick-actions"><a href={`tel:+${contact.phone.replace(/[^0-9]/g, "")}`}><PhoneCall aria-hidden="true"/><span>Llamar</span></a><button type="button" onClick={handleCopyPhone}><Copy aria-hidden="true"/><span>Copiar</span></button><button type="button" onClick={()=>observationInputRef.current?.focus()}><StickyNote aria-hidden="true"/><span>Observación</span></button></div>
           {/* Divider */}
           <div className="my-4 border-t border-border" />
 
           {/* Tags */}
-          <div>
+          <div className="crm-contact-section">
             <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <TagIcon className="h-3 w-3" />
               {tSidebar("tags")}
             </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {tags.length === 0 ? (
-                <p className="px-1 text-xs text-muted-foreground">{tSidebar("noTags")}</p>
-              ) : (
-                tags.map((tag) => (
-                  <span
-                    key={tag.contact_tag_id}
-                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                    style={{
-                      backgroundColor: `${tag.color}20`,
-                      color: tag.color,
-                    }}
-                  >
-                    {tag.name}
-                  </span>
-                ))
-              )}
-            </div>
+            <div className="mt-2"><ContactTagsEditor key={contact.id} contactId={contact.id} conversationId={conversationId} accountId={accountId}/></div>
           </div>
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />
 
           {/* Active Deals */}
-          <div>
+          <div className="crm-contact-section">
             <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <DollarSign className="h-3 w-3" />
               {tSidebar("deals")}
@@ -294,23 +282,25 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
           {conversationId && <ConversationCases key={conversationId} conversationId={conversationId} />}
 
           {/* Notes */}
-          <div>
+          <div className="crm-contact-section">
             <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <StickyNote className="h-3 w-3" />
-              {tSidebar("notes")}
+              Observaciones
             </div>
             <div className="mt-2">
               <div className="flex gap-2">
                 <textarea
+                  ref={observationInputRef}
                   value={newNote}
                   onChange={(e) => setNewNote(e.target.value)}
-                  placeholder={tSidebar("addNotePlaceholder")}
+                  placeholder="Escribe una observación…"
                   rows={2}
                   className="flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-xs text-white placeholder:text-slate-400 outline-none transition-all duration-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 light:border-border light:bg-card light:text-foreground light:placeholder:text-muted-foreground"
                 />
                 <Button
                   size="sm"
                   className="h-10 rounded-xl bg-sky-500 px-3 shadow-lg shadow-sky-500/30 hover:bg-sky-600"
+                  aria-label="Agregar observación"
                   onClick={handleAddNote}
                   disabled={!newNote.trim() || addingNote}
                 >
@@ -322,18 +312,16 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
                 {notes.map((note) => (
                   <div
                     key={note.id}
-                    className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 light:border-border light:bg-card-2"
+                    className={cn("crm-contact-note rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 light:border-border light:bg-card-2", !note.note_number && "crm-contact-summary")}
                   >
-                    {note.note_text.startsWith("RESUMEN AUTOMÁTICO DE DERIVACIÓN") && (
-                      <button type="button" className="float-right ml-2 text-muted-foreground hover:text-destructive"
-                        aria-label="Eliminar resumen automático" disabled={deletingNoteId === note.id}
-                        onClick={() => void handleDeleteAutoNote(note)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <p className="whitespace-pre-wrap text-xs text-muted-foreground">
-                      {note.note_text}
-                    </p>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <strong className="text-xs">{note.note_number ? 'Observación '+note.note_number : 'Resumen automático'}</strong>
+                      {canManageNote(note)&&<div className="flex gap-2">
+                        {note.note_number&&<button type="button" aria-label={'Editar observación '+note.note_number} onClick={()=>{setEditingNote(note);setEditedNote(note.note_text);}}><Pencil className="h-3.5 w-3.5"/></button>}
+                        <button type="button" aria-label={note.note_number?'Eliminar observación '+note.note_number:'Eliminar resumen automático'} disabled={deletingNoteId===note.id} onClick={()=>void handleDeleteNote(note)}><Trash2 className="h-3.5 w-3.5"/></button>
+                      </div>}
+                    </div>
+                    {editingNote?.id===note.id?<div className="space-y-2"><textarea aria-label="Editar texto de observación" value={editedNote} onChange={e=>setEditedNote(e.target.value)} rows={4} className="w-full rounded border bg-background p-2 text-xs"/><div className="flex gap-2"><Button size="sm" disabled={savingNote||!editedNote.trim()} onClick={()=>void handleSaveNote()}>Guardar</Button><Button size="sm" variant="outline" disabled={savingNote} onClick={()=>setEditingNote(null)}>Cancelar</Button></div></div>:<p className="whitespace-pre-wrap text-xs text-muted-foreground">{note.note_text}</p>}
                     <p className="mt-1 text-[10px] text-muted-foreground">
                       {format(new Date(note.created_at), "MMM d, yyyy HH:mm")}
                     </p>
@@ -343,7 +331,8 @@ export function ContactSidebar({ contact, conversationId, mobile = false }: Cont
             </div>
           </div>
         </div>
-      </ScrollArea>
+      </div>
+      <div data-reminder-dock aria-hidden="true" className="crm-reminder-dock"/>
     </div>
   );
 }

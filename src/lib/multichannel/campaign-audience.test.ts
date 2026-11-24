@@ -3,11 +3,11 @@ import type{SupabaseClient}from'@supabase/supabase-js';
 import{resolveCampaignAudience,importCampaignContacts}from'./campaign-audience';
 type Row={id:string;account_id:string;phone:string;phone_normalized:string;name:string};
 function fixture(initial:Row[],race=false){
- const rows=structuredClone(initial),inserted:Record<string,unknown>[][]=[];
+ const rows=structuredClone(initial),inserted:Record<string,unknown>[][]=[],lookupSizes:number[]=[];
  const db={from:()=>({
-  select:()=>{let account='',field='',variants:string[]=[];const query={eq:(_:string,value:string)=>{account=value;return query;},in:(key:string,values:string[])=>{field=key;variants=values;return query;},limit:async()=>({data:rows.filter(row=>row.account_id===account&&variants.includes(row[field as keyof Row])),error:null})};return query;},
+  select:()=>{let account='',field='',variants:string[]=[];const query={eq:(_:string,value:string)=>{account=value;return query;},in:(key:string,values:string[])=>{field=key;variants=values;lookupSizes.push(values.length);return query;},limit:async()=>({data:rows.filter(row=>row.account_id===account&&variants.includes(row[field as keyof Row])),error:null})};return query;},
   insert:async(values:Record<string,unknown>[])=>{inserted.push(values);if(race)return{error:{code:'23505'}};rows.push(...values.map((value,index)=>({id:'new-'+index,account_id:String(value.account_id),phone:String(value.phone),phone_normalized:String(value.phone).replace(/\D/g,''),name:String(value.name)})));return{error:null};},
- })};return{db:db as unknown as SupabaseClient,rows,inserted};
+ })};return{db:db as unknown as SupabaseClient,rows,inserted,lookupSizes};
 }
 describe('campaign contact registration',()=>{
  it('uses exact normalized phones in the current account and preserves existing names',async()=>{
@@ -25,5 +25,14 @@ describe('campaign contact registration',()=>{
  it('reports remaining unknown contacts after a concurrent conflict instead of claiming success',async()=>{
   const f=fixture([],true);const result=await importCampaignContacts(f.db,'own','actor',[{phone:'+51937467119'}]);
   expect(result.remaining).toBe(1);expect(result.recipients[0].status).toBe('not_found');
+ });
+ it('reviews a pasted list of 345 numbers in gateway-safe batches',async()=>{
+  const f=fixture([]);
+  const phones=Array.from({length:345},(_,i)=>`+519${String(i).padStart(8,'0')}`);
+  const result=await resolveCampaignAudience(f.db,'own',phones);
+  expect(result).toHaveLength(345);
+  expect(result.every(row=>row.status==='not_found')).toBe(true);
+  expect(f.lookupSizes).toHaveLength(18);
+  expect(Math.max(...f.lookupSizes)).toBeLessThanOrEqual(120);
  });
 });

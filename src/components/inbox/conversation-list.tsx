@@ -56,14 +56,8 @@ interface ConversationListProps {
   resyncToken?: number;
 }
 
-const STATUS_COLORS: Record<ConversationStatus, string> = {
-  open: 'bg-primary',
-  pending: 'bg-amber-500',
-  closed: 'bg-muted-foreground',
-};
-
 type InboxFilter = ConversationStatus | 'all' | 'unread' | 'unassigned';
-const CONVERSATION_RENDER_BATCH = 150;
+const CONVERSATION_RENDER_BATCH = 60;
 
 export function ConversationList({
   activeConversationId,
@@ -88,6 +82,8 @@ export function ConversationList({
   );
 
   const [search, setSearch] = useState('');
+  const searchInputRef=useRef<HTMLInputElement>(null);
+  useEffect(()=>{const focus=()=>searchInputRef.current?.focus();window.addEventListener('wacrm:focus-inbox-search',focus);if(new URLSearchParams(window.location.search).get('focusSearch')==='1')focus();return()=>window.removeEventListener('wacrm:focus-inbox-search',focus);},[]);
   const [messageSearch, setMessageSearch] = useState<{query:string;ids:string[]}>({query:'',ids:[]});
   useEffect(() => {
     const query=search.trim();if(query.length<2)return;
@@ -102,7 +98,8 @@ export function ConversationList({
   },[search]);
   const [filter, setFilter] = useState<InboxFilter>('all');
   const [visibleLimit, setVisibleLimit] = useState(CONVERSATION_RENDER_BATCH);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => conversations.length===0);
+  const [loadError,setLoadError]=useState(''),[loadAttempt,setLoadAttempt]=useState(0),[loadingOlder,setLoadingOlder]=useState(false);
   // Contact-based filters (issue #272). Tags use OR logic (a conversation
   // matches if its contact carries any selected tag), consistent with
   // Broadcast audience filtering. Company is an exact match on the field.
@@ -129,6 +126,7 @@ export function ConversationList({
     document.addEventListener('keydown', exitSelection, true);
     return () => document.removeEventListener('keydown', exitSelection, true);
   }, [checkedChats.length, labelOpen]);
+  useEffect(()=>{const refresh=()=>setLabelsRevision(v=>v+1);window.addEventListener('wacrm:labels-updated',refresh);return()=>window.removeEventListener('wacrm:labels-updated',refresh);},[]);
   async function applyLabel(remove: boolean, tag: string) {
     setTagBusy(true);
     try {
@@ -144,6 +142,7 @@ export function ConversationList({
         data = await res.json();
       if (!res.ok) throw Error(data.error);
       setLabelsRevision((x) => x + 1);
+      window.dispatchEvent(new Event('wacrm:labels-updated'));
       toast.success(remove ? 'Etiqueta retirada' : 'Chats etiquetados');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo etiquetar');
@@ -177,37 +176,35 @@ export function ConversationList({
     const supabase = createClient();
     let cancelled = false;
 
+    const abort=new AbortController();
     (async () => {
-      const { data, error } = await supabase
-        .from('conversations')
-        .select(CONVERSATION_SELECT)
-        .order('last_message_at', { ascending: false });
-
-      if (cancelled) return;
-
-      if (error) {
-        // Supabase errors have non-enumerable properties — log fields explicitly
-        console.error('Failed to fetch conversations:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code,
-        });
-        setLoading(false);
-        return;
-      }
-
-      onConversationsLoadedRef.current(normalizeConversations(data ?? []).filter(isVisibleInInbox));
-      setLoading(false);
-    })();
-
-    return () => {
-      cancelled = true;
+      const query=()=>supabase.from('conversations').select(CONVERSATION_SELECT).order('last_message_at',{ascending:false});
+      try{
+        const first=await query().limit(CONVERSATION_RENDER_BATCH).abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]));
+        if(first.error)throw first.error;if(cancelled)return;
+        let recent=first.data??[];
+        const requested=new URLSearchParams(window.location.search).get('c');
+        if(requested&&/^[a-f0-9-]{36}$/i.test(requested)&&!recent.some(row=>row.id===requested)){
+          const target=await supabase.from('conversations').select(CONVERSATION_SELECT).eq('id',requested).abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(8000)])).maybeSingle();
+          if(!target.error&&target.data)recent=[target.data,...recent];
+        }
+        if(cancelled)return;
+        onConversationsLoadedRef.current(normalizeConversations(recent).filter(isVisibleInInbox));setLoading(false);setLoadError('');
+        if(first.data?.length!==CONVERSATION_RENDER_BATCH)return;
+        setLoadingOlder(true);
+        const all=await query().abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(30000)]));
+        if(all.error)throw all.error;if(cancelled)return;
+        onConversationsLoadedRef.current(normalizeConversations(all.data??[]).filter(isVisibleInInbox));
+      }catch(error){
+        if(!cancelled){console.error('Failed to fetch conversations:',error);setLoadError('No se pudo completar la carga. Puedes reintentar sin recargar el CRM.');}
+      }finally{if(!cancelled){setLoading(false);setLoadingOlder(false);}}
+    })();    return () => {
+      cancelled = true;abort.abort();
     };
     // `resyncToken` is included so the parent can force a refetch when
     // the realtime channel reconnects or the tab regains focus — catches
     // up on any events sent while the WS was disconnected or throttled.
-  }, [resyncToken, labelsRevision]);
+  }, [resyncToken, labelsRevision, loadAttempt]);
 
   // Tag definitions for the filter picker — refreshed on inbox resynchronization.
   // stay stable regardless of which conversations happen to be loaded.
@@ -327,10 +324,10 @@ export function ConversationList({
     // w-full on mobile so the list occupies the whole viewport when it's
     // the single pane showing; fixed 320px on desktop where it shares the
     // row with the thread + contact sidebar.
-    <div className="border-border bg-card flex h-full min-w-0 w-full flex-col overflow-hidden border-r lg:w-80">
+    <div className="crm-conversation-list border-border bg-card flex h-full min-w-0 w-full flex-col overflow-hidden border-r lg:w-80">
       {/* Search + Filter */}
-      <div className="border-border space-y-2 border-b p-3 lg:space-y-3 lg:p-4">
-        <InboxRecovery onChanged={() => setLabelsRevision(value => value + 1)}/>
+      <div className="crm-conversation-tools border-border space-y-2 border-b p-3 lg:space-y-3 lg:p-4">
+        <div className="crm-list-quick-actions"><InboxRecovery onChanged={() => setLabelsRevision(value => value + 1)}/>
         {canViewPayments && (
           <Link
             href="/payments"
@@ -344,8 +341,9 @@ export function ConversationList({
             )}
           </Link>
         )}
+        </div>
         {(canTag || canClear) && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div aria-label="Acciones de etiquetas" className="flex items-center gap-1 overflow-x-auto [&_button]:!h-5 [&_button]:!shrink-0 [&_button]:!px-1 [&_button]:!text-[9px] [&_svg]:!size-3">
             {canTag && <Button
               variant="outline"
               size="sm"
@@ -378,7 +376,7 @@ export function ConversationList({
               </Button>
             )}
             {checkedChats.length > 0 && tags.filter((tag) => checkedTagCounts.has(tag.id)).map((tag) => (
-              <button key={tag.id} type="button" title={`${tag.name} · ${checkedTagCounts.get(tag.id)}/${checkedChats.length} seleccionados`} disabled={tagBusy} onClick={() => void applyLabel(true, tag.id)} aria-label={`Retirar ${tag.name} de los chats seleccionados`} className="inline-flex h-6 max-w-36 items-center gap-1 rounded-full border px-2 text-[10px]" style={{ color: tag.color }}>
+              <button key={tag.id} type="button" title={`${tag.name} · ${checkedTagCounts.get(tag.id)}/${checkedChats.length} seleccionados`} disabled={tagBusy} onClick={() => void applyLabel(true, tag.id)} aria-label={`Retirar ${tag.name} de los chats seleccionados`} className="inline-flex h-5 w-20 shrink-0 items-center gap-0.5 rounded-full border px-1 text-[9px]" style={{ color: tag.color }}>
                 <span className="truncate">{tag.name}</span><span className="shrink-0">{checkedTagCounts.get(tag.id)}/{checkedChats.length}</span><X className="h-3 w-3 shrink-0" />
               </button>
             ))}
@@ -387,6 +385,8 @@ export function ConversationList({
         <div className="relative">
           <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
           <Input
+            ref={searchInputRef}
+            aria-label="Buscar conversaciones"
             value={search}
             onChange={handleSearchChange}
             placeholder={t('searchPlaceholder')}
@@ -555,6 +555,8 @@ export function ConversationList({
         )}
       </div>
 
+      {loadError&&<div role="alert" className="border-b border-amber-500/30 p-2 text-xs"><p>{loadError}</p><button type="button" className="mt-1 rounded border px-2 py-1" onClick={()=>setLoadAttempt(x=>x+1)}>Reintentar carga</button></div>}
+      {loadingOlder&&<p role="status" className="px-2 py-1 text-[11px] text-muted-foreground">Cargando conversaciones anteriores…</p>}
       {/* Conversation Items.
           `min-h-0` is load-bearing: a flex child defaults to
           min-height:auto, so without it this ScrollArea grows to fit
@@ -573,11 +575,11 @@ export function ConversationList({
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-3 px-3 py-3">
+          <div className="crm-conversation-rows flex flex-col gap-1 p-1">
             {visibleConversations.map((conv,index) => (
               <div
                 key={conv.id}
-                className="flex flex-wrap items-center"
+                className="crm-conversation-row flex items-center"
                 onContextMenu={(e) => {
                   if (!canTag) return;
                   e.preventDefault();
@@ -705,8 +707,9 @@ function ConversationItem({
   return (
     <button
       onClick={handleClick}
+      aria-current={isActive ? "true" : undefined}
       className={cn(
-        'group mx-2 my-1.5 flex w-[calc(100%-16px)] items-start gap-3 rounded-2xl px-4 py-3 text-left transition-all duration-200 hover:scale-[1.01] hover:bg-slate-800/70 hover:shadow-xl hover:shadow-sky-500/10 light:hover:bg-sky-50 light:hover:shadow-sm',
+        'crm-conversation-item group mx-2 my-1.5 flex w-[calc(100%-16px)] items-start gap-3 rounded-2xl px-4 py-3 text-left transition-all duration-200 hover:scale-[1.01] hover:bg-slate-800/70 hover:shadow-xl hover:shadow-sky-500/10 light:hover:bg-sky-50 light:hover:shadow-sm',
         isActive &&
           'border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent shadow-[0_12px_32px_rgba(14,165,233,.22)] light:from-secondary light:via-card-2 light:to-card light:shadow-sm'
       )}
@@ -768,24 +771,17 @@ function ConversationItem({
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
             {conversation.unread_count > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-sky-500 px-1.5 text-[10px] font-bold text-white shadow-lg shadow-sky-500/40">
-                {conversation.unread_count}
-              </span>
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf866]" aria-label="Conversación no leída" title="No leído" style={{width:10,height:10,minWidth:10,minHeight:10,padding:0,lineHeight:0}} />
             )}
-            <span
-              className={cn(
-                'h-2.5 w-2.5 rounded-full ring-2 ring-slate-900',
-                STATUS_COLORS[conversation.status]
-              )}
-              title={conversation.status}
-            />
+            <span className="sr-only">Estado: {conversation.status}</span>
           </div>
         </div>
         <div className="mt-1 flex flex-wrap gap-1">
           {contact?.tags?.slice(0, 3).map((tag) => (
             <span
               key={tag.id}
-              className="max-w-36 truncate rounded-full px-2 py-0.5 text-[10px]"
+              title={tag.name}
+              className="inline-block h-5 w-20 truncate rounded-full px-1.5 text-[9px] leading-5"
               style={{ color: tag.color, backgroundColor: tag.color + '20' }}
             >
               {tag.name}

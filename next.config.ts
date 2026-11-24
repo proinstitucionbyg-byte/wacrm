@@ -50,6 +50,9 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Production checks the application and its imported dependencies; auxiliary
+  // audits/fixtures keep their own checks instead of entering every web build.
+  typescript: { tsconfigPath: "tsconfig.build.json", ignoreBuildErrors: false },
 
   async headers() {
     return [

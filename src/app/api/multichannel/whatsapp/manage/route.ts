@@ -21,7 +21,7 @@ export async function POST(request:Request){
   let acknowledged:string|null=null;
   if(input.data.completed){
    const done=input.data.completed;
-   const saved=await db.from('whatsapp_management_commands').update({status:done.status,result:done.result,finished_at:new Date().toISOString(),lease_until:null}).eq('id',done.id).eq('worker_id',id).eq('account_id',account_id).eq('status','running').select('id').maybeSingle();
+   const saved=await db.from('whatsapp_management_commands').update({status:done.status,result:done.result,...(done.result_data!==undefined?{result_data:done.result_data}:{}),finished_at:new Date().toISOString(),lease_until:null}).eq('id',done.id).eq('worker_id',id).eq('account_id',account_id).eq('status','running').select('id').maybeSingle();
    if(saved.error)throw saved.error;
    if(saved.data)acknowledged=done.id;
    else{const previous=await db.from('whatsapp_management_commands').select('status').eq('id',done.id).eq('worker_id',id).eq('account_id',account_id).maybeSingle();if(previous.error)throw previous.error;if(previous.data&&['done','error','needs_review'].includes(previous.data.status))acknowledged=done.id;}

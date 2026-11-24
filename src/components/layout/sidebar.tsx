@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import {activeWorkspacePath} from "@/lib/workspace-navigation";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
@@ -15,7 +16,10 @@ import {
   CheckCheck,
   Bot,
   Crown,
+  DollarSign,
+  FileText,
   GitBranch,
+  GraduationCap,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -111,9 +115,10 @@ const navItems: NavItem[] = [
     permission: ["inbox", "view"],
   },
   { href: "/payments", labelKey: "", label: "Validación de pagos", icon: CheckCheck, permission: ["payments", "view"] },
-  { href: "/enrollments", labelKey: "", label: "Registro de matrículas", icon: Users, permission: ["enrollments", "view"] },
+  { href: "/enrollments", labelKey: "", label: "Registro de matrículas", icon: GraduationCap, permission: ["enrollments", "view"] },
   { href: "/team-chat", labelKey: "", label: "Chat interno", icon: UsersRound, permission: ["inbox", "view"] },
   {href:'/reports',labelKey:'',label:'Estadísticas de primeras frases',icon:LayoutDashboard,ownerOnly:true},
+  {href:'/whatsapp-billing',labelKey:'',label:'Costos de WhatsApp',icon:DollarSign,ownerOnly:true},
   {href:'/multichannel',labelKey:'',label:'Bot multicanal',icon:Bot,ownerOnly:true},
   {
     href: "/notifications",
@@ -143,6 +148,13 @@ const navItems: NavItem[] = [
     href: "/automations",
     labelKey: "automations",
     icon: Zap,
+    permission: ["automations", "view"],
+  },
+  {
+    href: "/automations/media",
+    labelKey: "",
+    label: "Mis archivos",
+    icon: FileText,
     permission: ["automations", "view"],
   },
   {
@@ -247,7 +259,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
       <aside
       className={cn(
-        "fixed inset-y-0 left-0 z-40 flex h-full w-72 flex-col border-r border-sky-900/40 bg-[#0B1220] shadow-[30px_0_80px_rgba(0,0,0,.35)] backdrop-blur-xl light:border-sidebar-border light:bg-sidebar light:shadow-[12px_0_32px_rgba(29,78,121,.07)]",
+        "crm-sidebar fixed inset-y-0 left-0 z-40 flex h-full w-72 flex-col border-r border-sky-900/40 bg-[#0B1220] shadow-[30px_0_80px_rgba(0,0,0,.35)] backdrop-blur-xl light:border-sidebar-border light:bg-sidebar light:shadow-[12px_0_32px_rgba(29,78,121,.07)]",
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
           // Desktop: static, always visible — reset all the mobile framing.
@@ -258,7 +270,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Logo row. On mobile we put a close button here; on desktop the
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-          <Link href="/dashboard" className="flex w-full items-center">
+          <Link prefetch={false} href="/dashboard" className="flex w-full items-center">
 
 
   <div className="flex h-12 items-center">
@@ -291,9 +303,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       (!item.ownerOnly || accountRole === 'owner') && (item.href !== '/team-chat' || accountRole !== 'viewer') && (!item.permission || can(item.permission[0], item.permission[1])),
   )
   .map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/dashboard" && pathname.startsWith(item.href));
+              const isActive = activeWorkspacePath(pathname,navItems.map(entry=>entry.href)) === item.href;
 
               const showUnreadDot =
                 item.href === "/inbox" && totalUnread > 0 && !isActive;
@@ -308,10 +318,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
               return (
                 <li key={item.href}>
-                  <Link
+                  <Link prefetch={false}
                     href={item.href}
+                    data-workspace-route={item.href}
+                    aria-current={isActive ? "page" : undefined}
                     className={cn(
-  "group flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200",
+  "crm-nav-link group flex items-center gap-4 rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200",
   isActive
   ? "border-l-4 border-sky-400 bg-gradient-to-r from-sky-500/15 to-transparent text-white shadow-[0_8px_24px_rgba(14,165,233,.15)] light:from-secondary light:to-card light:text-sky-900 light:shadow-none"
   : "text-slate-400 hover:bg-slate-800/40 hover:text-white light:text-slate-600 light:hover:bg-sky-50 light:hover:text-sky-900"
@@ -327,7 +339,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 />
                     <span
   className={cn(
-    "flex-1 transition-colors",
+    "crm-nav-label flex-1 transition-colors",
     isActive
   ? "font-semibold text-white light:text-sky-900"
   : "text-slate-300 group-hover:text-white light:text-slate-600 light:group-hover:text-sky-900"
@@ -383,10 +395,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               const isActive = pathname.startsWith(item.href);
               return (
                 <li key={item.href}>
-                  <Link
+                  <Link prefetch={false}
                     href={item.href}
+                    data-workspace-route={item.href}
+                    aria-current={isActive ? "page" : undefined}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                      "crm-nav-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
                       isActive
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -470,7 +484,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             >
               <DropdownMenuItem
                 render={
-                  <Link
+                  <Link prefetch={false}
                     href="/settings?tab=profile"
                     onClick={onClose}
                     className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
@@ -482,7 +496,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               </DropdownMenuItem>
               <DropdownMenuItem
                 render={
-                  <Link
+                  <Link prefetch={false}
                     href="/settings?tab=whatsapp"
                     onClick={onClose}
                     className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"

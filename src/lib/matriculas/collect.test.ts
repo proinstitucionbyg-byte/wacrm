@@ -138,3 +138,13 @@ describe('scoped enrollment collection', () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+it('preserves staff-confirmed identity while reading later chat',async()=>{
+ const manual={full_name:'ESTUDIANTE CONFIRMADO',document_type:'DNI',document_number:'12345678',email:'confirmado@example.com',phone1:'51987020644',declaration_message_ids:['manual'],identity_confirmed:false};
+ drafts=[{id:'draft',review_id:'review',version:2,data:manual}];
+ const upload={select:()=>upload,eq:()=>upload,in:()=>upload,then:(resolve:(r:unknown)=>void)=>Promise.resolve({data:[{id:'manual',image_analysis:{category:'staff_confirmed_identity',fields:manual}}],error:null}).then(resolve)};
+ from.mockImplementation((table:string)=>table==='enrollment_uploads'?upload:chain);
+ limit.mockResolvedValue({data:[{id:'photo',sender_type:'customer',image_analysis:{category:'identity_document',fields:{full_name:'OTRA LECTURA',document_number:'87654321'}}}],error:null});
+ await collectConversationEnrollments(db,'account','conversation');
+ expect(syncPaidEnrollmentHandoff).toHaveBeenCalledWith(db,'account','conversation','draft',expect.objectContaining({full_name:'ESTUDIANTE CONFIRMADO',document_number:'12345678',declaration_message_ids:['manual']}));
+});

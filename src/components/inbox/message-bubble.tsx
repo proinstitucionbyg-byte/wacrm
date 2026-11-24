@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PersistentMessageAudio } from "@/components/media/workspace-audio";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
 import {
@@ -240,7 +241,7 @@ function MediaImage({
     <img
   src={src ?? ""}
   alt={alt}
-  className="max-h-72 max-w-72 rounded-2xl object-cover cursor-pointer shadow-lg"
+  className="crm-chat-image max-h-72 max-w-72 rounded-2xl object-contain cursor-pointer shadow-lg"
   onClick={() => {
     if (src) onOpen(src);
   }}
@@ -312,7 +313,7 @@ function MessageContent({
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <PersistentMessageAudio id={message.id} src={message.media_url} label={message.sender_type === "customer" ? "Audio recibido" : "Audio enviado"}/>
           ) : (
             <MediaUnavailable label={t("audio")} t={t} />
           )}
@@ -447,9 +448,9 @@ className={cn(
   console.log("DESPUÉS");
 }}
 >
-      <div
+      <div data-message-direction={isAgent ? "outgoing" : "incoming"}
   className={cn(
-    "relative min-w-0 max-w-full [overflow-wrap:anywhere] rounded-3xl px-4 py-3 shadow-lg",
+    "crm-message-bubble relative min-w-0 max-w-full [overflow-wrap:anywhere] rounded-3xl px-4 py-3 shadow-lg",
     isAgent
       ? "rounded-br-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/20"
       : "rounded-bl-lg border border-slate-700 bg-slate-900/70 text-white light:border-border light:bg-card light:text-foreground light:shadow-sm",

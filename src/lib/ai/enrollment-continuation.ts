@@ -1,11 +1,11 @@
+import {activeConversationPayments} from '@/lib/automations/test-session'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /** A pending or approved enrollment payment blocks another payment request until registration documents are complete. */
 export async function hasUnfinishedEnrollmentPayment(
   db: SupabaseClient, accountId: string, conversationId: string,
 ): Promise<boolean> {
-  const { data: review, error: reviewError } = await db.from('payment_reviews')
-    .select('id,status').eq('account_id', accountId).eq('conversation_id', conversationId)
+  const { data: review, error: reviewError } = await activeConversationPayments(db,accountId,conversationId)
     .eq('payment_purpose', 'enrollment').in('status', ['pending', 'validated'])
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (reviewError) throw reviewError
@@ -36,8 +36,7 @@ export async function paidEnrollmentContinuation(
 ): Promise<string | null> {
   if (!/\b(?:sigamos|continuemos|continuar|seguir|sigue|ya pagu[eé]|ya hice el pago)\b/i.test(text)
       || !/inscripci[oó]n|matr[ií]cula|registro|pag[ou]/i.test(text)) return null
-  const { data, error } = await db.from('payment_reviews')
-    .select('status').eq('account_id', accountId).eq('conversation_id', conversationId)
+  const { data, error } = await activeConversationPayments(db,accountId,conversationId)
     .eq('payment_purpose', 'enrollment').in('status', ['pending', 'validated'])
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (error) throw error

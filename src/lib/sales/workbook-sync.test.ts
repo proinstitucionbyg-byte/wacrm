@@ -135,16 +135,16 @@ describe('commercial workbook synchronization', () => {
     expect(writes).toHaveLength(2);
     expect(writes.every((w)=>((w[0] as number[])[1]+(w[0] as number[])[3]-1)<=6)).toBe(true);
   });
-  it('creates and reuses 100 isolated personal bases without sharing permissions', () => {
+  it('creates and reuses 100 isolated personal bases with access only for each matching adviser', () => {
     const c=context();
-    const advisers=Array.from({length:100},(_,i)=>({user_id:`staff-${i}`,name:'ANA',active_for_sales:true}));
+    const advisers=Array.from({length:100},(_,i)=>({user_id:`staff-${i}`,name:'ANA',email:`ana${i}@example.com`,active_for_sales:true}));
     const leads=advisers.map((a,i)=>({id:`contact-${i}`,assigned_adviser_id:a.user_id}));
     const master=leads.map((lead,i)=>Array.from({length:30},(_,col)=>col===16?lead.id:col===1?`PERSON ${i}`:''));
     const directoryRows=advisers.map(a=>[a.user_id,a.name,'','','','Activo','','']);
     const directory={getRange:(r:number,col:number)=>({getDisplayValues:()=>directoryRows,setValue:(v:string)=>{directoryRows[r-3][col-1]=v;}})};
     const main={getLastRow:()=>102,getRange:(r:number,col:number,n=1,w=1)=>({getDisplayValues:()=>master.map(row=>row.slice(0,17)),getValues:()=>r===2?[Array(30).fill('Header')]:master,getDataValidation:()=>({}),setValue:()=>{}})};
     const ss={getId:()=> 'general',getSheetByName:(name:string)=>name==='BASE GENERAL'?main:null};
-    const books=new Map<string,unknown>();
+    const books=new Map<string,unknown>();const driveFiles=new Map<string,{editors:string[],viewers:string[],addEditor:ReturnType<typeof vi.fn>,removeEditor:ReturnType<typeof vi.fn>}>();
     function createBook() {
       const cells=new Map<string,unknown>(); let last=0;
       const sheet:Record<string,unknown>={getLastRow:()=>last,getMaxColumns:()=>30,setName:()=>sheet};
@@ -161,9 +161,12 @@ describe('commercial workbook synchronization', () => {
       for(const method of ['setFrozenRows','hideColumns','setHiddenGridlines','setColumnWidth'])sheet[method]=()=>sheet;
       const id=`private-${books.size}`;
       const book={getId:()=>id,getUrl:()=>`https://docs.google.com/spreadsheets/d/${id}/edit`,getSheets:()=>[sheet],getSheetByName:()=>sheet,cells};
+      const file={editors:[] as string[],viewers:[] as string[],getSharingAccess:()=> 'PRIVATE',getEditors:()=>file.editors.map(email=>({getEmail:()=>email})),getViewers:()=>file.viewers.map(email=>({getEmail:()=>email})),addEditor:vi.fn((email:string)=>{file.editors.push(email);}),removeEditor:vi.fn((email:string)=>{file.editors=file.editors.filter(value=>value!==email);}),setShareableByEditors:vi.fn()};
+      driveFiles.set(id,file);
       books.set(id,book);return book;
     }
     const create=vi.fn(createBook); c.SpreadsheetApp={create,openById:(id:string)=>books.get(id)};
+    c.DriveApp={Access:{PRIVATE:'PRIVATE'},getFileById:(id:string)=>driveFiles.get(id)};
     const props=properties();
     c.syncSalesPersonalBases_(ss,directory,advisers,leads,props);
     c.syncSalesPersonalBases_(ss,directory,advisers,leads,props);
@@ -178,6 +181,17 @@ describe('commercial workbook synchronization', () => {
       expect(cells.get('3:17')).toBe(`contact-${i}`);
       expect(cells.get('1:17')).toBe(`ASESORA CRM:staff-${i}`);
     });
+    [...driveFiles.values()].forEach((file,i)=>expect(file.editors).toEqual([`ana${i}@example.com`]));
+    expect([...driveFiles.values()].every(file=>file.addEditor.mock.calls.length===1)).toBe(true);
+  });
+  it('removes only the tracked adviser access when the adviser is deactivated and keeps the base', () => {
+    const c=context();const file:{removed:string[];getSharingAccess:()=>string;removeEditor:(email:string)=>void}={removed:[],getSharingAccess:()=> 'PRIVATE',removeEditor(email){file.removed.push(email);}};
+    const props=properties({'SALES_PERSONAL_BOOK:staff-1':'personal-1','SALES_PERSONAL_ACCESS_EMAIL:staff-1':'ana@example.com'});
+    c.DriveApp={Access:{PRIVATE:'PRIVATE'},getFileById:vi.fn(()=>file)};
+    expect(c.revokeInactiveSalesPersonalAccess_([{user_id:'staff-1',active_for_sales:false}],props)).toBe(1);
+    expect(file.removed).toEqual(['ana@example.com']);
+    expect(props.getProperty('SALES_PERSONAL_BOOK:staff-1')).toBe('personal-1');
+    expect(props.getProperty('SALES_PERSONAL_ACCESS_EMAIL:staff-1')).toBeNull();
   });
   it('refuses to overwrite a personal edit after a failed status upload', () => {
     const c=context(); c.UrlFetchApp={fetch:()=>({getResponseCode:()=>403})};

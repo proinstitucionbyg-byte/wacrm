@@ -185,7 +185,7 @@ describe('Documentos de matricula', () => {
     for (const metodo of ['YAPE', 'Plin', 'Yape/Plin'])
       expect(run(`D_METODO('${metodo}')`)).toBe('Yape/Plin');
     expect(run("D_METODO('TRANSFERENCIA/DEPÓSITO')")).toBe(
-      'Tranferencia/Depósito'
+      'Transferencia/Depósito'
     );
     expect(run("D_METODO('EFECTIVO')")).toBe('Efectivo');
     expect(run("D_METODO('MERCADO PAGO')")).toBe('Mercado Pago');

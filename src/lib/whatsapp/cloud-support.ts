@@ -6,9 +6,11 @@ import type {InteractiveMessagePayload} from './interactive';
 import {isSalesInquiry} from '@/lib/sales/attribution';
 import {readConversationBillingPreflight} from './billing-runtime';
 import {enqueueSupportWait,pendingSupportWait} from './cloud-support-wait';
+import {pauseNoncampaignFidelity} from './noncampaign-fidelity';
 
 /** A Cloud customer message stays a Cloud source. Only its reply changes line. */
 export async function routeCloudSupportOpening(db:SupabaseClient,args:{accountId:string;conversationId:string;contactId:string;userId:string;messageId:string;hasConfirmedAdOrigin:boolean;contentText?:string|null;interactiveReplyId?:string|null;isFirstInboundMessage?:boolean;contactCreated?:boolean;metaWaitExpired?:boolean}):Promise<boolean>{
+ if(await pauseNoncampaignFidelity(db,{...args,channel:'cloud'}))return true;
  if(process.env.MULTICHANNEL_CLOUD_SUPPORT_ENABLED!=='true'||args.hasConfirmedAdOrigin)return false;
  const policy=await db.from('whatsapp_support_routes').select('enabled').eq('account_id',args.accountId).maybeSingle();
  if(policy.error)throw Error('No se pudo verificar la ruta de soporte; no se enviará por Cloud.');

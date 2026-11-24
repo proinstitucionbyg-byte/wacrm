@@ -5,6 +5,7 @@ import {
   parseEnrollmentData,
   enrollmentIssues,
 } from '@/lib/matriculas/enrollment';
+import { manualEvidenceMatches } from '@/lib/matriculas/manual-evidence';
 import { declarationEvidence } from '@/lib/matriculas/identity-evidence';
 
 export async function GET(
@@ -45,7 +46,7 @@ export async function GET(
     if (documentsError) throw documentsError;
     return NextResponse.json({
       draft,
-      images: [...(images??[]),...(uploads??[]).filter(file=>file.kind!=='voucher').map(file=>({...file,media_url:`/api/enrollments/uploads/${file.id}`}))],
+      images: [...(images??[]),...(uploads??[]).filter(file=>['front','back'].includes(file.kind)).map(file=>({...file,media_url:`/api/enrollments/uploads/${file.id}`}))],
       documents: documents ?? [],
       issues: enrollmentIssues(draft.data),
     });
@@ -111,10 +112,11 @@ export async function PATCH(
     if (data.declaration_message_ids?.length) {
       const {data: declarations,error: declarationError}=await ctx.supabase.from('messages').select('id,content_text').eq('conversation_id',existing.conversation_id).eq('sender_type','customer').eq('content_type','text').in('id',data.declaration_message_ids);
       if (declarationError) throw declarationError;
-      const {data:manual,error:manualError}=await ctx.supabase.from('enrollment_uploads').select('id').eq('account_id',ctx.accountId).eq('review_id',existing.review_id).in('id',data.declaration_message_ids).eq('kind','declaration');
+      const {data:manual,error:manualError}=await ctx.supabase.from('enrollment_uploads').select('id,image_analysis').eq('account_id',ctx.accountId).eq('review_id',existing.review_id).in('id',data.declaration_message_ids).eq('kind','declaration');
       if(manualError)throw manualError;
+      if (manual?.some(file => file.image_analysis?.category === 'staff_confirmed_identity' && !manualEvidenceMatches(data, file.image_analysis))) return NextResponse.json({error:'Cambiaste nombre, documento o correo. Confirma de nuevo los datos por llamada u otro WhatsApp para actualizar el respaldo.'},{status:400});
       if ((declarations?.length??0)+(manual?.length??0) !== data.declaration_message_ids.length || (declarations?.length&&declarationEvidence(data,declarations).length !== declarations.length))
-        return NextResponse.json({error:'El respaldo debe contener nombre, documento y correo escritos por el estudiante en este chat.'},{status:400});
+        return NextResponse.json({error:'Los mensajes elegidos no contienen los datos actuales. Usa «Datos por llamada / otro WhatsApp» para confirmarlos sin captura, o adjunta otro respaldo.'},{status:400});
     }
     if (data.guardian_message_ids?.length) {
       const {data: guardians,error: guardianError}=await ctx.supabase.from('messages').select('id,image_analysis').eq('conversation_id',existing.conversation_id).eq('sender_type','customer').eq('content_type','image').in('id',data.guardian_message_ids);

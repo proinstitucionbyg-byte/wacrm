@@ -2,6 +2,7 @@ import { requireApiKey } from '@/lib/auth/api-context';
 import { ApiError, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api';
+import { SESSION_MEDIA_BUCKET } from '@/lib/whatsapp/session-received-media';
 import { declarationImage } from '@/lib/matriculas/declaration-image';
 import { isSocialChannel } from '@/lib/social/meta-api';
 import { readSocialImage } from '@/lib/social/storage';
@@ -44,7 +45,7 @@ export async function GET(
     const declarationIds: string[] = draft.data?.declaration_message_ids ?? [];
     const guardianIds: string[] = draft.data?.guardian_message_ids ?? [];
     let upload:{storage_path:string;mime_type:string;kind:string}|null=null;
-    if(!review?.message_id){const result=await ctx.supabase.from('enrollment_uploads').select('storage_path,mime_type,kind').eq('id',messageId).eq('account_id',ctx.accountId).eq('review_id',draft.review_id).maybeSingle();if(result.error)throw result.error;upload=result.data;}
+    {const result=await ctx.supabase.from('enrollment_uploads').select('storage_path,mime_type,kind').eq('id',messageId).eq('account_id',ctx.accountId).eq('review_id',draft.review_id).maybeSingle();if(result.error)throw result.error;upload=result.data;}
     if (
       review?.status !== 'validated' ||
       (messageId !== review.message_id && !identityIds.includes(messageId) && !declarationIds.includes(messageId) && !guardianIds.includes(messageId) && upload?.kind!=='voucher')
@@ -63,6 +64,12 @@ export async function GET(
       return declarationImage(message);
     }
     if (message?.content_type !== 'image') throw new ApiError('not_found', 'Imagen no disponible',404);
+    if(message.media_url===`/api/whatsapp/session-media/${messageId}`){
+      const file=await ctx.supabase.storage.from(SESSION_MEDIA_BUCKET).download(`${ctx.accountId}/${messageId}`);
+      if(file.error||!file.data)throw new ApiError('not_found','Archivo de WhatsApp pendiente de sincronizar',404);
+      if(!['image/jpeg','image/png','image/webp'].includes(file.data.type.split(';')[0])||file.data.size>10*1024*1024)throw new ApiError('bad_request','Formato o tamaño de imagen no permitido',400);
+      return new Response(file.data,{headers:{'Content-Type':file.data.type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
+    }
     if (!message.media_url?.startsWith('/api/whatsapp/media/')) {
       const { data: conversation } = await ctx.supabase.from('conversations').select('contact:contacts(channel)')
         .eq('id', draft.conversation_id).eq('account_id', ctx.accountId).maybeSingle();

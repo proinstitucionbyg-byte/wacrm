@@ -104,9 +104,10 @@ export async function POST(request: Request) {
         .eq('id', message.data.conversation_id).eq('account_id', worker.data.account_id).maybeSingle();
       if (conversation.error || !conversation.data) throw conversation.error ?? new Error('Conversation unavailable');
 
+      let preparedCommand: {requestId:string;actorId:string;automationId:string}|undefined;
       let interactiveReplyId:string|null=null;
       let dispatchText=message.data.content_text;
-      if(/^(?:[1-9]|10)$/.test(parsed.data.text.trim())){
+      if(parsed.data.text.trim()){
         const menu=await db.rpc('resolve_whatsapp_session_menu_reply',{
           p_worker_id:worker.data.id,p_line_key:parsed.data.line_key,
           p_conversation_id:conversation.data.id,p_inbound_row_id:receipt.data.message_row_id,
@@ -117,6 +118,13 @@ export async function POST(request: Request) {
           if(typeof menu.data.reply_title!=='string'||!menu.data.reply_title.trim())throw Error('Menu title unavailable');
           interactiveReplyId=menu.data.reply_id;
           dispatchText=menu.data.reply_title;
+          if (typeof menu.data.command_run_id === 'string') {
+            const command = await db.from('inbox_command_runs').select('id,actor_id,automation_id')
+              .eq('id',menu.data.command_run_id).eq('account_id',worker.data.account_id)
+              .eq('conversation_id',conversation.data.id).in('status',['started','launched']).maybeSingle();
+            if(command.error)throw command.error;
+            if(command.data)preparedCommand={requestId:command.data.id,actorId:command.data.actor_id,automationId:command.data.automation_id};
+          }
         }
       }
 
@@ -130,6 +138,7 @@ export async function POST(request: Request) {
         messageId: message.data.message_id,
         contentText: dispatchText,
         interactiveReplyId,
+        preparedCommand,
         isFirstInboundMessage: receipt.data.is_first_inbound,
         previousInboundAt: receipt.data.previous_inbound_at ?? undefined,
         inboundAt: message.data.created_at,

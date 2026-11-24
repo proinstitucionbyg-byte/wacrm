@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import {LiveCampaignManager} from './live-campaign-manager';
+import {CampaignWorkspaceHeading} from '@/components/layout/workspace-page-heading';
+import {LayoutGrid,Smartphone} from 'lucide-react';
 import {SessionLineManager} from './session-line-manager';
 import type { previewCampaign } from '@/lib/multichannel/campaign-preview';
 import type { previewCentralCampaign } from '@/lib/multichannel/central-campaign';
@@ -32,6 +34,7 @@ export function CampaignManager() {
   const [interval,setInterval]=useState(20); const [limit,setLimit]=useState(100);
   const [template,setTemplate]=useState('Hola {{nombre}}, este es un aviso de prueba.');
   const [list,setList]=useState('ID\tDestino\tNombre\tPermiso\tPago\n');
+  const [workspaceTab,setWorkspaceTab]=useState<'campaigns'|'lines'>('campaigns');
   const [preview,setPreview]=useState<Preview|null>(null);
   const [error,setError]=useState(''); const [notice,setNotice]=useState('');
   const [busy,setBusy]=useState(false); const [saved,setSaved]=useState(false);
@@ -147,12 +150,14 @@ export function CampaignManager() {
     const day=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(job.run_at));
     (days[day]??=[]).push(job);return days;
   },{})).sort(([a],[b])=>a.localeCompare(b));
-  return <div className="mx-auto w-full max-w-6xl space-y-5 p-4 sm:p-6">
-    <SessionLineManager/>
-    <LiveCampaignManager/>
-    <header className="space-y-2"><h1 className="text-xl font-semibold">Bot multicanal</h1>
-      <p className="text-sm text-muted-foreground">Prepara campañas y revisa sus pendientes.</p>
-      <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">Modo de prueba. Esta pantalla prepara simulaciones; no envía SMS ni WhatsApp. La conexión de los teléfonos se comprueba por separado.</p>
+  return <div className="crm-campaign-workspace w-full min-w-0 space-y-5">
+    <CampaignWorkspaceHeading actions={<nav className="crm-workspace-tabs" aria-label="Apartados del bot"><button type="button" aria-pressed={workspaceTab==='campaigns'} onClick={()=>setWorkspaceTab('campaigns')}><LayoutGrid/>Campañas</button><button type="button" aria-pressed={workspaceTab==='lines'} onClick={()=>setWorkspaceTab('lines')}><Smartphone/>WhatsApps vinculados</button></nav>}/>
+    
+    <div hidden={workspaceTab!=='lines'}><SessionLineManager active={workspaceTab==='lines'}/></div>
+    <div hidden={workspaceTab!=='campaigns'}><LiveCampaignManager/></div>
+    <details className="space-y-4 rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Herramientas de prueba · no envían mensajes</summary>
+    <header className="space-y-2"><h2 className="text-lg font-semibold">Simulaciones</h2>
+      <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">Este apartado prepara simulaciones; no envía SMS ni WhatsApp. Las campañas reales se gestionan arriba.</p>
     </header>
     <form onSubmit={prepare} className="space-y-4" onChange={changed}>
       <fieldset disabled={busy} className="space-y-4 rounded-xl border border-border bg-card p-4">
@@ -211,5 +216,6 @@ export function CampaignManager() {
       {jobs&&queueView==='calendar'&&<div className="max-h-64 space-y-3 overflow-auto"><div className="flex flex-wrap items-end gap-2"><label className="space-y-1 text-sm">Mes · hora de Lima<input type="month" className={style} value={calendarMonth} onChange={e=>{setCalendarMonth(e.target.value);void loadQueue(e.target.value)}}/></label><button type="button" className={button} disabled={loadingQueue||!calendarMonth} onClick={()=>{void loadQueue(calendarMonth)}}>{loadingQueue?'Consultando…':'Consultar mes'}</button></div>{calendarDays.map(([day,items])=><section key={day} className="rounded-lg border border-border p-3"><div className="flex justify-between text-sm font-medium"><h4>{new Intl.DateTimeFormat('es-PE',{timeZone:'America/Lima',weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date(`${day}T12:00:00-05:00`))}</h4><span>{items.length} {items.length===1?'trabajo':'trabajos'}</span></div><ul className="mt-2 space-y-1 text-xs">{items.sort((a,b)=>a.run_at.localeCompare(b.run_at)).map(job=><li key={job.id} className="flex flex-wrap justify-between gap-2 border-t border-border py-2"><span>{when(job.run_at)} · {job.recipient}</span><span>{labels[job.status]??job.status}</span></li>)}</ul></section>)}{calendarHasMore&&<button type="button" className={button} disabled={loadingQueue} onClick={()=>{void loadQueue(calendarMonth,calendarPage+1,true)}}>{loadingQueue?'Cargando…':'Cargar siguientes 500'}</button>}{!calendarDays.length&&<p className="p-2 text-sm">No hay horarios guardados para este mes.</p>}<p className="text-xs text-muted-foreground">Trabajos de la cola de prueba, filtrados por el mes elegido y agrupados en hora de Lima. No sincroniza ni envía desde el calendario.</p></div>}
       <p className="text-xs text-muted-foreground">Actualización manual. Simulado significa prueba completada; no significa SMS entregado.</p>
     </section>
+    </details>
   </div>;
 }

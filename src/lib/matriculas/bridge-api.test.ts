@@ -74,3 +74,11 @@ describe('authenticated Google enrollment bridge',()=>{
     expect((await submit(request({version:1}),context())).status).toBe(409);expect(mocks.update).not.toHaveBeenCalled();
   });
 });
+
+it('serves a later private upload even when the validated voucher came from chat',async()=>{
+ const download=vi.fn().mockResolvedValue({data:new Blob([new Uint8Array([137,80,78,71])]),error:null});
+ mocks.key.mockResolvedValue({accountId:'account-a',supabase:{from:mocks.from,storage:{from:()=>({download})}}});
+ mocks.single.mockReset().mockResolvedValueOnce({data:{review_id:'review',conversation_id:'conv',status:'processing',lease_token:'lease',data:{declaration_message_ids:[id]}},error:null}).mockResolvedValueOnce({data:{status:'validated',message_id:'original-voucher'},error:null}).mockResolvedValueOnce({data:{kind:'declaration',storage_path:'account-a/manual/upload',mime_type:'image/png'},error:null});
+ const response=await file(new Request('https://crm.test',{headers:{'x-enrollment-lease':'lease'}}),context());
+ expect(response.status).toBe(200);expect(download).toHaveBeenCalledWith('account-a/manual/upload');expect(response.headers.get('Content-Type')).toBe('image/png');
+});

@@ -31,7 +31,8 @@ export function AutomationCommandPicker({ open, query, onOpenChange, onPick }: {
     setError('');
     fetch('/api/inbox/commands')
       .then(async (response) => {
-        const data = await response.json();
+        const data = await response.json().catch(() => null);
+        if (!data) throw new Error('No se pudieron cargar los bloques. Actualiza la lista e inténtalo de nuevo.');
         if (!response.ok) throw new Error(data.error ?? 'No se pudieron cargar las automatizaciones.');
         if (active) setBlocks(data.blocks ?? []);
       })

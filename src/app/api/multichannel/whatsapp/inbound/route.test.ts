@@ -68,7 +68,7 @@ describe('WhatsApp session inbound route', () => {
       conversationId: 'conversation', messageId: 'waweb:WA-SOPORTE:provider-1',
       isFirstInboundMessage: true, contactCreated: true, hasConfirmedAdOrigin: false,
     }))
-    expect(db.rpc).toHaveBeenCalledOnce()
+    expect(db.rpc).toHaveBeenCalledTimes(2)
     expect(db.rpc).toHaveBeenCalledWith('record_whatsapp_session_inbound', expect.objectContaining({ p_sender_phone: '51922222222' }))
   })
 
@@ -80,7 +80,7 @@ describe('WhatsApp session inbound route', () => {
 
     const unresolved = await POST(request({ ...event, chat_id: '123456789012345@lid' }))
     expect(unresolved.status).toBe(422)
-    expect(db.rpc).toHaveBeenCalledOnce()
+    expect(db.rpc).toHaveBeenCalledTimes(2)
   })
 
   it('persists non-text events without starting text automations', async () => {
@@ -97,3 +97,5 @@ describe('WhatsApp session inbound route', () => {
     expect(h.db).toBeUndefined()
   })
 })
+
+ describe('typed menu choices',()=>{it('resolves a word through the same verified menu RPC',async()=>{const db=mockDb();db.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:{reply_id:'btn_1',reply_title:'Malla de Farmacia'},error:null});expect((await POST(request({...event,text:'malla'}))).status).toBe(200);expect(db.rpc).toHaveBeenCalledWith('resolve_whatsapp_session_menu_reply',expect.objectContaining({p_inbound_row_id:'message-row'}));expect(h.dispatch).toHaveBeenCalledWith(expect.objectContaining({interactiveReplyId:'btn_1',contentText:'Malla de Farmacia'}));});it('keeps unmatched text unchanged',async()=>{const db=mockDb();db.rpc.mockResolvedValueOnce({data:'recorded',error:null}).mockResolvedValueOnce({data:null,error:null});expect((await POST(request(event))).status).toBe(200);expect(h.dispatch).toHaveBeenCalledWith(expect.objectContaining({interactiveReplyId:null,contentText:'Quiero informes'}));});});

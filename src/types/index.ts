@@ -152,6 +152,7 @@ export interface ContactCustomValue {
 }
 
 export interface ContactNote {
+  note_number?: number | null;
   id: string;
   contact_id: string;
   user_id: string;

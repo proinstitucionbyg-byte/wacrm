@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { loadAiConfig } from './config'
+import {automationTestSession} from '@/lib/automations/test-session'
 import type { AiProvider, AiUsage } from './types'
 import { normalizeUsage } from './providers/shared'
 
@@ -286,12 +287,14 @@ async function readWithAnthropic(args: {
 export async function analyzeInboundImage(args: {
   db: SupabaseClient
   accountId: string
+  conversationId?: string
 } & ({ mediaId: string; accessToken: string; media?: never } | { media: { buffer: Buffer; contentType: string }; mediaId?: never; accessToken?: never })): Promise<AnalyzeInboundImageResult> {
   let provider: AiProvider | null = null
   let model: string | null = null
   try {
-    const config = await loadAiConfig(args.db, args.accountId)
-    if (!config?.isActive) return failed('not_configured')
+    const test=automationTestSession(args.accountId,args.conversationId)
+    const config = await loadAiConfig(args.db, args.accountId,test?.allowAi?{requireActive:false}:{})
+    if (!config || (!config.isActive&&!test?.allowAi)) return failed('not_configured')
     provider = config.provider
     model = config.model
 

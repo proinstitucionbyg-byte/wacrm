@@ -10,7 +10,7 @@ type Worker={id:string;name:string;enabled:boolean};
 const inputClass='w-full rounded-lg border border-border bg-background px-3 py-2 text-sm';
 const buttonClass='rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40';
 
-export function SessionLineManager(){
+export function SessionLineManager({active=true}:{active?:boolean}){
  const [lines,setLines]=useState<Line[]>([]),[workers,setWorkers]=useState<Worker[]>([]);
  const [loaded,setLoaded]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  const [link,setLink]=useState(''),[worker,setWorker]=useState('');
@@ -35,9 +35,9 @@ export function SessionLineManager(){
  async function pause(line:Line){
   setBusy(true);setMessage('');try{await request({action:'pause_line',line_key:line.line_key,value:!line.paused});await refresh();setMessage(line.paused?'Automatizaciones habilitadas para esta línea. El teléfono debe permanecer conectado.':'Automatizaciones pausadas para esta línea.');}catch(error){setMessage(error instanceof Error?error.message:'No se pudo guardar.');}finally{setBusy(false);}
  }
- return <div className="space-y-4"><WhatsappConnectionManager/><SupportRoutingManager/><details><summary className="cursor-pointer text-sm text-muted-foreground">Instalación avanzada y compatibilidad con ejecutores anteriores</summary><section className="mt-3 space-y-4 rounded-xl border border-border p-4">
+ return <div className="space-y-4"><WhatsappConnectionManager active={active}/><SupportRoutingManager/><details><summary className="cursor-pointer text-sm text-muted-foreground">Instalación avanzada y compatibilidad con ejecutores anteriores</summary><section className="mt-3 space-y-4 rounded-xl border border-border p-4">
   <h2 className="text-lg font-semibold">Mis números de WhatsApp y sus automatizaciones</h2>
-  <p className="text-sm text-muted-foreground">Puedes abrir hasta diez números en el panel local. Primero vincula cada teléfono con su QR. Después copia su vínculo y regístralo aquí para que utilice las automatizaciones e IA del CRM.</p>
+  <p className="text-sm text-muted-foreground">La vinculación habitual se hace arriba, en «Mis WhatsApps». Este registro manual es únicamente para instalaciones anteriores que todavía necesiten importar un vínculo.</p>
   <button className={buttonClass} type="button" disabled={busy} onClick={load}>{loaded?'Actualizar números':'Ver y activar mis números'}</button>
   {message&&<p role="status" className="text-sm">{message}</p>}
   {loaded&&<>
@@ -47,7 +47,7 @@ export function SessionLineManager(){
    </li>)}</ul>
    <form onSubmit={register} className="space-y-3">
     <label className="block text-sm">Vínculo copiado del panel de WhatsApp<textarea className={inputClass} required maxLength={512} value={link} onChange={event=>setLink(event.target.value)} placeholder="Pega aquí con Ctrl + V"/></label>
-    <label className="block text-sm">Computadora que mantiene los WhatsApps conectados<select className={inputClass} required value={worker} onChange={event=>setWorker(event.target.value)}><option value="">Selecciona tu ejecutor</option>{workers.filter(row=>row.enabled).map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+    <label className="block text-sm">Servidor que mantiene los WhatsApps conectados<select className={inputClass} required value={worker} onChange={event=>setWorker(event.target.value)}><option value="">Selecciona el servidor</option>{workers.filter(row=>row.enabled).map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
     <button className={buttonClass} disabled={busy||!worker||!link.trim()} type="submit">Registrar este número en el CRM</button>
    </form>
   </>}

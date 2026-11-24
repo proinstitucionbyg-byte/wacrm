@@ -1,8 +1,12 @@
 'use client';
+import {RegisteredCorrectionEditor} from '@/components/enrollments/registered-correction-editor';
 import { useCallback, useEffect, useState } from 'react';
+import {CourseSelect} from '@/components/enrollments/course-select';
+import { EnrollmentEvidenceEditor } from '@/components/enrollments/enrollment-evidence-editor';
 import { Button } from '@/components/ui/button';
-import { ENROLLMENT_FIELDS, enrollmentIssues, missingRequiredEnrollmentFields, type EnrollmentData } from '@/lib/matriculas/enrollment';
-import { intakeEditorStorageKey, readIntakeEditorDraft, rebaseIntakeEditorData, visibleIntakeFields, type EnrollmentField } from '@/lib/matriculas/intake-editor';
+import { ENROLLMENT_FIELDS, parseEnrollmentData, enrollmentIssues, missingRequiredEnrollmentFields, type EnrollmentData } from '@/lib/matriculas/enrollment';
+import { intakeEditorStorageKey, prepareIntakeDraft, sameIntakeData, readIntakeEditorDraft, rebaseIntakeEditorData, visibleIntakeFields, type EnrollmentField } from '@/lib/matriculas/intake-editor';
+import type { ManualDocumentDelivery } from '@/lib/matriculas/manual-document-delivery';
 interface IntakeDraft {
   id: string;
   version: number;
@@ -10,6 +14,7 @@ interface IntakeDraft {
   issues: string[];
   can_edit: boolean;
   status?: string;
+  error?: string | null;
   identity_candidates?: Array<{
     id: string;
     created_at: string;
@@ -27,6 +32,11 @@ interface WelcomeTask {
   status: string;
 }
 interface EnrollmentProgress {
+  error?: string | null;
+  id: string;
+  version: number;
+  can_edit_delivery: boolean;
+  manual_delivery: ManualDocumentDelivery;
   status: string;
   registered_number: string | null;
   student_folder_url: string | null;
@@ -34,7 +44,7 @@ interface EnrollmentProgress {
 }
 function explainIntakeIssue(issue: string): string {
   if (issue.startsWith('VERIFICAR IDENTIDAD:'))
-    return 'Identidad pendiente: selecciona las fotos del documento y confirma que las revisaste, o selecciona mensajes escritos que juntos contengan nombre, documento y correo.';
+    return 'Identidad pendiente: adjunta un documento, selecciona el respaldo del chat o usa «Datos por llamada / otro WhatsApp».';
   if (issue.startsWith('CONFIRMAR LA OFERTA'))
     return 'Oferta pendiente: registra el primer pago y las cinco cuotas del último bloque enviado y marca la confirmación.';
   return issue;
@@ -57,6 +67,7 @@ export function EnrollmentWelcomeCheck({
   const [feedback, setFeedback] = useState('');
   const [enrollment, setEnrollment] = useState<EnrollmentProgress | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [intakeStep,setIntakeStep]=useState(0),[reviewAll,setReviewAll]=useState(false);
   const load = useCallback(async () => {
     try {
       const res = await fetch(
@@ -68,6 +79,7 @@ export function EnrollmentWelcomeCheck({
       setEnrollment(data.enrollment ?? null);
       const nextIntake = data.intake ?? null;
       setIntake(nextIntake);
+      setIntakeStep(0);setReviewAll(false);
       if (nextIntake) {
         const serverData = nextIntake.data ?? {};
         const cached = readIntakeEditorDraft(
@@ -75,10 +87,11 @@ export function EnrollmentWelcomeCheck({
           nextIntake.id,
           nextIntake.version
         );
-        const draftData = cached?.data ?? serverData;
+        const draftData = cached?rebaseIntakeEditorData(serverData,cached.data,cached.editedFields??cached.confirmedFields as (keyof EnrollmentData)[]):serverData;
         setIntakeData(draftData);
         setConfirmedFields(cached?.confirmedFields ?? []);
-        setIntakeFields(missingRequiredEnrollmentFields(serverData));
+        setIntakeFields(missingRequiredEnrollmentFields(draftData));
+        setEditedFields(cached?.editedFields??[]);
         setIdentityReviewed(Boolean(draftData.identity_confirmed && draftData.identity_message_ids?.length));
         setOfferReviewed(Boolean(draftData.offer_confirmed && draftData.prices?.length === 6));
       } else {
@@ -100,16 +113,22 @@ export function EnrollmentWelcomeCheck({
       intakeId: intake.id,
       baseVersion: intake.version,
       data: intakeData,
-      confirmedFields,
+      confirmedFields,editedFields,
     };
     window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify(draft));
-  }, [intake, intakeData, confirmedFields]);
+  }, [intake, intakeData, confirmedFields,editedFields]);
   useEffect(() => {
     setTask(null);
     void Promise.resolve().then(load);
     // Load on chat selection only. Polling this card previously accumulated
     // duplicate DOM slots in the inbox on every refresh.
   }, [load]);
+  useEffect(()=>{
+    if(busy||!enrollment||!['ready','processing'].includes(enrollment.status))return;
+    // Only follow an already-submitted job. Replace this one slot; never append cards.
+    const timer=window.setTimeout(()=>void load(),5000);
+    return()=>window.clearTimeout(timer);
+  },[enrollment,busy,load]);
   async function complete(task: WelcomeTask) {
     setBusy(task.id);
     try {
@@ -127,10 +146,29 @@ export function EnrollmentWelcomeCheck({
       setBusy('');
     }
   }
-  async function registerMissingIntake() {
+  async function markManualDelivery(sent: boolean) {
+    if (!enrollment?.can_edit_delivery) return;
+    setBusy('manual-delivery');
+    setError('');
+    try {
+      const res = await fetch(`/api/enrollments/${enrollment.id}/manual-delivery`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sent, version: enrollment.version }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw Error(result.error ?? 'No se pudo guardar la entrega manual.');
+      setEnrollment(current => current?.id === enrollment.id
+        ? { ...current, version: result.version, manual_delivery: result.manual_delivery } : current);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo guardar la entrega manual.');
+    } finally {
+      setBusy('');
+    }
+  }
+  async function registerMissingIntake(submitAfter = true, overrideData?: EnrollmentData, overrideFields?: (keyof EnrollmentData)[]) {
     if (!intake) return;
     const missing = missingRequiredEnrollmentFields(intakeData);
-    if (missing.length || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim())) return;
+    if (submitAfter && (missing.length || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim()))) return;
     setBusy('intake');
     setError('');
     setFeedback('');
@@ -142,7 +180,9 @@ export function EnrollmentWelcomeCheck({
         draft?: { data: EnrollmentData; version: number };
         issues?: string[];
       };
-      let dataToSave = intakeData;
+      const inputData=overrideData??intakeData;
+      let dataToSave = prepareIntakeDraft(inputData,intake.data);
+      const fieldsToSave=dataToSave===inputData?(overrideFields??editedFields):[...new Set<keyof EnrollmentData>([...(overrideFields??editedFields),'declaration_message_ids','identity_message_ids','identity_confirmed'])];
       let versionToSave = intake.version;
       for (let attempt = 0; ; attempt += 1) {
         patch = await fetch(`/api/enrollments/${intake.id}`, {
@@ -153,8 +193,15 @@ export function EnrollmentWelcomeCheck({
         if (patch.status !== 409 || saved.error !== 'Otra persona cambió la ficha. Actualiza antes de guardar.' || !saved.latest) break;
         const latestDraft = saved.latest;
         if (!latestDraft) break;
-        if (latestDraft.status !== 'collecting') throw Error('La ficha avanzó a registro mientras la completabas. Conservé tus datos en este navegador; no repetí el trámite.');
-        dataToSave = rebaseIntakeEditorData(latestDraft.data ?? {}, dataToSave, editedFields);
+        if (!['collecting','error'].includes(latestDraft.status??'')) {
+          const identical=sameIntakeData(parseEnrollmentData(latestDraft.data)??latestDraft.data,parseEnrollmentData(dataToSave)??dataToSave);
+          await load();
+          const progress=latestDraft.status==='registered'?'ya está registrada':latestDraft.status==='processing'?'se está registrando':'ya está en cola de registro';
+          setFeedback('La matrícula '+progress+'. Consulté el estado sin repetir el trámite.');
+          if(!identical)setError('El registro avanzó con datos diferentes a los cambios pendientes. Tus cambios se conservan en este navegador y no sobrescribieron el registro.');
+          return true;
+        }
+        dataToSave = rebaseIntakeEditorData(latestDraft.data ?? {}, dataToSave, fieldsToSave);
         versionToSave = latestDraft.version;
         const nextFields = [...new Set([...intakeFields, ...missingRequiredEnrollmentFields(latestDraft.data ?? {})])];
         setIntake({ ...latestDraft, issues: enrollmentIssues(latestDraft.data ?? {}), can_edit: true });
@@ -172,6 +219,7 @@ export function EnrollmentWelcomeCheck({
       setIntake({ ...intake, data: saved.draft.data, version: saved.draft.version, issues: savedIssues, can_edit: true });
       setIntakeData(saved.draft.data);
       window.sessionStorage.setItem(intakeEditorStorageKey(intake.id), JSON.stringify({ intakeId: intake.id, baseVersion: saved.draft.version, data: saved.draft.data, confirmedFields }));
+      if (!submitAfter) { setFeedback('Borrador guardado. Todavía no se envió a registro.'); return true; }
       if (savedIssues.length) {
         setError(`Datos guardados. Aún no se envían documentos: ${savedIssues.map(explainIntakeIssue).join(' · ')}`);
         return;
@@ -188,6 +236,7 @@ export function EnrollmentWelcomeCheck({
       setFeedback('Datos completos: ficha enviada a la cola de registro. Esto todavía no confirma que los documentos se hayan enviado.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudieron registrar los datos faltantes.');
+      return false;
     } finally {
       setBusy('');
     }
@@ -211,30 +260,61 @@ export function EnrollmentWelcomeCheck({
     setEditedFields((fields) => [...new Set<keyof EnrollmentData>([...fields, 'identity_message_ids', 'declaration_message_ids', 'identity_confirmed'])]);
     setIdentityReviewed(false);
   }
-  const currentIntakeIssues = intake ? enrollmentIssues(intakeData) : [];
+  const preparedIntakeData=intake?prepareIntakeDraft(intakeData,intake.data):intakeData;
+  const currentIntakeIssues = intake ? enrollmentIssues(preparedIntakeData) : [];
+  const hasUnsavedIntake=!!intake&&!sameIntakeData(intakeData,intake.data);
+  const correctionFields:EnrollmentField[]=intake?.status==='error'?[
+    ...(/^(LA|EL) (DOCENTE|PROFESOR|PROFESORA)\b/.test(intakeData.full_name??'')?['full_name' as const]:[]),
+    ...(/CURSO/.test(intake.error??'')?['course' as const,'start_date' as const]:/FECHA|INICIO/.test(intake.error??'')?['start_date' as const]:[]),
+  ]:[];
+  const stepFields=reviewAll?(Object.keys(ENROLLMENT_FIELDS) as EnrollmentField[]):[...new Set([...correctionFields,...visibleIntakeFields(intakeFields)])];
+  const currentStep=Math.min(intakeStep,stepFields.length);
+  const currentField=stepFields[currentStep];
+  const optionalField=!!currentField&&!missingRequiredEnrollmentFields({}).includes(currentField);
+  function nextIntakeField(){
+    if(currentField&&!optionalField&&!intakeData[currentField]?.trim())return;
+    if(currentField&&intakeData[currentField]?.trim())setConfirmedFields(fields=>[...new Set([...fields,currentField])]);
+    setIntakeStep(Math.min(currentStep+1,stepFields.length));
+  }
   return (
-    <div className="contents" data-enrollment-welcome-slot>
-      {intake && intake.can_edit && (intakeFields.length > 0 || intake.issues.some((issue) => issue.startsWith('VERIFICAR IDENTIDAD:') || issue.startsWith('CONFIRMAR LA OFERTA'))) && (
-        <details className="mx-2 my-1 w-fit max-w-[calc(100%-1rem)] rounded-lg border border-amber-500/50 bg-background text-[10px] leading-tight sm:mx-4 sm:max-w-sm" aria-label="Registrar datos faltantes de matrícula">
-          <summary className="cursor-pointer list-none px-2 py-1.5 font-semibold">DATOS DE MATRÍCULA PENDIENTES · Abrir</summary>
-          <div className="max-h-[28vh] overflow-y-auto border-t border-amber-500/30 p-1.5">
-          <strong>DATOS FALTANTES · SOLO PARA COMPLETAR LO QUE YA FALTA</strong>
-          <p className="mt-0.5 text-muted-foreground">Completa aquí los pendientes y verifica cada dato con el chat. Dirección y segundo celular son opcionales. La revisión de identidad y la oferta se completan en este mismo cuadro.</p>
-          <div className="mt-1 grid gap-1 sm:grid-cols-2">
-            {visibleIntakeFields(intakeFields).map((key) => (
+    <div className="min-w-0 shrink-0" data-enrollment-welcome-slot>
+      {intake && intake.can_edit && (
+        <details className="mx-2 my-1 w-[calc(100%-1rem)] min-w-0 rounded-lg border border-amber-500/40 bg-background text-xs leading-normal" aria-label="Registrar datos faltantes de matrícula">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 px-3 py-1.5"><span className="font-semibold">Matrícula · {currentField?(currentField==='payment_date'?'fecha en que se realizó este pago':ENROLLMENT_FIELDS[currentField].toLocaleLowerCase('es')):'revisión final'}</span><span className={hasUnsavedIntake?'text-amber-400':'text-emerald-500'}>{hasUnsavedIntake?'Sin guardar':'Borrador guardado'}</span></summary>
+          <div className="grid min-w-0 gap-x-4 gap-y-2 border-t border-amber-500/30 p-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+          <div className="min-w-0">
+          <p className="mb-1 flex flex-wrap items-center justify-between gap-x-2 text-muted-foreground"><span>{currentField?"Dato "+(currentStep+1)+" de "+stepFields.length:'Respaldo y oferta'}</span><button type="button" className="underline underline-offset-2" disabled={!!busy} onClick={()=>{setReviewAll(!reviewAll);setIntakeStep(0);}}>{reviewAll?'Solo pendientes':'Otros datos'}</button></p>
+          <div className="mt-2 min-w-0" onKeyDown={event=>{if(event.key==='Enter'&&!event.nativeEvent.isComposing&&(event.target as HTMLElement).tagName==='INPUT'){event.preventDefault();nextIntakeField();}}}>
+            {stepFields.slice(currentStep,currentStep+1).map((key) => (
               <label key={key} className="min-w-0">
-                <span className="font-medium">{ENROLLMENT_FIELDS[key]}</span>
-                {key === 'document_type' ? (
-                  <select disabled={busy === 'intake'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setEditedFields((fields) => [...new Set([...fields, key])]); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-0.5 w-full rounded border border-border bg-background px-1.5 py-1 text-[11px]">
+                <span className="sr-only">{ENROLLMENT_FIELDS[key]}</span>
+                {key === 'course' ? <CourseSelect value={intakeData.course??''} disabled={!!busy} onChange={value=>{setIntakeData(current=>({...current,course:value,start_date:''}));setEditedFields(fields=>[...new Set([...fields,'course','start_date'] as (keyof EnrollmentData)[])]);setConfirmedFields(fields=>fields.filter(field=>field!=='course'&&field!=='start_date'));}}/> : key === 'document_type' ? (
+                  <select disabled={busy === 'intake'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setEditedFields((fields) => [...new Set([...fields, key])]); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-1 min-h-11 sm:min-h-9 w-full min-w-0 rounded border border-border bg-background px-2 text-base sm:text-sm">
                     <option value="">Seleccionar</option>{['DNI','CARNE DE EXTRANJERIA','PASAPORTE','OTRO'].map((type) => <option key={type}>{type}</option>)}
                   </select>
                 ) : (
-                  <input disabled={busy === 'intake'} type={['birth_date','start_date','payment_date'].includes(key) ? 'date' : key === 'email' ? 'email' : 'text'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setEditedFields((fields) => [...new Set([...fields, key])]); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-0.5 w-full rounded border border-border bg-background px-1.5 py-1 text-[11px]" />
+                  <input disabled={busy === 'intake'} type={['birth_date','start_date','payment_date'].includes(key) ? 'date' : key === 'email' ? 'email' : 'text'} value={intakeData[key] ?? ''} onChange={(event) => { setIntakeData((current) => ({ ...current, [key]: event.target.value })); setEditedFields((fields) => [...new Set([...fields, key])]); setConfirmedFields((fields) => fields.filter((field) => field !== key)); }} className="mt-1 min-h-11 sm:min-h-9 w-full min-w-0 rounded border border-border bg-background px-2 text-base sm:text-sm" />
                 )}
-                <span className="mt-0.5 flex min-h-4 items-center gap-1"><input className="size-3" type="checkbox" disabled={busy === 'intake' || !intakeData[key]?.trim()} checked={confirmedFields.includes(key)} onChange={(event) => setConfirmedFields((fields) => event.target.checked ? [...new Set([...fields,key])] : fields.filter((field) => field !== key))} /> Verificado en chat</span>
+                {confirmedFields.includes(key)&&<span className="sr-only">Dato confirmado</span>}
               </label>
             ))}
           </div>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end" role="group" aria-label="Acciones de matrícula">
+            <Button type="button" variant="outline" className="min-h-11 sm:min-h-9 flex-1 px-3 md:flex-none" disabled={!!busy||currentStep===0} onClick={()=>setIntakeStep(Math.max(0,currentStep-1))}>Atrás</Button>
+            {currentField&&<Button type="button" className="min-h-11 sm:min-h-9 flex-1 px-3 md:flex-none" disabled={!!busy||(!optionalField&&!intakeData[currentField]?.trim())} title="Confirma este dato y avanza" onClick={nextIntakeField}>Siguiente</Button>}
+          <Button type="button" variant="outline" className="min-h-11 sm:min-h-9 flex-1 border-primary/50 px-3 md:flex-none" disabled={!!busy} onClick={()=>void registerMissingIntake(false)}>{busy==='intake'?'Guardando…':'Guardar borrador'}</Button>
+          </div>
+          {currentField==='payment_date'&&<p className="text-xs text-muted-foreground md:col-span-2">Indica el día del depósito o transferencia que acaba de realizar el estudiante. Los vencimientos de las siguientes cuotas se calculan desde el inicio oficial del curso.</p>}
+          {currentField==='start_date'&&<p className="text-xs text-muted-foreground md:col-span-2">Se completa desde el cuadro de inicios del curso. Puedes corregirlo manualmente si confirmaste otro inicio.</p>}
+          {currentStep===stepFields.length&&<div className="max-h-[28dvh] min-w-0 space-y-2 overflow-y-auto overscroll-contain md:col-span-2" aria-label="Revisión final de matrícula">
+          {!!(preparedIntakeData.declaration_message_ids?.length||preparedIntakeData.identity_message_ids?.length)&&<p role="status" className="rounded border border-emerald-500/40 p-2 text-emerald-600">✓ Respaldo guardado y asociado a esta matrícula.</p>}
+          <EnrollmentEvidenceEditor key={intake.id} id={intake.id} version={intake.version} data={preparedIntakeData} disabled={!!busy} onChange={async patch => {
+            const nextData={...intakeData,...patch};const nextFields=[...new Set<keyof EnrollmentData>([...editedFields,...Object.keys(patch) as (keyof EnrollmentData)[]])];
+            setIntakeData(nextData);setEditedFields(nextFields);setIdentityReviewed(patch.identity_confirmed===true);
+            if(!await registerMissingIntake(false,nextData,nextFields))throw Error('El archivo está guardado, pero no se pudo asociar a la ficha. Revisa el aviso antes de continuar.');
+          }} />
+
           {intake.issues.some((issue) => issue.startsWith('VERIFICAR IDENTIDAD:')) && (
             <details className="mt-1 rounded border border-border px-1.5 py-1">
               <summary className="cursor-pointer font-semibold">Revisión de identidad · {intake.identity_candidates?.length ?? 0} fotos para revisar</summary>
@@ -259,7 +339,7 @@ export function EnrollmentWelcomeCheck({
                     setEditedFields((fields) => [...new Set<keyof EnrollmentData>([...fields, 'identity_confirmed', 'identity_message_ids'])]);
                   }} /> Revisé la(s) foto(s) seleccionada(s) y coinciden con el nombre y documento escritos.</label>
                 </>
-              ) : <p>No hay una foto de identidad identificada en este chat. No marques la identidad como revisada; solicita o adjunta la evidencia desde este mismo chat.</p>}
+              ) : <p>No hay una foto de identidad identificada en este chat. No marques la identidad como revisada; puedes adjuntarla o confirmar los datos por llamada en el apartado de arriba.</p>}
               {intake.declaration_candidates?.length ? (
                 <details className="mt-1">
                   <summary className="cursor-pointer font-medium">O usar el respaldo escrito del estudiante</summary>
@@ -299,7 +379,13 @@ export function EnrollmentWelcomeCheck({
               </div>
             </details>
           )}
-          <Button size="sm" className="mt-1 h-7 px-2 text-[11px]" disabled={busy === 'intake' || currentIntakeIssues.length > 0 || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim())} onClick={() => void registerMissingIntake()}>{busy === 'intake' ? 'GUARDANDO…' : 'GUARDAR Y CONTINUAR'}</Button>
+          {currentIntakeIssues.length>0&&<div className="rounded border border-amber-500/30 p-2"><p className="font-semibold">Falta para continuar:</p><ul className="ml-4 list-disc">{currentIntakeIssues.map(issue=><li key={issue}>{explainIntakeIssue(issue)}</li>)}</ul></div>}
+          <Button size="sm" className="mt-1 min-h-11 w-full px-2 text-sm" disabled={busy === 'intake' || currentIntakeIssues.length > 0 || intakeFields.some((key) => !confirmedFields.includes(key) || !intakeData[key]?.trim())} onClick={() => void registerMissingIntake()}>{busy === 'intake' ? 'GUARDANDO…' : 'ENVIAR A REGISTRO'}</Button>
+          </div>}
+          {(error||intake.error||feedback)&&<div className="min-w-0 border-t border-border pt-1 text-xs md:col-span-2">
+            {error?<p role="alert" className="break-words text-destructive">{error}</p>:intake.error?<details><summary className="cursor-pointer text-amber-400">Registro detenido · Ver motivo</summary><p className="mt-1 break-words text-muted-foreground">{intake.error}. Guardar borrador conserva los datos; para reintentar usa Enviar a registro al finalizar.</p></details>:null}
+            {feedback&&<p role="status" className="text-emerald-500">{feedback}</p>}
+          </div>}
           </div>
         </details>
       )}
@@ -322,7 +408,7 @@ export function EnrollmentWelcomeCheck({
           </ul>
         </div>
       ) : null}
-      {task && (
+      {task && !intake && (
         <div
           data-enrollment-welcome-id={task.id}
           className="mx-2 my-1 w-full max-w-2xl rounded-lg border border-sky-500/40 bg-sky-500/10 p-1.5 text-[10px] leading-tight sm:mx-4 sm:my-1.5"
@@ -375,8 +461,8 @@ export function EnrollmentWelcomeCheck({
           )}
         </div>
       )}
-      {enrollment && (
-        <div className="mx-2 my-1 flex max-w-2xl items-center gap-2 rounded border border-sky-500/40 bg-sky-500/5 px-2 py-1 text-[10px] leading-tight sm:mx-4">
+      {enrollment && enrollment.id!==intake?.id && (
+        <div className="mx-2 my-1 flex max-w-2xl flex-wrap items-center gap-2 rounded border border-sky-500/40 bg-sky-500/5 px-2 py-1 text-[10px] leading-tight sm:mx-4">
           <span className="min-w-0 flex-1">
             <strong>
               {enrollment.status === 'registered'
@@ -394,6 +480,17 @@ export function EnrollmentWelcomeCheck({
           <Button type="button" size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[10px]" onClick={() => void load()} disabled={!!busy}>
             Actualizar
           </Button>
+          {process.env.NEXT_PUBLIC_ENROLLMENT_CORRECTIONS_ENABLED === 'true'&&enrollment.status==='registered'&&enrollment.can_edit_delivery&&<RegisteredCorrectionEditor enrollmentId={enrollment.id}/>}
+          {enrollment.error&&<p role="alert" className="w-full rounded border border-destructive/40 p-2 text-destructive">No se generaron los documentos: {enrollment.error}</p>}
+          {enrollment.status === 'registered' && enrollment.student_folder_url && (
+            <label className="flex items-center gap-1" title="Marca solo si ya enviaste boleta, cronograma y ficha por otro medio. Esta marca no envía mensajes ni confirma recepción.">
+              <input type="checkbox" checked={enrollment.manual_delivery?.sent === true}
+                disabled={!!busy || !enrollment.can_edit_delivery}
+                onChange={event => void markManualDelivery(event.target.checked)} />
+              <span>Enviados manualmente{enrollment.manual_delivery?.sent_at
+                ? ` · ${new Date(enrollment.manual_delivery.sent_at).toLocaleString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+            </label>
+          )}
           {enrollment.status === 'registered' && enrollment.student_folder_url && (
             <a
               className="shrink-0 font-semibold text-sky-600 underline"
@@ -406,12 +503,12 @@ export function EnrollmentWelcomeCheck({
           )}
         </div>
       )}
-      {error && (
+      {error && !intake && (
         <p role="alert" className="text-destructive px-4 text-xs">
           {error}
         </p>
       )}
-      {feedback && <p role="status" className="px-4 text-xs text-emerald-600">{feedback}</p>}
+      {feedback && !intake && <p role="status" className="px-4 text-xs text-emerald-600">{feedback}</p>}
     </div>
   );
 }

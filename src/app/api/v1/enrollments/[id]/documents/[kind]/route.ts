@@ -14,6 +14,9 @@ import { resumeEnrollmentAfterDocuments } from '@/lib/matriculas/sequence';
 import { isSocialChannel, socialConfiguration } from '@/lib/social/meta-api';
 import { saveSocialDocument } from '@/lib/social/storage';
 import { readConversationBillingPreflight } from '@/lib/whatsapp/billing-runtime';
+import { getSessionOriginLineForConversation } from '@/lib/whatsapp/session-transport-guard';
+import { reconcileNativeEnrollmentDocument } from '@/lib/matriculas/native-document-delivery';
+import { manualDocumentDelivery } from '@/lib/matriculas/manual-document-delivery';
 
 /** Receives only the three generated PDFs for an already registered and human-validated enrollment. */
 export async function POST(
@@ -30,7 +33,7 @@ export async function POST(
       throw badRequest('Documento inválido');
     const { data: job, error } = await ctx.supabase
       .from('enrollment_drafts')
-      .select('id,status,lease_token,data,conversation_id,review_id,student_folder_url')
+      .select('id,status,lease_token,data,conversation_id,review_id,student_folder_url,manual_document_delivery')
       .eq('id', id)
       .eq('account_id', ctx.accountId)
       .maybeSingle();
@@ -54,6 +57,8 @@ export async function POST(
       .maybeSingle();
     if (review?.status !== 'validated')
       throw new ApiError('forbidden', 'Pago sin validar', 403);
+    if (manualDocumentDelivery(job.manual_document_delivery, job.student_folder_url).sent)
+      throw new ApiError('bad_request', 'Documentos marcados como enviados manualmente. No se repetirán por API; revisa la marca en la conversación si necesitas corregirla.', 409);
     if (
       request.headers.get('content-type')?.split(';')[0] !== 'application/pdf'
     )
@@ -82,7 +87,7 @@ export async function POST(
     const hash = createHash('sha256').update(buffer).digest('hex');
     const { data: prior, error: priorError } = await ctx.supabase
       .from('enrollment_document_deliveries')
-      .select('status,sha256')
+      .select('status,sha256,whatsapp_message_id')
       .eq('enrollment_id', id)
       .eq('account_id', ctx.accountId)
       .eq('kind', kind)
@@ -98,6 +103,11 @@ export async function POST(
       if (prior.status === 'sent') {
         await resumeEnrollmentAfterDocuments(ctx.supabase, ctx.accountId, id);
         return ok({ sent: true });
+      }
+      if(prior.status==='sending'&&prior.whatsapp_message_id?.startsWith('waweb-job:')){
+        const state=await reconcileNativeEnrollmentDocument(ctx.supabase,ctx.accountId,id,kind,prior.whatsapp_message_id);
+        if(state==='sent'){await resumeEnrollmentAfterDocuments(ctx.supabase,ctx.accountId,id);return ok({sent:true});}
+        if(state==='queued')return Response.json({data:{sent:false,queued:true}},{status:202});
       }
       throw new ApiError(
         'bad_request',
@@ -125,7 +135,8 @@ export async function POST(
     const contact = Array.isArray(conversation?.contact)
       ? conversation.contact[0]
       : conversation?.contact;
-    if (contact?.channel === 'whatsapp') {
+    const sessionLine=contact?.channel==='whatsapp'?await getSessionOriginLineForConversation(ctx.supabase,conversation.id):null;
+    if (contact?.channel === 'whatsapp'&&!sessionLine) {
       // Read only: the sender makes the atomic quota reservation once, at dispatch.
       // A known block must not upload to Meta or create an uncertain-send reservation.
       let billing;
@@ -144,7 +155,7 @@ export async function POST(
       .select('access_token,phone_number_id')
       .eq('account_id', ctx.accountId)
       .maybeSingle();
-    if ((!isSocialChannel(contact?.channel) && contact?.channel !== 'whatsapp') || (contact?.channel === 'whatsapp' && !config))
+    if ((!isSocialChannel(contact?.channel) && contact?.channel !== 'whatsapp') || (contact?.channel === 'whatsapp' && !sessionLine && !config))
       throw badRequest('No hay conexión para el canal de esta matrícula');
     if (isSocialChannel(contact?.channel)) socialConfiguration(contact.channel, ctx.accountId);
     const documentName = String(job.data.full_name)
@@ -158,7 +169,7 @@ export async function POST(
       .replace(/[^a-zA-Z0-9]/g, '')
       .toUpperCase()}.pdf`;
     // Upload failures occur before the idempotent send reservation and are safe to retry.
-    const uploaded: { mediaId: string; url?: string } = contact?.channel === 'whatsapp' ? await uploadMedia({
+    const uploaded: { mediaId: string; url?: string } = contact?.channel === 'whatsapp'&&!sessionLine ? await uploadMedia({
       phoneNumberId: config!.phone_number_id,
       accessToken: decrypt(config!.access_token),
       buffer,
@@ -191,7 +202,12 @@ export async function POST(
         mediaType: 'document',
         mediaUrl: uploaded.url ?? uploaded.mediaId,
         filename,
+        idempotencyKey:`enrollment-document:${id}:${kind}:${hash}`,
       });
+      if(sessionLine){
+        const queued=await ctx.supabase.from('enrollment_document_deliveries').update({whatsapp_message_id:sent.whatsapp_message_id}).eq('enrollment_id',id).eq('account_id',ctx.accountId).eq('kind',kind).eq('status','sending');if(queued.error)throw queued.error;
+        return Response.json({data:{sent:false,queued:true}},{status:202});
+      }
       const { error: savedError } = await ctx.supabase
         .from('enrollment_document_deliveries')
         .update({

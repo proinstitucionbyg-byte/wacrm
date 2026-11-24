@@ -1,8 +1,12 @@
+import {previewEnrollmentIntake} from '@/lib/matriculas/intake-preview';
+import {loadAcademicCalendar} from '@/lib/matriculas/calendar';
+import type {IntakeEvidence} from '@/lib/matriculas/auto-intake';
 import { NextResponse } from 'next/server';
 import { canInAccount, requirePermission } from '@/lib/auth/permissions';
 import { toErrorResponse } from '@/lib/auth/account';
 import { UUID_PATTERN } from '@/lib/team-chat';
 import { enrollmentIssues, type EnrollmentData } from '@/lib/matriculas/enrollment';
+import { manualDocumentDelivery } from '@/lib/matriculas/manual-document-delivery';
 export async function GET(request: Request) {
   try {
     const ctx = await requirePermission('inbox', 'view');
@@ -23,17 +27,17 @@ export async function GET(request: Request) {
     if (error) throw error;
     const { data: draft, error: draftError } = await ctx.supabase
       .from('enrollment_drafts')
-      .select('id,version,data,status,review_id,conversation_id')
+      .select('id,version,data,status,review_id,conversation_id,error')
       .eq('account_id', ctx.accountId)
       .eq('conversation_id', conversation)
-      .eq('status', 'collecting')
+      .in('status', ['collecting','error'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (draftError) throw draftError;
     const { data: enrollment, error: enrollmentError } = await ctx.supabase
       .from('enrollment_drafts')
-      .select('id,status,registered_number,student_folder_url')
+      .select('id,version,status,registered_number,student_folder_url,manual_document_delivery,error')
       .eq('account_id', ctx.accountId)
       .eq('conversation_id', conversation)
       .in('status', ['ready', 'processing', 'registered', 'error'])
@@ -62,7 +66,7 @@ export async function GET(request: Request) {
     if (draft) {
       const { data: review, error: reviewError } = await ctx.supabase
         .from('payment_reviews')
-        .select('status,payment_purpose')
+        .select('status,payment_purpose,evidence,created_at')
         .eq('id', draft.review_id)
         .eq('account_id', ctx.accountId)
         .maybeSingle();
@@ -70,15 +74,14 @@ export async function GET(request: Request) {
       if (review?.status === 'validated' && review.payment_purpose === 'enrollment'
           && await canInAccount(ctx, 'enrollments', 'edit')) {
         if (draft.conversation_id) {
-          const { data: images, error: imagesError } = await ctx.supabase
-            .from('messages')
-            .select('id,created_at,image_analysis')
-            .eq('conversation_id', draft.conversation_id)
-            .eq('sender_type', 'customer')
-            .eq('content_type', 'image')
-            .order('created_at', { ascending: false })
-            .limit(30);
-          if (imagesError) throw imagesError;
+          const {data: latestMessages,error: latestError}=await ctx.supabase.from('messages')
+            .select('id,content_text,media_url,image_analysis,sender_type,ai_generated,created_at')
+            .eq('conversation_id',draft.conversation_id).order('created_at',{ascending:false}).limit(250);
+          if(latestError)throw latestError;
+          const calendar=(draft.data as EnrollmentData).start_date?[]:await loadAcademicCalendar(ctx.supabase,ctx.accountId);
+          draft.data=previewEnrollmentIntake(draft.data as EnrollmentData,review.evidence?.fields??{},(latestMessages??[]) as IntakeEvidence[],calendar,review.created_at);
+
+          const images=(latestMessages??[]).filter(message=>message.sender_type==='customer');
           identityCandidates = (images ?? [])
             .filter((image) => image.image_analysis?.category === 'identity_document')
             .slice(0, 4)
@@ -88,16 +91,7 @@ export async function GET(request: Request) {
               category: image.image_analysis?.category ?? null,
               fields: image.image_analysis?.fields ?? {},
             }));
-          const { data: written, error: writtenError } = await ctx.supabase
-            .from('messages')
-            .select('id,created_at,content_text')
-            .eq('conversation_id', draft.conversation_id)
-            .eq('sender_type', 'customer')
-            .eq('content_type', 'text')
-            .not('content_text', 'is', null)
-            .order('created_at', { ascending: false })
-            .limit(40);
-          if (writtenError) throw writtenError;
+          const written=(latestMessages??[]).filter(message=>message.sender_type==='customer');
           declarationCandidates = (written ?? [])
             .filter((message) => typeof message.content_text === 'string' && message.content_text.trim())
             .slice(0, 40)
@@ -106,6 +100,8 @@ export async function GET(request: Request) {
         intake = {
           id: draft.id,
           version: draft.version,
+          status: draft.status,
+          error: draft.error,
           data: draft.data as EnrollmentData,
           issues: enrollmentIssues(draft.data as EnrollmentData),
           can_edit: await canInAccount(ctx, 'enrollments', 'edit'),
@@ -119,7 +115,12 @@ export async function GET(request: Request) {
       intake,
       enrollment: enrollment
         ? {
+            id: enrollment.id,
+            version: enrollment.version,
+            can_edit_delivery: await canInAccount(ctx, 'enrollments', 'edit'),
+            manual_delivery: manualDocumentDelivery(enrollment.manual_document_delivery, enrollment.student_folder_url),
             status: enrollment.status,
+            error: enrollment.error,
             registered_number: enrollment.registered_number,
             student_folder_url:
               enrollment.student_folder_url?.startsWith(

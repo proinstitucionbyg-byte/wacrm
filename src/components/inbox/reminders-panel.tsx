@@ -43,6 +43,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; x: number; y: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const positionRef = useRef<ButtonPosition | null>(null);
+  const hasCustomPosition=useRef(false);
   const [buttonPosition, setButtonPosition] = useState<ButtonPosition | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
@@ -51,9 +52,19 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
     if (!mounted) return;
     const button = buttonRef.current;
     if (!button) return;
+    const dock=document.querySelector('[data-reminder-dock]');
+    if(dock&&!hasCustomPosition.current){const rect=dock.getBoundingClientRect();if(rect.width&&rect.height){const next=keepOnScreen({x:rect.left+(rect.width-button.offsetWidth)/2,y:rect.top+(rect.height-button.offsetHeight)/2},button.offsetWidth,button.offsetHeight);positionRef.current=next;setButtonPosition(next);}}
+    const inboxBar = document.querySelector('nav[aria-label="Vista de Inbox"]');
+    if (inboxBar && !positionRef.current) {
+      const rect = inboxBar.getBoundingClientRect();
+      const next = keepOnScreen({ x: window.innerWidth - button.offsetWidth - 16, y: rect.top + Math.max(0, (rect.height - button.offsetHeight) / 2) }, button.offsetWidth, button.offsetHeight);
+      positionRef.current = next;
+      setButtonPosition(next);
+    }
     try {
       const saved = JSON.parse(localStorage.getItem(POSITION_KEY) || 'null') as ButtonPosition | null;
       if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+        hasCustomPosition.current=true;
         const next = keepOnScreen(saved, button.offsetWidth, button.offsetHeight);
         positionRef.current = next;
         setButtonPosition(next);
@@ -62,13 +73,15 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
     const onResize = () => {
       const current = positionRef.current;
       if (!current || !buttonRef.current) return;
-      const next = keepOnScreen(current, buttonRef.current.offsetWidth, buttonRef.current.offsetHeight);
+      const dock=document.querySelector('[data-reminder-dock]'),rect=dock?.getBoundingClientRect();
+      const target=!hasCustomPosition.current&&rect?.width?{x:rect.left+(rect.width-buttonRef.current.offsetWidth)/2,y:rect.top+(rect.height-buttonRef.current.offsetHeight)/2}:current;
+      const next = keepOnScreen(target, buttonRef.current.offsetWidth, buttonRef.current.offsetHeight);
       positionRef.current = next;
       setButtonPosition(next);
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [mounted]);
+  }, [mounted,conversationId]);
 
   function startDrag(event: PointerEvent<HTMLButtonElement>) {
     if (event.button !== 0) return;
@@ -83,6 +96,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
     if (!drag || drag.pointerId !== event.pointerId) return;
     if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
     drag.moved = true;
+    hasCustomPosition.current=true;
     const next = keepOnScreen({ x: drag.x + event.clientX - drag.startX, y: drag.y + event.clientY - drag.startY }, event.currentTarget.offsetWidth, event.currentTarget.offsetHeight);
     positionRef.current = next;
     setButtonPosition(next);
@@ -110,6 +124,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
       setRecipients(result.recipients??[]);
     } catch { toast.error('No se pudieron cargar los recordatorios.'); }
   }, [teamView]);
+  useEffect(()=>{const openFromChat=()=>setOpen(true);window.addEventListener('wacrm:open-reminders',openFromChat);return()=>window.removeEventListener('wacrm:open-reminders',openFromChat);},[]);
   useEffect(() => { if (open) void refresh(); }, [open, refresh]);
   useEffect(() => () => { recorderRef.current?.stop(); streamRef.current?.getTracks().forEach(track => track.stop()); }, []);
 
@@ -205,7 +220,7 @@ export function RemindersPanel({ conversationId }: { conversationId: string | nu
   return createPortal(<>
     <button ref={buttonRef} type="button" onClick={event => { if (suppressClickRef.current) { event.preventDefault(); suppressClickRef.current = false; return; } setOpen(true); }}
       onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
-      title="Mis recordatorios · arrastra para mover" aria-label="Abrir mis recordatorios; arrastra para mover"
+      data-reminder-trigger title="Mis recordatorios · arrastra para mover" aria-label="Abrir mis recordatorios; arrastra para mover"
       style={buttonPosition ? { left: buttonPosition.x, top: buttonPosition.y } : { right: 16, top: '40%' }}
       className="fixed z-40 inline-flex h-11 touch-none cursor-grab items-center gap-2 rounded-xl border border-sky-500/50 bg-slate-900 px-4 text-slate-100 shadow-xl hover:border-sky-400 hover:bg-slate-800 active:cursor-grabbing light:border-border light:bg-card light:text-sky-800 light:shadow-lg light:hover:bg-secondary">
       <BellRing className="h-4 w-4"/><span className="hidden xl:inline">Recordatorios</span>

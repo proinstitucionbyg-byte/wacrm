@@ -78,6 +78,22 @@ beforeEach(() => {
   mocks.send.mockResolvedValue({ whatsapp_message_id: 'wamid' });
   mocks.billing.mockResolvedValue({ service_window_open: true, automatic_send_allowed: true });
 });
+
+it('never uploads, sends or starts a sequence after an explicit manual delivery declaration', async () => {
+  mocks.single.mockReset();
+  mocks.single.mockResolvedValueOnce({ data: { id, status: 'registered', lease_token: 'lease',
+    conversation_id: 'conv', review_id: 'review', student_folder_url: 'https://drive.google.com/drive/folders/student',
+    manual_document_delivery: { sent: true, sent_at: '2026-10-28T06:00:00Z', sent_by: id,
+      folder_url: 'https://drive.google.com/drive/folders/student' }, data: {} } })
+    .mockResolvedValueOnce({ data: { status: 'validated' } });
+  const response = await POST(request(), context());
+  expect(response.status).toBe(409);
+  expect((await response.json()).error.message).toContain('enviados manualmente');
+  expect(mocks.upload).not.toHaveBeenCalled();
+  expect(mocks.send).not.toHaveBeenCalled();
+  expect(mocks.insert).not.toHaveBeenCalled();
+  expect(mocks.resume).not.toHaveBeenCalled();
+});
 describe('PDF delivery bridge', () => {
   it.each([
     ['expired 24-hour window even inside ad coverage', { service_window_open: false, free_entry_window_open: true, automatic_send_allowed: true }],

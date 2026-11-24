@@ -158,6 +158,26 @@ describe('Automatizacion de matriculas V2', () => {
     const timestamp = h.rows[1][1]; expect(h.rows[1][2]).toBe(timestamp);
     h.process(); expect(h.rows[1][1]).toBe(timestamp); expect(h.rows[1][0]).toBe(1);
   });
+  it('conserva vacia la asesora retirada manualmente incluso tras el proceso automatico', () => {
+    const h = setup(); h.rows[1][6] = 'maria'; h.process();
+    expect(h.rows[1][4]).toBe('MAINET');
+    h.notes.set('2:5', 'NOTA EXISTENTE'); h.rows[1][4] = '';
+    h.evaluate("PROCESAR_FILAS_V2_(testSheet,2,1,5,5,new Date('2026-10-08T16:30:00Z'),true)");
+    h.process(); h.process();
+    expect(h.rows[1][4]).toBe('');
+    expect(h.notes.get('2:5')).toBe('NOTA EXISTENTE\n[ASESORA DE INGRESO: ELECCION MANUAL]');
+  });
+  it('respeta la asesora elegida manualmente y conserva su decision al volver a borrarla', () => {
+    const h = setup(); h.rows[1][6] = 'maria'; h.process(); h.rows[1][4] = 'ANTONELLA';
+    h.evaluate("PROCESAR_FILAS_V2_(testSheet,2,1,5,5,new Date('2026-10-08T16:30:00Z'),true)");
+    h.process(); expect(h.rows[1][4]).toBe('ANTONELLA');
+    h.rows[1][4] = ''; h.process(); expect(h.rows[1][4]).toBe('');
+  });
+  it('editar otra columna no desactiva la asignacion inicial automatica', () => {
+    const h = setup(); h.rows[1][6] = 'maria';
+    h.evaluate("PROCESAR_FILAS_V2_(testSheet,2,1,7,7,new Date('2026-10-08T16:30:00Z'),true)");
+    expect(h.rows[1][4]).toBe('MAINET'); expect(h.notes.get('2:5')).toBeUndefined();
+  });
   it('conserva formulas y no inventa la hora de registros historicos', () => {
     const h = setup(); h.rows[1][6] = 'maria'; h.rows[1][1] = new Date('2025-01-01'); h.rows[1][10] = 'CALCULADA'; h.formulas.set('2:11', '=DATEDIF(J2,TODAY(),"Y")'); h.process();
     expect(h.rows[1][2]).toBe(''); expect(h.rows[1][10]).toBe('CALCULADA');

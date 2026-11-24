@@ -39,6 +39,8 @@ Bot,
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AutomationMediaPicker } from '@/components/automations/media-library'
+import type { MediaKind } from '@/lib/storage/media-library'
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import {Dialog,DialogContent,DialogTitle,DialogDescription,DialogFooter} from '@/components/ui/dialog'
@@ -698,7 +700,7 @@ const folderId = searchParams.get("folder")
   const [saving, setSaving] = useState(false)
   const [revision,setRevision]=useState(initial.steps_revision)
   const [review,setReview]=useState<null|{payload:Record<string,unknown>;token:string;impacts:ReferenceImpact[];problems:string[];
-    summary:{before:number;after:number;unchangedLinks:number;pendingChanges:number}}>(null)
+    summary:{before:number;after:number;unchangedLinks:number;pendingChanges:number};linkedAutomations:{id:string;name:string;folder:string}[]}>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   function patchTop<K extends keyof BuilderInitial>(key: K, value: BuilderInitial[K]) {
@@ -750,7 +752,7 @@ steps: toApiSteps(state.steps),
           body:JSON.stringify({...payload,preview:true})})
         const preview=await check.json()
         if(!check.ok){toast.error(preview.error??'No se pudo revisar el cambio.');return}
-        if(preview.impacts.length||preview.problems.length||preview.summary.pendingChanges){
+        if(preview.impacts.length||preview.problems.length||preview.summary.pendingChanges||preview.linkedAutomations.length){
           setReview({payload,...preview});return
         }
         impactToken=preview.token
@@ -800,7 +802,7 @@ steps: toApiSteps(state.steps),
       <Dialog open={!!review} onOpenChange={open=>{if(!open&&!saving)setReview(null)}}>
         <DialogContent className="w-[calc(100vw-1.5rem)] max-w-2xl max-h-[85dvh] overflow-y-auto">
           <DialogTitle>Revisar enlaces antes de guardar</DialogTitle>
-          <DialogDescription>Moviste, agregaste o quitaste bloques. Estos cambios mantienen cada enlace apuntando a la información correcta.</DialogDescription>
+          <DialogDescription>Revisa las automatizaciones que llevan a esta secuencia. Si cambiaste contenido o botones, revisa también sus mensajes y enlaces.</DialogDescription>
           {review&&<div className="space-y-3 text-sm">
             <p>Esta automatización pasa de <strong>{review.summary.before}</strong> a <strong>{review.summary.after}</strong> bloques.</p>
             {review.impacts.map((item,i)=><div key={i} className="rounded-lg border p-3 space-y-1 break-words">
@@ -810,6 +812,7 @@ steps: toApiSteps(state.steps),
               {item.problem&&<p className="text-destructive">{item.problem}</p>}
             </div>)}
             <p>{review.summary.unchangedLinks} enlaces conservan su selección actual.</p>
+            {!!review.linkedAutomations.length&&<div className="rounded-lg border p-3"><p className="font-medium">Automatizaciones conectadas</p><ul className="mt-2 space-y-1">{review.linkedAutomations.map(item=><li key={item.id}><a className="text-primary underline" href={`/automations/${item.id}/edit`} target="_blank" rel="noopener noreferrer">{item.name}</a><span className="text-muted-foreground"> · {item.folder}</span></li>)}</ul><p className="mt-2 text-xs text-muted-foreground">Guardar aquí no cambia automáticamente el contenido de esas automatizaciones. Ábrelas para revisar imágenes, audios, botones y precios.</p></div>}
             {!!review.summary.pendingChanges&&<p>Se ajustarán {review.summary.pendingChanges} posiciones guardadas para continuar desde el mismo contenido, incluidas las secuencias pausadas. Sus horas de espera se conservan.</p>}
             {review.problems.map((problem,i)=><p key={i} className="text-destructive">{problem}</p>)}
             <p>Al aceptar, se guardan tus cambios y se actualizan juntos los enlaces indicados.</p>
@@ -1438,7 +1441,7 @@ function StepEditor({
       <FieldBlock label="Media Type">
         <select
           value={(cfg.media_type as string) ?? "image"}
-          onChange={(e) => set({ media_type: e.target.value })}
+          onChange={(e) => set({ media_type: e.target.value, url: '', media_url: '', filename: '', audio_transcript: undefined, audio_transcript_url: undefined })}
           className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm"
         >
           <option value="image">Image</option>
@@ -1448,6 +1451,7 @@ function StepEditor({
         </select>
       </FieldBlock>
 
+      <AutomationMediaPicker kind={(cfg.media_type as MediaKind) ?? 'image'} url={(cfg.media_url as string) || (cfg.url as string) || ''} onChange={file => set({ url: file.url, media_url: file.url, filename: file.name, audio_transcript: undefined, audio_transcript_url: undefined })} />
       <FieldBlock
   label={
     cfg.media_type === "image"
@@ -1460,8 +1464,8 @@ function StepEditor({
   }
 >
   <Input
-    value={(cfg.url as string) ?? ""}
-    onChange={(e) => set({ url: e.target.value })}
+    value={(cfg.media_url as string) || (cfg.url as string) || ""}
+    onChange={(e) => set({ url: e.target.value, media_url: e.target.value, audio_transcript: undefined, audio_transcript_url: undefined })}
     placeholder="https://..."
   />
 </FieldBlock>

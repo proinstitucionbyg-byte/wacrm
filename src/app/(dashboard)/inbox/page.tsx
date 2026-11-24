@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -11,12 +11,15 @@ import {
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
-import { MessageThread } from "@/components/inbox/message-thread";
+import dynamic from "next/dynamic";
+const WhatsAppGroupsPanel=dynamic(()=>import("@/components/inbox/whatsapp-groups-panel").then(m=>m.WhatsAppGroupsPanel),{loading:()=> <p role="status" className="p-4 text-sm text-muted-foreground">Abriendo grupos…</p>});
+const MessageThread=dynamic(()=>import("@/components/inbox/message-thread").then(m=>m.MessageThread),{loading:()=> <p role="status" className="p-4 text-sm text-muted-foreground">Abriendo conversación…</p>});
 import { RemindersPanel } from "@/components/inbox/reminders-panel";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { WifiOff } from "lucide-react";
+import { WifiOff, MessageSquare, UsersRound } from "lucide-react";
+import {InboxWorkspaceHeading} from "@/components/layout/workspace-page-heading";
 import { cn } from "@/lib/utils";
 import { isVisibleInInbox } from '@/lib/inbox/cleanup';
 
@@ -25,8 +28,8 @@ import { isVisibleInInbox } from '@/lib/inbox/cleanup';
 const CONTACT_PANEL_STORAGE_KEY = "wacrm:inbox:contact-panel-open";
 
 export default function InboxPage() {
+  const [inboxView, setInboxView] = useState<'chats' | 'groups'>('chats');
   const t = useTranslations("Inbox.page");
-  const router = useRouter();
   const searchParams = useSearchParams();
   /**
    * `?c=<id>` deep-link support. Used when landing here from the
@@ -62,15 +65,13 @@ export default function InboxPage() {
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
   const [mobileContactOpen, setMobileContactOpen] = useState(false);
+  const [wideContactViewport,setWideContactViewport]=useState(false);
+  useEffect(()=>{const media=window.matchMedia('(min-width:1280px)');const update=()=>{setWideContactViewport(media.matches);if(media.matches)setMobileContactOpen(false);};update();media.addEventListener('change',update);return()=>media.removeEventListener('change',update);},[]);
   const mobileViewportRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const updateHeight = () => {
       const el = mobileViewportRef.current;
       if (!el) return;
-      if (window.innerWidth >= 1024) {
-        el.style.removeProperty('height');
-        return;
-      }
       // Measure from this pane's actual top, including the dashboard
       // header and any notice. Subtracting a fixed 56px left the composer
       // behind the iPhone keyboard whenever those heights changed.
@@ -103,6 +104,7 @@ export default function InboxPage() {
   }, []);
 
   const handleToggleContactPanel = useCallback(() => {
+    if(!window.matchMedia('(min-width:1280px)').matches){setMobileContactOpen(value=>!value);return;}
     setContactPanelOpen((prev) => {
       const next = !prev;
       try {
@@ -529,12 +531,12 @@ if (activeConversation?.id === fetched.id) {
       if (window.matchMedia("(max-width: 1023px)").matches) {
         mobileClosePendingRef.current = false;
         mobileSelectionPendingRef.current = conv.id;
-        router.push(`/inbox?c=${conv.id}`, { scroll: false });
+        window.history.pushState(null,"",`/inbox?c=${conv.id}`);
       } else {
-        router.replace(`/inbox?c=${conv.id}`, { scroll: false });
+        window.history.replaceState(null,"",`/inbox?c=${conv.id}`);
       }
     },
-    [activeConversation?.id, router]
+    [activeConversation?.id]
   );
 
   // Mobile "back" — deselect the conversation so the list pane comes
@@ -550,8 +552,8 @@ if (activeConversation?.id === fetched.id) {
     // Clearing the ref lets the deep-link auto-selector fire again if
     // the user later visits /inbox?c=<same-id> — desirable UX.
     autoSelectedForDeepLinkRef.current = null;
-    router.replace("/inbox", { scroll: false });
-  }, [router]);
+    window.history.replaceState(null,"","/inbox");
+  }, []);
 
   // Keep the mobile pane in sync with the browser Back/Forward gestures.
   useEffect(() => {
@@ -639,9 +641,14 @@ if (activeConversation?.id === fetched.id) {
   // it back to the list. On lg+ both panes render side-by-side as
   // before, unchanged.
   const hasActiveConv = !!activeConversation;
+  const viewNavigation = (<nav className="crm-inbox-switch" aria-label="Vista de Inbox">
+        <button className={cn('rounded-lg px-4 py-2 text-sm', inboxView === 'chats' && 'bg-primary text-primary-foreground')} aria-pressed={inboxView === 'chats'} onClick={() => setInboxView('chats')}><MessageSquare aria-hidden="true"/>Chats</button>
+        <button className={cn('rounded-lg px-4 py-2 text-sm', inboxView === 'groups' && 'bg-primary text-primary-foreground')} aria-pressed={inboxView === 'groups'} onClick={() => setInboxView('groups')}><UsersRound aria-hidden="true"/>Grupos</button>
+      </nav>);
 
   return (
-    <div ref={mobileViewportRef} className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden sm:-m-6 lg:h-[calc(100vh-3.5rem)]">
+    <div ref={mobileViewportRef} className="crm-inbox -m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden sm:-m-6 lg:h-[calc(100vh-3.5rem)]">
+      <InboxWorkspaceHeading conversations={conversations} compact={hasActiveConv}/>
       {/* WhatsApp connection banner — in the flex column, not absolute,
           so it pushes the panels down instead of overlapping them. */}
       {whatsappConnected === false && (
@@ -653,16 +660,19 @@ if (activeConversation?.id === fetched.id) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {inboxView === 'groups' && viewNavigation}
+      {inboxView === 'groups' && <WhatsAppGroupsPanel />}
+      <div className={cn("min-h-0 flex-1 overflow-hidden", inboxView === 'chats' ? 'flex' : 'hidden')}>
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
             thread can occupy the full width. Always visible on lg+. */}
         <div
           className={cn(
-            "flex h-full min-h-0 min-w-0 flex-1 lg:flex-none",
+            "crm-conversation-pane flex h-full min-h-0 min-w-0 flex-1 flex-col lg:flex-none",
             hasActiveConv ? "hidden lg:flex" : "flex",
           )}
         >
+          {inboxView === 'chats' && viewNavigation}
           <ConversationList
             activeConversationId={activeConversation?.id ?? null}
             onSelect={handleSelectConversation}
@@ -701,7 +711,7 @@ if (activeConversation?.id === fetched.id) {
             onOpenContactInfo={() => setMobileContactOpen(true)}
             resyncToken={resyncToken}
             onRefresh={handleManualRefresh}
-            contactPanelOpen={contactPanelOpen}
+            contactPanelOpen={wideContactViewport?contactPanelOpen:mobileContactOpen}
             onToggleContactPanel={handleToggleContactPanel}
           />
         </div>
@@ -711,14 +721,14 @@ if (activeConversation?.id === fetched.id) {
             On mobile it's always hidden (the `lg:block` below), so the
             toggle — which is itself desktop-only — never affects it. */}
         {contactPanelOpen && (
-          <div className="hidden lg:block">
+          <div className="hidden xl:block">
             <ContactSidebar contact={activeContact} conversationId={activeConversation?.id} />
           </div>
         )}
       </div>
-      <RemindersPanel conversationId={activeConversation?.id ?? null} />
+      {inboxView === 'chats' && <RemindersPanel conversationId={activeConversation?.id ?? null} />}
       <Sheet open={mobileContactOpen} onOpenChange={setMobileContactOpen}>
-        <SheetContent side="right" className="!w-full max-w-sm gap-0 p-0 lg:hidden">
+        <SheetContent side="right" className="!w-full max-w-sm gap-0 p-0 xl:hidden">
           <SheetHeader className="border-b border-border pr-14">
             <SheetTitle>Información del contacto</SheetTitle>
           </SheetHeader>

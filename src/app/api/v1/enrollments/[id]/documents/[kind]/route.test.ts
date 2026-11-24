@@ -1,0 +1,18 @@
+import{beforeEach,it,expect,vi}from'vitest';
+const h=vi.hoisted(()=>({key:vi.fn(),origin:vi.fn(),billing:vi.fn(),upload:vi.fn(),save:vi.fn(),send:vi.fn(),resume:vi.fn(),updates:[] as unknown[],prior:null as unknown}));
+vi.mock('@/lib/auth/api-context',()=>({requireApiKey:h.key}));
+vi.mock('@/lib/whatsapp/session-transport-guard',()=>({getSessionOriginLineForConversation:h.origin}));
+vi.mock('@/lib/whatsapp/billing-runtime',()=>({readConversationBillingPreflight:h.billing}));
+vi.mock('@/lib/whatsapp/meta-api',()=>({uploadMedia:h.upload}));
+vi.mock('@/lib/social/storage',()=>({saveSocialDocument:h.save}));
+vi.mock('@/lib/automations/meta-send',()=>({engineSendMedia:h.send}));
+vi.mock('@/lib/matriculas/sequence',()=>({resumeEnrollmentAfterDocuments:h.resume}));
+import{POST}from'./route';
+const id='209f2796-9a57-474d-ad95-15e7ecec97c6',queued='waweb-job:11111111-1111-4111-8111-111111111111';
+beforeEach(()=>{vi.resetAllMocks();h.updates=[];h.prior=null;h.origin.mockResolvedValue('WA-ORIGIN');h.save.mockResolvedValue({mediaId:'private',url:'https://storage.example/private.pdf'});h.send.mockResolvedValue({whatsapp_message_id:queued});
+ const rows:Record<string,unknown>={enrollment_drafts:{status:'registered',lease_token:'lease',data:{full_name:'PRUEBA',document_number:'00000000'},conversation_id:'conversation',review_id:'review',student_folder_url:'https://drive.google.com/drive/folders/test'},payment_reviews:{status:'validated'},conversations:{id:'conversation',automation_enabled:true,user_id:'owner',contact_id:'contact',contact:{channel:'whatsapp'}},whatsapp_config:null,whatsapp_session_outbound_jobs:{status:'delivered',provider_message_id:'real-provider'}};
+ h.key.mockResolvedValue({accountId:'account',supabase:{from:(table:string)=>{const c:any={select:()=>c,eq:()=>c,maybeSingle:async()=>({data:table==='enrollment_document_deliveries'?h.prior:rows[table],error:null}),insert:()=>c,update:(v:unknown)=>{h.updates.push(v);return c;},then:(fn:(v:unknown)=>unknown)=>Promise.resolve({error:null}).then(fn)};return c;}}});
+});
+const call=()=>POST(new Request('https://crm.example/documents',{method:'POST',headers:{'X-Enrollment-Lease':'lease','Content-Type':'application/pdf'},body:'%PDF-1.7\n%%EOF'}),{params:Promise.resolve({id,kind:'BOLETA'})});
+it('queues a native PDF without Cloud quota or upload and without marking delivery',async()=>{const r=await call();expect(r.status).toBe(202);expect(h.billing).not.toHaveBeenCalled();expect(h.upload).not.toHaveBeenCalled();expect(h.send).toHaveBeenCalledWith(expect.objectContaining({conversationId:'conversation',mediaUrl:'https://storage.example/private.pdf',idempotencyKey:expect.stringContaining('enrollment-document:')}));expect(h.updates).toEqual([{whatsapp_message_id:queued}]);expect(h.resume).not.toHaveBeenCalled();});
+it('reconciles a delivered native job without reuploading or sending again',async()=>{const {createHash}=await import('node:crypto');h.prior={status:'sending',whatsapp_message_id:queued,sha256:createHash('sha256').update('%PDF-1.7\n%%EOF').digest('hex')};expect((await call()).status).toBe(200);expect(h.send).not.toHaveBeenCalled();expect(h.save).not.toHaveBeenCalled();expect(h.updates).toContainEqual(expect.objectContaining({status:'sent',whatsapp_message_id:'real-provider'}));expect(h.resume).toHaveBeenCalled();});

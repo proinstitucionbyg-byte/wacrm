@@ -155,9 +155,26 @@ export async function GET(request: Request) {
       const route = conversation ? newestRoute(conversation.conversation_sales_routes) : null;
       const assignedAgentId = conversation?.assigned_agent_id ?? route?.agent_id ?? null;
       const assignedProfile = assignedAgentId ? profileById.get(assignedAgentId) : null;
-      return !!stateByContact.get(contact.id) || !!saleByContact.get(contact.id) ||
+      return conversation?.ai_handoff_area === 'FIDELIZACION' || tags.includes('AREA FIDELIZACION') || !!stateByContact.get(contact.id) || !!saleByContact.get(contact.id) ||
         tags.some((tag) => SALES_TAGS.has(tag)) || assignedProfile?.area?.toLowerCase() === 'ventas';
     });
+    // Only numbered manual observations are mirrored; automatic handoffs stay separate.
+    const { data: observations, error: observationsError, count: observationsCount } = exportContacts.length
+      ? await ctx.supabase.from('contact_notes')
+          .select('id,contact_id,note_number,note_text', { count: 'exact' })
+          .eq('account_id', ctx.accountId)
+          .in('contact_id', exportContacts.map(contact => contact.id))
+          .gt('note_number', 0).order('note_number', { ascending: true })
+      : { data: [], error: null, count: 0 };
+    if (observationsError) throw observationsError; // Never export an empty replacement after a failed read.
+    if (observationsCount != null && (observations?.length ?? 0) !== observationsCount) throw new Error('Incomplete observation snapshot');
+    const observationsByContact = new Map<string, Array<{ id: string; number: number; text: string }>>();
+    for (const note of observations ?? []) {
+      if (!Number.isSafeInteger(note.note_number) || note.note_number < 1) continue;
+      const entries = observationsByContact.get(note.contact_id) ?? [];
+      entries.push({ id: note.id, number: note.note_number, text: note.note_text });
+      observationsByContact.set(note.contact_id, entries);
+    }
     const exportConversationIds = [...new Set(exportContacts
       .map((contact) => contact.conversations[0]?.id)
       .filter((id): id is string => !!id))];
@@ -199,7 +216,8 @@ export async function GET(request: Request) {
         ? ['VENTA','VENTA SOLO'].includes(commercialStatus) && !commercialState.explicitly_cleared
         : !!sale || ['VENTA','VENTA SOLO'].includes(commercialStatus);
       const salePrices = (sale?.enrollments?.[0]?.data as { prices?: unknown } | null)?.prices;
-      if (!commercialState && !sale && !tags.some((tag) => SALES_TAGS.has(tag)) && !isSalesProfile) return [];
+      const hasSalesClassification = tags.some((tag) => SALES_TAGS.has(tag)) || isSalesProfile || !!commercialStatus;
+      if (!commercialState && !sale && !hasSalesClassification && conversation?.ai_handoff_area !== 'FIDELIZACION' && !tags.includes('AREA FIDELIZACION')) return [];
       const firstReferral = [...messages]
         .filter((message) => message.sender_type === 'customer' && message.source_referral)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))[0]?.source_referral ?? null;
@@ -222,7 +240,9 @@ export async function GET(request: Request) {
       const registeredPhone = (contact.channel || 'whatsapp') === 'whatsapp'
         && /^\+?\d{7,15}$/.test(candidatePhone) ? candidatePhone : '';
 
-      const indicators=salesLeadIndicators({tags,area:conversation?.ai_handoff_area,
+      // Export an explicit exclusion for a cleared classification. Otherwise
+      // Sheets keeps the old row forever because absence is not a deletion.
+      const indicators=salesLeadIndicators({tags,area:!hasSalesClassification && !sale && !countableSale ? 'SIN AREA' : conversation?.ai_handoff_area,
         status:commercialStatus,validatedSale:!!sale,
         statusChangedAt:commercialState?.status_changed_at??commercialTag?.created_at,
         urgencyRequestedAt:contact.contact_tags.filter(item=>item.tag?.name==='ASESOR URGENTE').map(item=>item.created_at??'').sort().at(-1),
@@ -232,6 +252,7 @@ export async function GET(request: Request) {
       return [{
         ...indicators,
         conversation_summary:conversation?.ai_handoff_summary??'',
+        observations: observationsByContact.get(contact.id) ?? [],
         id: contact.id,
         name: contact.name?.trim() || 'Sin nombre',
         phone_or_user_id: contact.phone_normalized || contact.external_id || contact.phone || registeredPhone,
