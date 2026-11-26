@@ -6,7 +6,7 @@ export const managementOperation=z.enum(['create','connect','stop','unlink','det
 export const managementAction=z.object({action:z.literal('manage_line'),operation:managementOperation,
  worker_id:z.string().uuid(),line_key:whatsappSessionLineKeySchema.optional(),label:z.string().trim().min(1).max(60).optional(),
  expected_phone:z.string().regex(/^\d{7,15}$/).optional()}).strict().refine(v=>v.operation==='create'?!!v.label&&!v.line_key:v.operation==='recover_all'?!v.line_key:!!v.line_key)
- .refine(v=>!['unlink','detach','replace'].includes(v.operation)||!!v.expected_phone);
+ .refine(v=>!['unlink','replace'].includes(v.operation)||!!v.expected_phone);
 
 export const managementSnapshotLine=z.object({lineKey:whatsappSessionLineKeySchema,label:z.string().min(1).max(60),
  archived:z.boolean().optional(),

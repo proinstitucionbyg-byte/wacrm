@@ -13,6 +13,15 @@ test('detach releases only selected number and never reconnects it',async()=>{
  }
 });
 
+test('detach also clears an unbound connection-error profile, but rejects a phone bound meanwhile',async()=>{
+ let calls=0;const manager={list:()=>[{...line,status:'connection_error',linkedPhone:null}],unlink:async()=>calls++};
+ await executeManagementCommand(manager,{...command,operation:'detach'},accountId);
+ assert.equal(calls,1);
+ manager.list=()=>[line];
+ await assert.rejects(executeManagementCommand(manager,{...command,operation:'detach'},accountId),/teléfono cambió/);
+ assert.equal(calls,1);
+});
+
 test('group requests stay on the selected ready phone and return only requested metadata',async()=>{
  let selected,change;
  const manager={list:()=>[line],get:key=>{selected=key;return{getGroupController:async phone=>{assert.equal(phone,line.linkedPhone);return{list:async()=>({total:1,offset:0,groups:[{id:'123456789@g.us',name:'Grupo',participantsLoaded:2}]}),mutate:async value=>{change=value;return{state:'needs_review'};}};}};}};

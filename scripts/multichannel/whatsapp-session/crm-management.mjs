@@ -29,7 +29,7 @@ export async function executeManagementCommand(manager,command,accountId){
   throw Error('Solicitud de grupos inválida.');
  }
  if((line.archived===true||line.label.startsWith('Historial '))&&op!=='stop')throw Error('El historial es de solo consulta.');
- if(['unlink','detach','replace'].includes(op)&&(!command.expected_phone||line.linkedPhone!==command.expected_phone))throw Error('El teléfono cambió; actualiza antes de continuar.');
+ if((['unlink','replace'].includes(op)||(op==='detach'&&line.linkedPhone))&&(!command.expected_phone||line.linkedPhone!==command.expected_phone))throw Error('El teléfono cambió; actualiza antes de continuar.');
  if(op==='detach'){await manager.unlink(line.lineKey,{release:true});return 'Desvinculado del CRM. La sesión local está cerrada y el historial se conserva. Si WhatsApp no respondió, revisa Dispositivos vinculados en el celular.';}
  if(op==='connect'){await manager.connect(line.lineKey);return 'Línea abierta. Comprueba su estado o escanea su QR.';}
  if(op==='stop'){await manager.disconnect(line.lineKey);return 'Línea detenida. Se conservan el vínculo y el historial.';}
