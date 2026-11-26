@@ -4,7 +4,7 @@ const LINE=/^WA-[A-Za-z0-9_-]{1,60}$/;
 export async function executeManagementCommand(manager,command,accountId){
  if(!command||!UUID.test(command.id??'')||command.account_id!==accountId||command.status!=='running')throw Error('Acción fuera de esta cuenta.');
  const op=command.operation;
- if(!['create','connect','stop','unlink','recover','recover_all','replace','group_list','group_details','group_mutate'].includes(op))throw Error('Acción no admitida.');
+ if(!['create','connect','stop','unlink','detach','recover','recover_all','replace','group_list','group_details','group_mutate'].includes(op))throw Error('Acción no admitida.');
  if(op==='recover_all'){
   const targets=manager.list().filter(item=>!item.archived&&!item.label.startsWith('Historial ')&&item.active);
   const results=[];
@@ -29,7 +29,8 @@ export async function executeManagementCommand(manager,command,accountId){
   throw Error('Solicitud de grupos inválida.');
  }
  if((line.archived===true||line.label.startsWith('Historial '))&&op!=='stop')throw Error('El historial es de solo consulta.');
- if(['unlink','replace'].includes(op)&&(!command.expected_phone||line.linkedPhone!==command.expected_phone))throw Error('El teléfono cambió; actualiza antes de continuar.');
+ if(['unlink','detach','replace'].includes(op)&&(!command.expected_phone||line.linkedPhone!==command.expected_phone))throw Error('El teléfono cambió; actualiza antes de continuar.');
+ if(op==='detach'){await manager.unlink(line.lineKey,{release:true});return 'Desvinculado del CRM. La sesión local está cerrada y el historial se conserva. Si WhatsApp no respondió, revisa Dispositivos vinculados en el celular.';}
  if(op==='connect'){await manager.connect(line.lineKey);return 'Línea abierta. Comprueba su estado o escanea su QR.';}
  if(op==='stop'){await manager.disconnect(line.lineKey);return 'Línea detenida. Se conservan el vínculo y el historial.';}
  if(op==='unlink'){await manager.unlink(line.lineKey);await manager.connect(line.lineKey);return 'Escanea el QR con el mismo número. Se conserva la tarjeta y su historial.';}

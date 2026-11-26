@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {sessionScope} from './store.mjs';
 
 // A local account owns this registry. Each runtime still owns its isolated store lock.
-export async function openLineManager({accountId,primary,createRuntime,createOfflineReader,readBoundPhone,registryPath,maxActive=10}) {
+export async function openLineManager({accountId,primary,createRuntime,createOfflineReader,readBoundPhone,resetAuthentication,registryPath,maxActive=10}) {
   sessionScope(accountId,primary.lineKey);
   if(!Number.isInteger(maxActive)||maxActive<1||maxActive>10)throw Error('Límite de sesiones inválido.');
   const valid=row=>{sessionScope(accountId,row.lineKey);if(typeof row.label!=='string'||!row.label.trim()||row.label.length>60||row.archived!==undefined&&typeof row.archived!=='boolean')throw Error('Nombre inválido.');return {lineKey:row.lineKey,label:row.label.trim(),archived:row.archived??row.label.startsWith('Historial ')};};
@@ -12,7 +12,7 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
   try {
     const saved=JSON.parse(await readFile(registryPath,'utf8'));
     if(saved.version!==1||saved.accountId!==accountId||!Array.isArray(saved.lines)||saved.lines.length>20)throw Error('Registro de líneas inválido.');
-    rows=saved.lines.map(valid);
+    rows=saved.lines.map(row=>({...valid(row),released:row.released===true}));
     if(saved.defaultLine!==undefined){if(!rows.some(r=>r.lineKey===saved.defaultLine))throw Error('Línea principal inválida.');defaultLine=saved.defaultLine;}
     if(new Set(rows.map(r=>r.lineKey)).size!==rows.length)throw Error('Líneas duplicadas.');
     if(!rows.some(r=>r.lineKey===primary.lineKey))rows.unshift(valid({lineKey:primary.lineKey,label:'Principal'}));
@@ -36,7 +36,7 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
     claimPhone(lineKey,phone){const task=phoneTail.then(async()=>{
       if(closed)throw Error('Administrador detenido.');
       if(!rows.some(r=>r.lineKey===lineKey)||!/^\d{7,15}$/.test(phone??''))throw Error('Identidad inválida.');
-      if([...phones].some(([key,value])=>key!==lineKey&&value===phone))return false;
+      if([...phones].some(([key,value])=>key!==lineKey&&value===phone&&!rows.find(r=>r.lineKey===key)?.released))return false;
       for(const [key,runtime]of runtimes)if(key!==lineKey&&runtime.adapter.status().linkedPhone===phone)return false;
       phones.set(lineKey,phone);return true;
     });phoneTail=task.catch(()=>{});return task;},
@@ -75,6 +75,7 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
       if(!rows.some(r=>r.lineKey===lineKey))throw Error('Línea desconocida.');
       if(rows.find(r=>r.lineKey===lineKey).archived)throw Error('El historial es de solo consulta; no se puede conectar.');
       if(runtimes.has(lineKey))return {alreadyActive:true};
+      if(rows.find(r=>r.lineKey===lineKey)?.released)await persist(rows.map(r=>r.lineKey===lineKey?{...r,released:false}:r));
       if(runtimes.size>=maxActive)throw Error('Límite local: '+maxActive+' sesiones abiertas.');
       const runtime=await createRuntime({accountId,lineKey});
       const state=runtime.adapter.status();
@@ -88,12 +89,20 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
       if(runtime){await runtime.stop();runtimes.delete(lineKey);}
       return {stopped:true,profilePreserved:true};
     });},
-    unlink(lineKey){return serial(async()=>{
+    unlink(lineKey,{release=false}={}){return serial(async()=>{
       sessionScope(accountId,lineKey);const runtime=runtimes.get(lineKey);
-      if(!rows.some(r=>r.lineKey===lineKey)||typeof runtime?.unlink!=='function')throw Error('Conecta y verifica esta línea antes de desvincularla.');
+      if(!rows.some(r=>r.lineKey===lineKey))throw Error('Línea desconocida.');
       if(rows.find(r=>r.lineKey===lineKey).archived)throw Error('El historial es de solo consulta.');
-      const result=await runtime.unlink();if(result?.unlinked!==true)throw Error('No se confirmó la desvinculación.');
-      runtimes.delete(lineKey);return{unlinked:true,historyPreserved:true};
+      if(runtime?.adapter.status().status==='ready'){
+        const result=await runtime.unlink();if(result?.unlinked!==true)throw Error('No se confirmó la desvinculación.');
+        runtimes.delete(lineKey);
+      }else{
+        if(typeof resetAuthentication!=='function')throw Error('La revinculación requiere verificar el perfil guardado.');
+        if(runtime){await runtime.stop();runtimes.delete(lineKey);}
+        await resetAuthentication({accountId,lineKey});
+      }
+      if(release)await persist(rows.map(r=>r.lineKey===lineKey?{...r,released:true}:r));
+      return{unlinked:true,historyPreserved:true};
     });},
     recover(lineKey){return serial(async()=>{
       sessionScope(accountId,lineKey);

@@ -5,6 +5,14 @@ const accountId='11111111-1111-4111-8111-111111111111',id='22222222-2222-4222-82
 const line={lineKey:'WA-test',label:'Soporte',status:'ready',active:true,linkedPhone:'51911111111'};
 const command={id,account_id:accountId,status:'running',operation:'connect',line_key:line.lineKey};
 
+test('detach releases only selected number and never reconnects it',async()=>{
+ for(const status of ['ready','stopped','connection_error']){
+  const calls=[];const manager={list:()=>[{...line,status}],unlink:async(key,options)=>calls.push({key,options}),connect:async()=>{throw Error('must not reconnect');}};
+  await executeManagementCommand(manager,{...command,operation:'detach',expected_phone:line.linkedPhone},accountId);
+  assert.deepEqual(calls,[{key:line.lineKey,options:{release:true}}]);
+ }
+});
+
 test('group requests stay on the selected ready phone and return only requested metadata',async()=>{
  let selected,change;
  const manager={list:()=>[line],get:key=>{selected=key;return{getGroupController:async phone=>{assert.equal(phone,line.linkedPhone);return{list:async()=>({total:1,offset:0,groups:[{id:'123456789@g.us',name:'Grupo',participantsLoaded:2}]}),mutate:async value=>{change=value;return{state:'needs_review'};}};}};}};

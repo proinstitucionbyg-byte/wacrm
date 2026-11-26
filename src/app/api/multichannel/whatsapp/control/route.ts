@@ -58,12 +58,12 @@ export async function POST(request: Request) {
       if(worker.error)throw worker.error;if(!worker.data)return NextResponse.json({error:'Servidor del bot no disponible en esta cuenta.'},{status:404});
       const state=await db.from('whatsapp_management_state').select('snapshot,seen_at').eq('account_id',ctx.accountId).eq('worker_id',worker.data.id).maybeSingle();
       if(state.error)throw state.error;
-      if(action.operation!=='recover_all'&&(!state.data||Date.now()-Date.parse(state.data.seen_at)>20000))return NextResponse.json({error:'El servidor del bot no está disponible. Actualiza el estado; si continúa, el administrador debe revisar el servicio de WhatsApp en Contabo. No inicies otro bot en la laptop.'},{status:409});
+      if(!['recover_all','detach'].includes(action.operation)&&(!state.data||Date.now()-Date.parse(state.data.seen_at)>20000))return NextResponse.json({error:'El servidor del bot no está disponible. Actualiza el estado; si continúa, el administrador debe revisar el servicio de WhatsApp en Contabo. No inicies otro bot en la laptop.'},{status:409});
       const snapshot=managementSnapshotLine.array().safeParse(state.data?.snapshot??[]);if(!snapshot.success)throw Error('Invalid management state');
       const line=snapshot.data.find(l=>l.lineKey===action.line_key);
       if(!['create','recover_all'].includes(action.operation)&&!line)return NextResponse.json({error:'Esa línea no pertenece a este servidor del bot.'},{status:404});
       if(line&&(line.archived===true||line.label.startsWith('Historial '))&&action.operation!=='stop')return NextResponse.json({error:'Ese número ya está archivado. Escanea el QR de su tarjeta actual; no necesitas volver a cambiarlo.'},{status:409});
-      if(['unlink','replace'].includes(action.operation)&&line?.linkedPhone!==action.expected_phone)return NextResponse.json({error:'El número cambió. Actualiza y comprueba el teléfono antes de continuar.'},{status:409});
+      if(['unlink','detach','replace'].includes(action.operation)&&line?.linkedPhone!==action.expected_phone)return NextResponse.json({error:'El número cambió. Actualiza y comprueba el teléfono antes de continuar.'},{status:409});
       const inserted=await db.from('whatsapp_management_commands').insert({account_id:ctx.accountId,worker_id:worker.data.id,operation:action.operation,line_key:action.line_key,label:action.label,expected_phone:action.expected_phone}).select('id').single();
       if(inserted.error?.code==='23505'&&action.operation==='recover_all')return NextResponse.json({recoveryRequested:true,message:'El supervisor comprobará el servicio y recuperará la conexión si está bloqueada.'},{status:202,headers:{'Cache-Control':'no-store'}});
       if(inserted.error?.code==='23505')return NextResponse.json({error:'Espera a que termine la acción anterior de este servidor.'},{status:409});
