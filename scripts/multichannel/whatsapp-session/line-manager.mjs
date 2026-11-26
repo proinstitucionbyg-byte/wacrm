@@ -36,7 +36,7 @@ export async function openLineManager({accountId,primary,createRuntime,createOff
     claimPhone(lineKey,phone){const task=phoneTail.then(async()=>{
       if(closed)throw Error('Administrador detenido.');
       if(!rows.some(r=>r.lineKey===lineKey)||!/^\d{7,15}$/.test(phone??''))throw Error('Identidad inválida.');
-      if([...phones].some(([key,value])=>key!==lineKey&&value===phone&&!rows.find(r=>r.lineKey===key)?.released))return false;
+      if([...phones].some(([key,value])=>key!==lineKey&&value===phone&&!rows.find(r=>r.lineKey===key)?.released&&!rows.find(r=>r.lineKey===key)?.archived))return false;
       for(const [key,runtime]of runtimes)if(key!==lineKey&&runtime.adapter.status().linkedPhone===phone)return false;
       phones.set(lineKey,phone);return true;
     });phoneTail=task.catch(()=>{});return task;},

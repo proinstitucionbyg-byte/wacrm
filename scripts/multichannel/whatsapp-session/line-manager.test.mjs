@@ -31,7 +31,7 @@ test('replacement creates a fresh profile identity and preserves the previous re
  await assert.rejects(x.manager.replace(row.lineKey),/ya espera/);
  assert.equal(x.manager.list().length,2);
  const restored=await openLineManager({...x.options,readBoundPhone:async key=>key==='WA-main'?'51900000001':null});
- assert.equal(restored.defaultLine(),row.lineKey);assert.equal(await restored.claimPhone(row.lineKey,'51900000001'),false);await restored.close();
+ assert.equal(restored.defaultLine(),row.lineKey);assert.equal(await restored.claimPhone(row.lineKey,'51900000001'),true);assert.equal(restored.list().find(r=>r.lineKey==='WA-main').archived,true);await restored.close();
 }));
 test('concurrent phone claims reject duplicates while the original line may reopen',()=>fixture(async x=>{
  const row=await x.manager.register({label:'Nueva'});
@@ -73,6 +73,13 @@ test('stopping one line preserves registration and frees capacity without stoppi
   await x.manager.connect(b.lineKey);assert.equal(x.created(),2);
 }));
 test('unlink affects only the selected runtime and retains its registration',()=>fixture(async x=>{
- const line=await x.manager.register({label:'Other'});await x.manager.connect(line.lineKey);await x.manager.unlink(line.lineKey);
+ const line=await x.manager.register({label:'Other'});await x.manager.connect(line.lineKey);const a=x.manager.get(line.lineKey).adapter;const original=a.status;a.status=()=>({...original(),status: 'ready'});await x.manager.unlink(line.lineKey);
  assert.equal(x.unlinked(),1);assert.equal(x.manager.list().find(r=>r.lineKey===line.lineKey).active,false);assert.ok(x.manager.get('WA-main'));
 }));
+
+test('a failed same-number relink retains its line key and never archives another line',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'wa-relink-'));let reset=0,stopped=0;
+ const runtime={adapter:{status:()=>({accountId,lineKey:'WA-main',status:'auth_failure'})},stop:async()=>stopped++,chatReader:{}};
+ const manager=await openLineManager({accountId,primary:{lineKey:'WA-main',runtime},registryPath:join(dir,'lines.json'),readBoundPhone:async()=> '51900000001',resetAuthentication:async args=>{assert.equal(args.lineKey,'WA-main');reset++;},createRuntime:async()=>({...runtime,adapter:{status:()=>({accountId,lineKey:'WA-main',status:'awaiting_qr'})}})});
+ try{await manager.unlink('WA-main');await manager.connect('WA-main');const lines=manager.list();assert.equal(lines.length,1);assert.equal(lines[0].lineKey,'WA-main');assert.equal(lines[0].linkedPhone,'51900000001');assert.equal(lines[0].archived,false);assert.equal(lines[0].status,'awaiting_qr');assert.equal(reset,1);assert.equal(stopped,1);}finally{await manager.close();await rm(dir,{recursive:true,force:true});}
+});
