@@ -66,8 +66,10 @@ export function startCrmManagement({accountId,origin,token,manager,qrToDataUrl,f
   if(data.command){
    const command=data.command;if(!UUID.test(command.id??'')||command.account_id!==accountId)throw Error('Acción fuera de esta cuenta.');
    // A claimed action is never replayed automatically if its outcome is lost.
-   try{const result=await executeManagementCommand(manager,command,accountId);completed={id:command.id,status:typeof result==='object'&&result.data?.kind==='mutation'&&result.data.state!=='done'?'needs_review':'done',result:typeof result==='string'?result:result.message,...(typeof result==='object'?{result_data:result.data}:{})};}
+   let commandTimer;
+   try{const result=await Promise.race([executeManagementCommand(manager,command,accountId),new Promise((_,reject)=>{commandTimer=setTimeout(()=>{onFatal();reject(Error('Management command timed out'));},120000);})]);completed={id:command.id,status:typeof result==='object'&&result.data?.kind==='mutation'&&result.data.state!=='done'?'needs_review':'done',result:typeof result==='string'?result:result.message,...(typeof result==='object'?{result_data:result.data}:{})};}
    catch{completed={id:command.id,status:command.operation==='group_mutate'?'needs_review':'error',result:'No se completó la acción. Revisa el estado y el número de esta línea antes de volver a intentarlo.'};}
+   finally{clearTimeout(commandTimer);}
   }
   failures=0;if(completed&&['group_list','group_details'].includes(data.command?.operation))flushReadResult=true;
  }catch{failures++;onError();if(failures>=maxFailures){onFatal();return;}}if(!stopped&&!flushReadResult)await wait();}})();

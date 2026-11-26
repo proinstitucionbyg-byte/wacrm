@@ -189,7 +189,7 @@ async function main() {
       await writeFile(join(privateRoot,sessionScope(accountId,ownerConfig.lineKey),'panel-access.json'),access,{mode:0o600});
     }
     console.log('Panel privado local (solo recepción): ' + panel.url);
-    const signalStop = () => { void stop().catch(() => { console.error('No se pudo confirmar el cierre del ejecutor.'); process.exitCode = 1; }); };
+    const signalStop = () => { const deadline=setTimeout(()=>process.exit(1),25000);deadline.unref();void stop().catch(() => { console.error('No se pudo confirmar el cierre del ejecutor.'); process.exitCode = 1; }); };
     process.once('SIGINT', signalStop);
     process.once('SIGTERM', signalStop);
   } catch (error) {
