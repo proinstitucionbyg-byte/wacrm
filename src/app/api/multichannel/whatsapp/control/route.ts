@@ -65,6 +65,7 @@ export async function POST(request: Request) {
       if(line&&(line.archived===true||line.label.startsWith('Historial '))&&action.operation!=='stop')return NextResponse.json({error:'Ese número ya está archivado. Escanea el QR de su tarjeta actual; no necesitas volver a cambiarlo.'},{status:409});
       if(['unlink','replace'].includes(action.operation)&&line?.linkedPhone!==action.expected_phone)return NextResponse.json({error:'El número cambió. Actualiza y comprueba el teléfono antes de continuar.'},{status:409});
       const inserted=await db.from('whatsapp_management_commands').insert({account_id:ctx.accountId,worker_id:worker.data.id,operation:action.operation,line_key:action.line_key,label:action.label,expected_phone:action.expected_phone}).select('id').single();
+      if(inserted.error?.code==='23505'&&action.operation==='recover_all')return NextResponse.json({recoveryRequested:true,message:'El supervisor comprobará el servicio y recuperará la conexión si está bloqueada.'},{status:202,headers:{'Cache-Control':'no-store'}});
       if(inserted.error?.code==='23505')return NextResponse.json({error:'Espera a que termine la acción anterior de este servidor.'},{status:409});
       if(inserted.error)throw inserted.error;
       return NextResponse.json({command:inserted.data},{status:202,headers:{'Cache-Control':'no-store'}});

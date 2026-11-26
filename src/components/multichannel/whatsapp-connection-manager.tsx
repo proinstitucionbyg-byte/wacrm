@@ -19,14 +19,14 @@ export function WhatsappConnectionManager({active=true}:{active?:boolean}){
  },[]);
  useEffect(()=>{if(!active)return;let stopped=false;let timer:ReturnType<typeof setTimeout>;const poll=async()=>{if(document.visibilityState==='visible'){try{await refresh();}catch(e){if(!stopped)setError(e instanceof Error?e.message:'No se pudo actualizar.');}}if(!stopped)timer=setTimeout(poll,15000);};void poll();return()=>{stopped=true;clearTimeout(timer);};},[refresh,active]);
  const state=data?.snapshots.find(s=>s.worker_id===worker);
- const pending=data?.commands.find(c=>c.worker_id===worker&&['pending','running'].includes(c.status));
+ const pending=state?.online?data?.commands.find(c=>c.worker_id===worker&&['pending','running'].includes(c.status)):undefined;
  const latest=data?.commands.find(c=>c.worker_id===worker);
  const online=state?.online===true&&!error;
  const fallbackLines:Line[]=(data?.lines.filter(line=>line.worker_id===worker)??[]).map(line=>({lineKey:line.line_key,label:'WhatsApp registrado',status:'disconnected',linkedPhone:line.linked_phone,active:false,qr:null}));
  const currentLines=(state?.lines.length?state.lines:fallbackLines).filter(line=>!line.archived&&!line.label.startsWith('Historial '));
  const unusedLines=currentLines.filter(line=>!line.active&&!line.linkedPhone&&line.label!=='Principal');
  const visibleLines=currentLines.filter(line=>!unusedLines.includes(line)).sort((a,b)=>Number(b.label==='Principal')-Number(a.label==='Principal')||a.label.localeCompare(b.label,'es',{numeric:true}));
- async function request(body:unknown){const response=await fetch('/api/multichannel/whatsapp/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw Error(result.error||'No se pudo solicitar la acción.');return result;}
+ async function request(body:unknown){const response=await fetch('/api/multichannel/whatsapp/control',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(20000),body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw Error(result.error||'No se pudo solicitar la acción.');return result;}
  async function manage(operation:string,line?:Line){
   if((operation==='unlink'||operation==='replace')&&!window.confirm(operation==='unlink'?`¿Volver a vincular +${line?.linkedPhone}? Se cerrará esta conexión y se mostrará un QR para el MISMO número. Su historial se conserva.`:`¿Cambiar +${line?.linkedPhone} por otro teléfono? Se abrirá un perfil nuevo; el historial anterior se conserva separado.`))return;
   setBusy(true);setNotice('');
