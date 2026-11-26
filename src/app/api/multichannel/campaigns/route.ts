@@ -18,7 +18,7 @@ export async function GET(request:Request){
   if(!z.string().uuid().safeParse(selected).success)return reply({error:'Campaña inválida.'},400);
   const[campaign,jobs]=await Promise.all([
    db.from('multichannel_campaigns').select('id,name,body,sequence,sms_body,status,routes,dispatch_mode,distribution,run_at,expires_at,review_hash,created_at').eq('account_id',ctx.accountId).eq('id',selected).maybeSingle(),
-   db.from('multichannel_jobs').select('id,campaign_id,recipient,status,run_at,routing_alert,line_key').eq('account_id',ctx.accountId).eq('campaign_id',selected).eq('mode','whatsapp_live').eq('campaign_step',0).order('campaign_sequence').limit(1000),
+   db.from('multichannel_jobs').select('id,campaign_id,recipient,body,status,run_at,routing_alert,line_key').eq('account_id',ctx.accountId).eq('campaign_id',selected).eq('mode','whatsapp_live').eq('campaign_step',0).order('campaign_sequence').limit(1000),
   ]);
   if(campaign.error||jobs.error)return reply({error:'No se pudo recuperar la revisión completa.'},503);
   if(!campaign.data)return reply({error:'Campaña no encontrada.'},404);
@@ -39,6 +39,8 @@ export async function POST(request:Request){
  if(process.env.MULTICHANNEL_CAMPAIGNS_ENABLED!=='true')return reply({error:'Campañas reales todavía no habilitadas.'},503);
  const decoded=await readQueueJson(request,1_500_000);if(!decoded.ok)return reply({error:'Solicitud inválida o demasiado grande.'},decoded.status);
  const json=decoded.value;
+ const handled=z.object({action:z.literal('mark_handled'),job_id:z.string().uuid()}).strict().safeParse(json);
+ if(handled.success){const r=await supabaseAdmin().rpc('mark_campaign_recipient_handled',{p_account:ctx.accountId,p_actor:ctx.userId,p_job:handled.data.job_id});return reply(r.error?{error:'No se confirmó la atención manual.'}:{cancelled:r.data},r.error?503:200);}
  const imported=z.object({action:z.literal('import_recipients'),recipients:z.array(z.object({phone:z.string().max(40),name:z.string().trim().max(200).optional()}).strict()).min(1).max(1000)}).strict().safeParse(json);
  if(imported.success){
   try{return reply(await importCampaignContacts(supabaseAdmin(),ctx.accountId,ctx.userId,imported.data.recipients));}
@@ -54,17 +56,17 @@ export async function POST(request:Request){
  if(edit.success){
   try{assertCampaignMediaOwnership(edit.data,ctx.accountId,process.env.NEXT_PUBLIC_SUPABASE_URL??'');}catch{return reply({error:'Selecciona archivos del almacenamiento de esta cuenta.'},400);}
   const value=edit.data;const hash=createHash('sha256').update(JSON.stringify({name:value.name,sequence:value.sequence})).digest('hex');
-  const{data,error}=await supabaseAdmin().rpc('edit_pending_campaign_content',{p_account:ctx.accountId,p_actor:ctx.userId,p_campaign:value.campaign_id,p_expected_hash:value.expected_review_hash,p_name:value.name,p_sequence:value.sequence,p_new_hash:hash});
+  const{data,error}=await supabaseAdmin().rpc('edit_pending_campaign_content_personalized',{p_account:ctx.accountId,p_actor:ctx.userId,p_campaign:value.campaign_id,p_expected_hash:value.expected_review_hash,p_name:value.name,p_sequence:value.sequence,p_new_hash:hash});
   if(error)return reply({error:error.code==='40001'?'Otra persona cambió la campaña. Actualiza antes de editar.':error.code==='22023'?'Pausa la campaña y conserva la cantidad de pasos y sus tiempos. Revisa que no haya vencido.':'No se confirmó el cambio de contenido.'},error.code==='40001'?409:error.code==='22023'?400:503);
   return reply({campaign:data});
  }
- const input=liveCampaignActionSchema.safeParse(json);if(!input.success)return reply({error:'Revisa fechas, líneas, permisos y destinatarios.'},400);
+ const input=liveCampaignActionSchema.safeParse(json);if(!input.success)return reply({error:input.error.issues[0]?.message??'Revisa fechas, líneas, permisos y destinatarios.'},400);
  let payload:Record<string,unknown>;
  if(input.data.action==='create'){
   try{const{plan}=liveCampaignSchedule(input.data.campaign);assertCampaignMediaOwnership(plan,ctx.accountId,process.env.NEXT_PUBLIC_SUPABASE_URL??'');payload={...plan,review_hash:createHash('sha256').update(JSON.stringify(plan)).digest('hex')};}
   catch{return reply({error:'La campaña venció o su programación no es válida.'},400);}
  }else{const{action,...rest}=input.data;void action;payload=rest;}
- const{data,error}=await supabaseAdmin().rpc('multichannel_campaign_control',{p_account_id:ctx.accountId,p_actor_id:ctx.userId,p_action:input.data.action,p_payload:payload});
+ const{data,error}=await supabaseAdmin().rpc('multichannel_campaign_control_personalized',{p_account_id:ctx.accountId,p_actor_id:ctx.userId,p_action:input.data.action,p_payload:payload});
  if(error)return reply({error:error.code==='23505'?'Hay una solicitud o teléfonos repetidos. Consulta el estado y revisa la lista.':error.code==='42501'?'Algún contacto o línea no pertenece a tu cuenta.':'No se confirmó el cambio. Consulta su estado antes de repetir.'},error.code==='23505'?409:error.code==='42501'?403:503);
  if(!data)return reply({error:'Campaña no encontrada.'},404);
  return reply({campaign:data},input.data.action==='create'?201:200);

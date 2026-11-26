@@ -64,7 +64,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   let status = 'stopped', connectionReason = null, connectionDetail = null, qr = null, binding = null, tail = Promise.resolve(), started = false, stopping = false;
   let readySignalSeen = false, socketState = null;
   function automationPaused(){try{return getAutomationPaused()!==false;}catch{return true;}}
-  const incoming = new Map(), humanMessages=new Map(), seen = new Set(), paused = new Set(), attempts = new Map(), manualAttempts = new Map(), bots = new Map(), pendingHuman = new Map();
+  const incoming = new Map(), humanMessages=new Map(), seen = new Set(), paused = new Map(), attempts = new Map(), manualAttempts = new Map(), bots = new Map(), pendingHuman = new Map();
   const crmSync = new Map(), crmSyncPhones = new Map(), phoneByChat = new Map(), crmSyncInFlight = new Map();
   const ackCheckedAt=new Map();
   let crmSyncTail = Promise.resolve(), crmRetryTimer = null, crmRetryDelayMs = crmRetryInitialMs, crmRetryBusy = false;
@@ -86,7 +86,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
         if (/^\d{7,15}$/.test(p.senderPhone ?? '')) phoneByChat.set(p.chatId, p.senderPhone);
       }
       else {
-        paused.add(p.chatId);
+        paused.set(p.chatId,Number.isFinite(p.timestamp)?p.timestamp:Number.POSITIVE_INFINITY);
         if(p.own===true&&Number.isFinite(p.timestamp)&&replyChatPattern.test(p.chatId)){
           const previous=humanMessages.get(p.id);humanMessages.set(p.id,p);
           if(previous&&Number.isInteger(p.ack)&&(p.ack>(previous.ack??-2)||p.ack===-1))crmSync.set(p.id,'retry');
@@ -95,7 +95,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     } else if (record.kind === 'human_resume') {
       if (!replyChatPattern.test(p.chatId ?? '') || p.source !== 'owner_confirmed') throw Error('Reanudación humana inválida.');
       const target=canonicalChatId(p.chatId);
-      for(const pausedChat of paused)if(canonicalChatId(pausedChat)===target)paused.delete(pausedChat);
+      for(const pausedChat of paused.keys())if(canonicalChatId(pausedChat)===target)paused.delete(pausedChat);
     } else if (record.kind === 'crm_sync') {
       if (!idValid(p.id) || !['synced', 'retry', 'needs_contact_resolution'].includes(p.state) ||
           (p.senderPhone !== undefined && !/^\d{7,15}$/.test(p.senderPhone))) throw Error('Acuse CRM inválido.');
@@ -214,8 +214,9 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     let becameReady = false;
     return enqueue(async () => {
       if (!readySignalSeen || stopping || ['wrong_number', 'duplicate_number', 'storage_error', 'auth_failure'].includes(status)) return;
-      try { socketState = await client.getState(); } catch { socketState = null; return; }
+      try { socketState = await client.getState(); } catch { socketState = null; if(status==='ready'){status='connection_error';connectionReason='connection_state_unavailable';qr=null;} return; }
       if (socketState !== 'CONNECTED') {
+        if(['TOS_BLOCK','SMB_TOS_BLOCK'].includes(socketState))connectionReason='provider_restriction';
         if (status === 'ready') { status = 'disconnected'; qr = null; }
         return;
       }
@@ -254,7 +255,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     },
     auth_failure() { if (!stopping) { status = 'auth_failure'; qr = null; } },
     session_error() { if (!stopping) { status = 'connection_error'; connectionReason = 'navigation_interrupted'; qr = null; } },
-    disconnected() { if (!['wrong_number', 'duplicate_number', 'storage_error'].includes(status)) status = 'disconnected'; qr = null; },
+    disconnected(reason) { if(/TOS_BLOCK|SMB_TOS_BLOCK|SPAM|BANNED/i.test(String(reason??'')))connectionReason='provider_restriction';if (!['wrong_number', 'duplicate_number', 'storage_error'].includes(status)) status = 'disconnected'; qr = null; },
     message_create(message) {
       if (status !== 'ready' || stopping) return;
       const event = snapshot(message, now());
@@ -267,7 +268,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       void enqueue(async () => {
         if (stopping || status === 'storage_error') return;
         if (bots.has(event.id)) { pendingHuman.delete(event.id); return null; }
-        if (seen.has(event.id)) return null;
+        if (seen.has(event.id)) { pendingHuman.delete(event.id); return null; }
         if(event.own){
           // A first-contact send may be echoed as a LID before any inbound
           // message has populated its verified phone mapping.
@@ -286,6 +287,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
           if (/^\d{7,15}$/.test(senderPhone ?? '')) stored={...event,senderPhone};
         }
         await persist(event.own ? 'human' : 'inbound', stored);
+        if(event.own)pendingHuman.delete(event.id);
         if(typeof onArchiveMessage==='function'){try{await onArchiveMessage(stored);}catch{/* The original message remains in the durable session journal. */}}
         return event.chatId.endsWith('@g.us')?null:stored;
       }).then(saved => {
@@ -310,7 +312,7 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   function blocked(chatId,manual=false) {
     const target=canonicalChatId(chatId);
     return status !== 'ready' || client.info?.wid?.user !== binding || stopping ||
-      (!manual&&([...paused].some(value=>canonicalChatId(value)===target) || [...pendingHuman.values()].some(value=>canonicalChatId(value)===target)));
+      (!manual&&([...paused].some(([value,timestamp])=>canonicalChatId(value)===target && timestamp>now()-5*60*1000) || [...pendingHuman.values()].some(value=>canonicalChatId(value)===target)));
   }
   async function permitted(job) {
     const manual=job.senderType==='agent';
@@ -327,10 +329,10 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
   async function campaignPermitted(job) {
     if(automationPaused()||blocked(job.chatId)||!authorizeCampaign)return false;
     try{
-      const p=await authorizeCampaign({...job,sessionPhone:binding,bodyHash:replyBodyHash(job.body)});
+      const p=await authorizeCampaign({...job,sessionPhone:binding,bodyHash:replyBodyHash(job.body,job.media)});
       return !automationPaused()&&!blocked(job.chatId)&&p?.allowed===true&&p.paused===false&&p.permissionConfirmed===true&&
         p.accountId===accountId&&p.lineKey===lineKey&&p.sessionPhone===binding&&p.jobId===job.id&&
-        p.campaignId===job.campaignId&&p.chatId===job.chatId&&p.bodyHash===replyBodyHash(job.body)&&
+        p.campaignId===job.campaignId&&p.chatId===job.chatId&&p.bodyHash===replyBodyHash(job.body,job.media)&&
         Number.isFinite(p.expiresAt)&&p.expiresAt>now()&&p.expiresAt<=now()+30000;
     }catch{return false;}
   }
@@ -476,16 +478,19 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     },
     dispatchCampaign(input) {
       const job=structuredClone(input);
+      if(job?.media)job.media=normalizeSessionMedia(job.media);
       if(!job||job.accountId!==accountId||job.lineKey!==lineKey||!idValid(job.id)||!idValid(job.campaignId)||
         job.key!=='campaign:'+job.id||!/^\d{7,15}@c\.us$/.test(job.chatId??'')||typeof job.body!=='string'||!job.body.trim()||job.body.length>4000)return Promise.reject(Error('Campaña fuera de esta sesión.'));
       return enqueue(async()=>{
         if(!campaignsEnabled||!authorizeCampaign)return{state:'disabled'};
         if(attempts.has(job.key))return{state:'already_attempted',previous:attempts.get(job.key).state};
+        if(job.media&&typeof prepareMedia!=='function')return{state:'blocked'};
         if(!await campaignPermitted(job))return{state:'blocked'};
-        await persist('attempt',{key:job.key,chatId:job.chatId,campaignId:job.campaignId,bodyHash:replyBodyHash(job.body),startedAt:now()});
+        let prepared;if(job.media){try{prepared=await prepareMedia(job.media);if(!prepared?.content||!prepared.options)throw Error('Missing media');}catch{return{state:'blocked',failureReason:'media_unavailable'};}}
+        await persist('attempt',{key:job.key,chatId:job.chatId,campaignId:job.campaignId,bodyHash:replyBodyHash(job.body,job.media),startedAt:now(),...(job.media?{media:job.media}:{})});
         if(!await campaignPermitted(job)){await persist('result',{key:job.key,state:'blocked'});return{state:'blocked'};}
         let state='needs_review',providerId=null;
-        try{const message=await client.sendMessage(job.chatId,job.body,{sendSeen:false});providerId=await acceptedProviderId(message,job.chatId);if(providerId)state='accepted';}catch{/* Never retry an uncertain campaign on another line. */}
+        try{const message=await client.sendMessage(job.chatId,prepared?.content??job.body,{...(prepared?.options??{}),sendSeen:false});providerId=await acceptedProviderId(message,job.chatId);if(providerId)state='accepted';}catch{/* Never retry an uncertain campaign on another line. */}
         await persist('result',{key:job.key,state,providerId});return{state,providerId};
       }).then(async result=>{
         // The provider can emit its real outgoing message while returning no

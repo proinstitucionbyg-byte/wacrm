@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import {campaignPhone} from './campaign-phone';
-export type ImportedRecipient={phone:string;name:string;country:string|null};
+import {campaignVariableKey} from './campaign-variables';
+export type ImportedRecipient={phone:string;name:string;country:string|null;variables?:Record<string,string>};
 const label=(v:string)=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase();
 const phoneHeaders=['TELEFONO','CELULAR','WHATSAPP','NUMERO','PHONE','DESTINO','MOVIL'];
 export function recipientsFromRows(rows:string[][]){
@@ -8,6 +9,8 @@ export function recipientsFromRows(rows:string[][]){
  if(!nonempty.length)throw Error('La lista está vacía.');
  const header=nonempty[0].map(label),column=header.findIndex(cell=>phoneHeaders.includes(cell));
  const nameColumn=header.findIndex(cell=>['NOMBRE','NOMBRE COMPLETO','NAME'].includes(cell));
+ const extras=column>=0?nonempty[0].map((value,index)=>({key:campaignVariableKey(value),index})).filter(c=>c.index!==column&&c.index!==nameColumn&&c.key):[];
+ if(extras.some(c=>! /^[a-z][a-z0-9_]{0,39}$/.test(c.key)||['nombre','telefono','__proto__','constructor','prototype'].includes(c.key))||new Set(extras.map(c=>c.key)).size!==extras.length)throw Error('Revisa los títulos de las columnas de variables.');
  let data=column>=0?nonempty.slice(1):nonempty;
  // A plain list can contain several phone numbers per row without a header.
  if(column<0&&data.every(row=>row.every(cell=>!cell.trim()||campaignPhone(cell))))data=data.flatMap(row=>row.filter(cell=>cell.trim()).map(cell=>[cell]));
@@ -16,10 +19,12 @@ export function recipientsFromRows(rows:string[][]){
  data.forEach((row,index)=>{
   const raw=row[column>=0?column:0]??'',parsed=campaignPhone(raw);
   if(!parsed){errors.push('Fila '+(index+(column>=0?2:1))+': teléfono inválido o sin prefijo internacional.');return;}
-  if(seen.has(parsed.phone)){duplicates++;return;}seen.add(parsed.phone);
   const name=(row[column>=0?nameColumn:1]??'').trim();
+  const variables=Object.fromEntries(extras.map(c=>[c.key,(row[c.index]??'').trim()]));
+  if(Object.values(variables).some(v=>v.length>2000)){errors.push('Fila '+(index+1)+': variable demasiado larga.');return;}
+  if(seen.has(parsed.phone)){duplicates++;const first=recipients.find(r=>r.phone===parsed.phone);if(first&&(first.name!==name||JSON.stringify(first.variables??{})!==JSON.stringify(variables)))errors.push('Fila '+(index+1)+': teléfono repetido con nombre o variables diferentes.');return;}seen.add(parsed.phone);
   if(name.length>200){errors.push('Fila '+(index+1)+': nombre demasiado largo.');return;}
-  recipients.push({phone:parsed.phone,country:parsed.country,name});
+  recipients.push({phone:parsed.phone,country:parsed.country,name,...(extras.length?{variables}:{})});
  });
  return {recipients,duplicates,errors};
 }
@@ -68,6 +73,7 @@ export async function readRecipientFile(file:Pick<File,'name'|'size'|'arrayBuffe
    if(value===null||value===undefined)row.push('');
    else if(typeof value==='string')row.push(value);
    else if(typeof value==='number'&&Number.isSafeInteger(value))row.push(String(value));
+   else if(value instanceof Date&&!Number.isNaN(value.getTime()))row.push([value.getUTCDate(),value.getUTCMonth()+1,value.getUTCFullYear()].map((n,i)=>i<2?String(n).padStart(2,'0'):String(n)).join('/'));
    else throw Error('Fila '+r+': usa texto o números enteros, sin fórmulas ni enlaces.');
   }rows.push(row);
  }

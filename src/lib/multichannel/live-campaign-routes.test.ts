@@ -47,7 +47,7 @@ describe('campaign worker boundary',()=>{
  });
  it('binds heartbeat to the authenticated worker and its session',async()=>{
   const r=await worker(request({action:'heartbeat',line_key:'WA-one',session_phone:'51900000001',ready:true}));expect(r.status).toBe(200);
-  expect(h.rpc).toHaveBeenCalledWith('multichannel_campaign_worker_step',expect.objectContaining({p_worker_id:id,p_line_key:'WA-one',p_session_phone:'51900000001',p_ready:true}));
+  expect(h.rpc).toHaveBeenCalledWith('multichannel_campaign_worker_step_safe',expect.objectContaining({p_worker_id:id,p_line_key:'WA-one',p_session_phone:'51900000001',p_ready:true,p_restricted:false}));
  });
  it('requires a provider identifier before accepting a claimed delivery',async()=>{
   const r=await worker(request({action:'record',line_key:'WA-one',session_phone:'51900000001',job_id:id,claim_token:id,state:'delivered'}));expect(r.status).toBe(400);expect(h.rpc).not.toHaveBeenCalled();

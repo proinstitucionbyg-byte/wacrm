@@ -6,7 +6,7 @@ export const runtime='nodejs';
 const base={line_key:z.string().regex(/^WA-[A-Za-z0-9_-]{1,60}$/),session_phone:z.string().regex(/^\d{7,15}$/)};
 const ref={job_id:z.string().uuid(),claim_token:z.string().uuid()};
 const schema=z.discriminatedUnion('action',[
- z.object({action:z.literal('heartbeat'),...base,ready:z.boolean()}).strict(),
+ z.object({action:z.literal('heartbeat'),...base,ready:z.boolean(),restricted:z.boolean().optional()}).strict(),
  z.object({action:z.literal('claim'),...base}).strict(),
  z.object({action:z.literal('authorize'),...base,...ref,chat_id:z.string().regex(/^\d{7,15}@c\.us$/),body_hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict(),
  z.object({action:z.literal('release'),...base,...ref}).strict(),
@@ -22,10 +22,11 @@ export async function POST(request:Request){
  const a=parsed.data,db=supabaseAdmin();
  const w=await db.from('multichannel_workers').select('id,account_id').eq('token_hash',createHash('sha256').update(auth.slice(7)).digest('hex')).eq('enabled',true).maybeSingle();
  if(w.error)return reply({error:'Ejecutor no disponible.'},503);if(!w.data)return reply({error:'Ejecutor revocado.'},401);
- const{data,error}=await db.rpc('multichannel_campaign_worker_step',{
+ const{data,error}=await db.rpc('multichannel_campaign_worker_step_safe',{
   p_worker_id:w.data.id,p_line_key:a.line_key,p_action:a.action,p_job_id:'job_id'in a?a.job_id:null,
   p_claim_token:'claim_token'in a?a.claim_token:null,p_ready:a.action==='heartbeat'?a.ready:null,
   p_session_phone:a.session_phone,p_state:a.action==='record'||a.action==='ack'?a.state:null,p_provider_id:a.action==='record'||a.action==='ack'?a.provider_id??null:null,
+  p_restricted:a.action==='heartbeat'&&a.restricted===true,
  });
  if(error)return reply({error:'No se confirmó la transición de campaña.'},error.code==='42501'?403:503);
  if(a.action==='authorize'){

@@ -44,6 +44,7 @@ export function startServer() {
     schedule('/api/automations/cron', 15_000);
     schedule('/api/flows/cron', 20_000);
     schedule('/api/multichannel/support/cron', 5_000, 5_000);
+    schedule('/api/multichannel/campaigns/safety', 30_000, 30_000);
     console.info(
       '[scheduler] enabled: automations and flows, every minute after each completed cycle'
     );

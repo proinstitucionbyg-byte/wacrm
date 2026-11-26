@@ -1,15 +1,24 @@
 import{PGlite}from'../../output/multichannel-verification/node_modules/@electric-sql/pglite/dist/index.js';
 import{readFile}from'node:fs/promises';import{randomUUID}from'node:crypto';import{before,after,beforeEach,test}from'node:test';import assert from'node:assert/strict';
+import{EventEmitter}from'node:events';
+import{createSessionAdapter,replyBodyHash}from'./whatsapp-session/adapter.mjs';
+import{createCampaignClient}from'./whatsapp-session/campaign-client.mjs';
+import{sessionScope}from'./whatsapp-session/store.mjs';
 const db=new PGlite(),account=randomUUID(),actor=randomUUID(),contact=randomUUID();let w1,w2;
 before(async()=>{
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;
  create table accounts(id uuid primary key);create table profiles(user_id uuid primary key,account_id uuid,account_role text);
  create table contacts(id uuid primary key,account_id uuid,phone text,phone_normalized text);
  create table conversations(id uuid primary key default gen_random_uuid(),account_id uuid,user_id uuid,contact_id uuid,status text,assigned_agent_id uuid,automation_enabled boolean,ai_enabled boolean,ai_autoreply_disabled boolean,last_human_message_at timestamptz,last_message_text text,last_message_at timestamptz,updated_at timestamptz,unique(account_id,contact_id));
- create table messages(id uuid primary key default gen_random_uuid(),conversation_id uuid,sender_type text,content_type text,content_text text,message_id text,status text,created_at timestamptz,whatsapp_session_line_key text);`);
+ create table messages(id uuid primary key default gen_random_uuid(),conversation_id uuid,sender_type text,content_type text,content_text text,message_id text,status text,created_at timestamptz,whatsapp_session_line_key text,media_url text);`);
  for(const name of ['20261029151921_multichannel_worker_queue.sql','20261028173948_multichannel_sms_dispatch.sql'])await db.exec(await readFile(new URL('../../supabase/migrations/'+name,import.meta.url),'utf8'));
  await db.exec(`create table multichannel_whatsapp_session_lines(account_id uuid not null,line_key text not null,worker_id uuid not null,linked_phone text not null,paused boolean not null default false,primary key(account_id,line_key));`);
  await db.exec(await readFile(new URL('../../supabase/migrations/20261104073046_multichannel_live_campaigns.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261107131046_multichannel_campaign_media_sequences.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261115191612_edit_pending_campaign_content.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261116011432_campaign_line_distribution.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261116020000_campaign_parallel_windows.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261126230000_campaign_personalization_safety.sql',import.meta.url),'utf8'));
 });
 after(()=>db.close());
 beforeEach(async()=>{
@@ -21,9 +30,108 @@ beforeEach(async()=>{
  await db.query("insert into multichannel_whatsapp_session_lines(account_id,line_key,worker_id,linked_phone)values($1,'WA-a',$2,'51900000002'),($1,'WA-b',$3,'51900000003')",[account,w1,w2]);
 });
 const input=(patch={})=>({request_id:randomUUID(),review_hash:'a'.repeat(64),name:'Aviso',purpose:'notice',body:'Texto ficticio',routes:[{channel:'whatsapp_support',line_key:'WA-a'},{channel:'whatsapp_support',line_key:'WA-b'}],run_at:new Date(Date.now()-60000).toISOString(),expires_at:new Date(Date.now()+3600000).toISOString(),interval_seconds:1,block_size:10,block_pause_seconds:0,recipients:[{contact_id:contact,permission_expires_at:new Date(Date.now()+7200000).toISOString(),evidence:'Permiso ficticio revisado'}],...patch});
+const media={kind:'image',url:'https://assets.example.test/storage/v1/object/public/course.png'};
+const sequence=()=>[{body:'Imagen del curso',delay_seconds:0,media},{body:'Audio del curso',delay_seconds:60,media:{...media,kind:'audio',url:media.url.replace('png','ogg')}}];
 const control=async(action,payload,who=actor)=>(await db.query('select multichannel_campaign_control($1,$2,$3,$4) as r',[account,who,action,JSON.stringify(payload)])).rows[0].r;
 async function step(action,line='WA-a',job={},ready=true){return(await db.query('select multichannel_campaign_worker_step($1,$2,$3,$4,$5,$6,$7,$8,$9) as r',[line==='WA-a'?w1:w2,line,action,job.id??null,job.claim_token??null,ready,line==='WA-a'?'51900000002':'51900000003',job.result??null,job.provider??null])).rows[0].r;}
 async function campaign(patch={}){const c=await control('create',input(patch));await control('activate',{campaign_id:c.id,review_hash:c.review_hash});return c;}
+const personalized=async(action,payload)=>(await db.query('select multichannel_campaign_control_personalized($1,$2,$3,$4) as r',[account,actor,action,JSON.stringify(payload)])).rows[0].r;
+async function safeStep(action,ready=true,restricted=false){return(await db.query('select multichannel_campaign_worker_step_safe($1,$2,$3,null,null,$4,$5,null,null,$6) as r',[w1,'WA-a',action,ready,'51900000002',restricted])).rows[0].r;}
+
+test('personalization keeps each phone paired with its own name and date in messages and media',async()=>{
+ const second=randomUUID();await db.query("insert into contacts values($1,$2,'51900000009','51900000009')",[second,account]);
+ const payload=input({sequence:[{body:'Hola [nombre], hasta [fecha1]',delay_seconds:0,media:{...media,caption:'Para [nombre]'}}]});
+ payload.recipients=[{...payload.recipients[0],contact_id:second,variables:{nombre:'Rosa',fecha1:'28/11'}},{...payload.recipients[0],variables:{nombre:'Pedro',fecha1:'29/11'}}];
+ const c=await personalized('create',payload);
+ const rows=(await db.query('select recipient,body,media from multichannel_jobs where campaign_id=$1 order by run_at',[c.id])).rows;
+ assert.deepEqual(rows.map(r=>[r.recipient,r.body,r.media.caption]),[['+51900000009','Hola Rosa, hasta 28/11','Para Rosa'],['+51900000001','Hola Pedro, hasta 29/11','Para Pedro']]);
+ assert.equal(await step('claim'),null);
+});
+test('a missing variable rolls back the entire campaign instead of leaving a partial queue',async()=>{
+ await assert.rejects(personalized('create',input({body:'Hola [nombre]'})),/Missing campaign variable/);
+ assert.equal((await db.query('select count(*)::int n from multichannel_campaigns')).rows[0].n,0);
+ assert.equal((await db.query('select count(*)::int n from multichannel_jobs')).rows[0].n,0);
+});
+test('no available lines pauses pending work and reconnection alone does not resume it',async()=>{
+ const c=await campaign();await db.query("update multichannel_campaigns set created_at=now()-interval '2 minutes' where id=$1",[c.id]);
+ assert.equal((await db.query('select campaign_safety_sweep() r')).rows[0].r.paused_no_lines,1);
+ await step('heartbeat');assert.equal(await step('claim'),null);
+ assert.equal((await db.query('select status from multichannel_jobs')).rows[0].status,'queued');
+});
+test('manual attention cancels pending steps and preserves an uncertain attempted step',async()=>{
+ const c=await campaign({sequence:sequence()});await step('heartbeat');const first=await step('claim');await step('authorize','WA-a',first);await step('record','WA-a',{...first,result:'needs_review'});
+ await db.query('select mark_campaign_recipient_handled($1,$2,$3)',[account,actor,first.id]);
+ assert.deepEqual((await db.query('select status from multichannel_jobs where campaign_id=$1 order by campaign_step',[c.id])).rows.map(r=>r.status),['needs_review','cancelled']);
+});
+test('provider restriction pauses the campaign and prevents backup or manual resume until review',async()=>{
+ const c=await campaign();await step('heartbeat','WA-b');await safeStep('heartbeat',false,true);
+ assert.equal(await step('claim','WA-b'),null);
+ await assert.rejects(personalized('pause',{campaign_id:c.id,value:false}),/restriction requires review/);
+ assert.equal((await db.query('select status from multichannel_campaigns where id=$1',[c.id])).rows[0].status,'paused');
+});
+test('a human message since campaign creation cancels the remaining queue',async()=>{
+ await campaign();await db.query("insert into conversations(account_id,contact_id,last_human_message_at) values($1,$2,clock_timestamp())",[account,contact]);
+ assert.equal((await db.query('select campaign_safety_sweep() r')).rows[0].r.cancelled_manual,1);
+ assert.equal((await db.query('select status from multichannel_jobs')).rows[0].status,'cancelled');
+});
+
+test('database claim through campaign client and adapter sends each mixed-media step once in order',async()=>{
+ const phone='51900000002',lineKey='WA-a',provider=new EventEmitter(),records=[],sent=[];
+ provider.info={wid:{user:phone}};provider.initialize=async()=>{};provider.destroy=async()=>{};provider.getState=async()=>'CONNECTED';
+ provider.sendMessage=async(to,content,options)=>{sent.push({to,content,options});return{id:{_serialized:'provider-sequence-'+sent.length,fromMe:true},fromMe:true,to};};
+ const sequence=[{body:'Inicio',delay_seconds:0},...['image','audio','video'].map(kind=>({body:kind,delay_seconds:0,media:{...media,kind,url:media.url.replace('.png','.'+kind)}}))];
+ await campaign({sequence});
+ const remote=createCampaignClient({origin:'https://crm.example.test',token:'wcm_'+'a'.repeat(64),lineKey,fetchImpl:async(_url,init)=>{
+  const p=JSON.parse(init.body);const data=await step(p.action,lineKey,{id:p.job_id,claim_token:p.claim_token,result:p.state,provider:p.provider_id},p.ready);
+  if(p.action==='authorize')return Response.json({permit:data?.allowed&&replyBodyHash(data.body,data.media)===p.body_hash?{allowed:true,permissionConfirmed:true,paused:false,accountId:data.account_id,lineKey:data.line_key,sessionPhone:data.session_phone,jobId:data.job_id,campaignId:data.campaign_id,chatId:data.chat_id,bodyHash:p.body_hash,expiresAt:Date.parse(data.expires_at)}:{allowed:false}});
+  return Response.json({[p.action==='claim'?'job':'receipt']:data});
+ }});
+ const adapter=createSessionAdapter({accountId:account,lineKey,client:provider,enabled:true,campaignsEnabled:true,authorizeCampaign:remote.authorize,
+  prepareMedia:async m=>({content:{kind:m.kind,url:m.url},options:{...(m.kind==='audio'?{sendAudioAsVoice:true}:{})}}),
+  store:{scope:sessionScope(account,lineKey),records:()=>records,append:async(kind,payload)=>records.push({kind,payload:structuredClone(payload)}),close:async()=>{}}});
+ try{
+  await adapter.start();await remote.heartbeat(true,phone);
+  for(let index=0;index<sequence.length;index++){
+   const job=await remote.claim(phone);assert.ok(job);const result=await adapter.dispatchCampaign(job);assert.equal(result.state,'accepted');
+   await remote.finish(job,result,phone);assert.equal((await adapter.dispatchCampaign(job)).state,'already_attempted');
+   await db.query("update multichannel_jobs set started_at=now()-interval '2 seconds' where id=$1",[job.id]);
+  }
+  assert.deepEqual(sent.map(s=>typeof s.content==='string'?s.content:s.content.kind),['Inicio','image','audio','video']);
+  assert.equal(sent[2].options.sendAudioAsVoice,true);assert.ok(sent.every(s=>s.to==='51900000001@c.us'));
+  assert.equal((await db.query("select count(*)::int as n from multichannel_jobs where status='accepted'")).rows[0].n,4);
+  assert.equal(await remote.claim(phone),null);assert.equal((await db.query('select count(*)::int as n from messages')).rows[0].n,4);
+ }finally{await adapter.stop();}
+});
+
+test('sequence waits for acceptance and delay, then uses a technical fallback when the origin is offline',async()=>{
+ await campaign({sequence:sequence()});await step('heartbeat');await step('heartbeat','WA-b');
+ const first=await step('claim');assert.equal(first.campaign_step,0);assert.deepEqual(first.media,media);
+ const permit=await step('authorize','WA-a',first);assert.deepEqual(permit.media,media);
+ assert.deepEqual((await db.query('select content_type,media_url from messages')).rows,[{content_type:'image',media_url:media.url}]);
+ assert.equal(await step('claim','WA-b'),null);
+ await step('record','WA-a',{...first,result:'accepted',provider:'sequence-image'});
+ assert.equal(await step('claim'),null);
+ await db.query("update multichannel_jobs set started_at=now()-interval '2 seconds' where id=$1",[first.id]);
+ await db.query("update multichannel_jobs set run_at=now()-interval '1 second' where predecessor_id=$1",[first.id]);
+ await step('heartbeat','WA-a',{},false);
+ const second=await step('claim','WA-b');assert.equal(second.campaign_step,1);assert.equal(second.line_key,'WA-b');
+ assert.equal(second.predecessor_id,first.id);assert.equal(second.media.kind,'audio');
+});
+
+test('an uncertain sequence step never authorizes its successor even if its due time passed',async()=>{
+ await campaign({sequence:sequence()});await step('heartbeat');const first=await step('claim');await step('authorize','WA-a',first);
+ await step('record','WA-a',{...first,result:'needs_review'});
+ await db.query("update multichannel_jobs set run_at=now()-interval '1 second' where predecessor_id=$1",[first.id]);
+ assert.equal(await step('claim'),null);
+ assert.equal((await db.query('select routing_alert from multichannel_jobs where predecessor_id=$1',[first.id])).rows[0].routing_alert,'sequence_previous_step_unconfirmed');
+});
+
+test('sequence SMS fallback requires explicitly reviewed text and invalid sequence rolls back',async()=>{
+ await assert.rejects(campaign({sequence:sequence(),routes:[{channel:'whatsapp_support',line_key:'WA-a'},{channel:'sms',line_key:'SMS-missing'}]}));
+ assert.equal((await db.query('select count(*)::int as n from multichannel_campaigns')).rows[0].n,0);
+ await assert.rejects(campaign({sequence:[{body:'x',delay_seconds:1}]}),/Invalid sequence step/);
+ assert.equal((await db.query('select count(*)::int as n from multichannel_jobs')).rows[0].n,0);
+});
 test('draft cannot send; review activates and repeated creation does not duplicate',async()=>{
  const plan=input(),c=await control('create',plan);await step('heartbeat');assert.equal(await step('claim'),null);
  assert.equal((await control('create',plan)).duplicate,true);
@@ -76,12 +184,52 @@ test('a confirmed provider ack updates the same CRM message without creating ano
 });
 test('SMS fallback requires a ready device and a separate current SMS authorization',async()=>{
  await db.query("insert into multichannel_lines(account_id,line_key,channel,paused,available,device_key,interval_seconds,daily_limit,limit_note)values($1,'SMS-backup','sms',false,true,'device',1,20,'Fictitious test limit')",[account]);
- await campaign({routes:[{channel:'whatsapp_support',line_key:'WA-a'},{channel:'sms',line_key:'SMS-backup'}]});
+ await assert.rejects(campaign({sequence:sequence(),routes:[{channel:'whatsapp_support',line_key:'WA-a'},{channel:'sms',line_key:'SMS-backup'}]}),/Explicit SMS text required/);
+ await campaign({sequence:sequence(),sms_body:'Respaldo SMS revisado',routes:[{channel:'whatsapp_support',line_key:'WA-a'},{channel:'sms',line_key:'SMS-backup'}]});
  assert.equal(await step('claim'),null);assert.equal((await db.query("select count(*)::int as n from multichannel_jobs where mode='sms_live'")).rows[0].n,0);
  await db.query("insert into multichannel_sms_authorizations(account_id,contact_id,purpose,recipient,granted,expires_at,evidence,reviewed_by)values($1,$2,'notice','+51900000001',true,now()+interval '2 hours','Separate SMS consent',$3)",[account,contact,actor]);
  await db.query("insert into multichannel_sms_bindings(account_id,line_key,worker_id,ready_at)values($1,'SMS-backup',$2,now())",[account,w2]);
- await step('claim');const child=(await db.query("select * from multichannel_jobs where mode='sms_live'")).rows[0];assert.ok(child);assert.equal(child.status,'queued');
+ await step('claim');const child=(await db.query("select * from multichannel_jobs where mode='sms_live'")).rows[0];assert.ok(child);assert.equal(child.status,'queued');assert.equal(child.body,'Respaldo SMS revisado');assert.equal(child.media,null);
+ assert.equal((await db.query("select count(*)::int as n from multichannel_jobs where mode='whatsapp_live' and status='cancelled'")).rows[0].n,2);
  await control('pause',{campaign_id:child.campaign_id,value:true});
  await db.query("update multichannel_jobs set status='claimed',worker_id=$2,claim_token=$3,lease_until=now()+interval '2 minutes' where id=$1",[child.id,w2,randomUUID()]);
  await assert.rejects(db.query("update multichannel_jobs set status='dispatching' where id=$1",[child.id]),/Campaign paused/);
+});
+
+const editContent=async(c,steps,who=actor,hash=c.review_hash)=>(await db.query('select edit_pending_campaign_content($1,$2,$3,$4,$5,$6,$7) r',[account,who,c.id,hash,'Editada',JSON.stringify(steps),'b'.repeat(64)])).rows[0].r;
+test('editing paused content preserves delivered and uncertain steps and their queue identity',async()=>{
+ const steps=[{body:'one',delay_seconds:0},{body:'two',delay_seconds:10},{body:'three',delay_seconds:10}];const c=await campaign({sequence:steps});await control('pause',{campaign_id:c.id,value:true});
+ await db.exec("update multichannel_jobs set status='delivered',provider_id='delivered-provider',started_at=now() where campaign_step=0;update multichannel_jobs set status='needs_review',started_at=now() where campaign_step=1;");
+ const before=(await db.query('select id,body,status,provider_id,routing_alert from multichannel_jobs order by campaign_step')).rows;
+ const result=await editContent(c,steps.map(x=>({...x,body:x.body+' edited'})));assert.equal(result.updated_steps,1);assert.equal(result.unchanged_steps,2);
+ const after=(await db.query('select id,body,status,provider_id,routing_alert from multichannel_jobs order by campaign_step')).rows;
+ assert.deepEqual(after.slice(0,2),before.slice(0,2));assert.equal(after[2].id,before[2].id);assert.equal(after[2].body,'three edited');assert.equal(after[2].routing_alert,before[2].routing_alert);assert.equal((await db.query('select status from multichannel_campaigns')).rows[0].status,'paused');
+});
+test('content edit requires pause, current review, owner and unchanged timing',async()=>{
+ const steps=[{body:'one',delay_seconds:0},{body:'two',delay_seconds:10}];const c=await campaign({sequence:steps});await assert.rejects(editContent(c,steps),/Pause/);await control('pause',{campaign_id:c.id,value:true});
+ await assert.rejects(editContent(c,steps,randomUUID()),/Owner/);await assert.rejects(editContent(c,steps,actor,'c'.repeat(64)),/changed/);await assert.rejects(editContent(c,[steps[0]]),/step count/);await assert.rejects(editContent(c,[steps[0],{...steps[1],delay_seconds:11}]),/timing/);assert.equal((await db.query('select body from multichannel_jobs where campaign_step=0')).rows[0].body,'one');
+});
+test('a claimed but unstarted step is not edited or returned to the queue',async()=>{
+ const c=await campaign();await step('heartbeat');const j=await step('claim');assert.ok(j);await control('pause',{campaign_id:c.id,value:true});const result=await editContent(c,[{body:'edited',delay_seconds:0}]);assert.equal(result.updated_steps,0);const row=(await db.query('select body,status,claim_token from multichannel_jobs where id=$1',[j.id])).rows[0];assert.equal(row.status,'claimed');assert.equal(row.claim_token,j.claim_token);assert.equal(row.body,'Texto ficticio');
+});
+
+test('one campaign runs explicit recipient ranges in parallel without starving the later range',async()=>{
+ await db.query("update multichannel_whatsapp_session_lines set worker_id=$1 where line_key='WA-b'",[w1]);w2=w1;
+ const people=[];for(let i=0;i<105;i++){const id=randomUUID();people.push(id);await db.query('insert into contacts values($1,$2,$3,$3)',[id,account,'519'+String(i).padStart(8,'0')]);}
+ const p=input({dispatch_mode:'parallel',distribution:[{from:1,to:101,line_key:'WA-a'},{from:102,to:105,line_key:'WA-b'}],run_at:new Date(Date.now()-3600000).toISOString()});p.recipients=people.map(contact_id=>({...p.recipients[0],contact_id}));const c=await control('create',p);await control('activate',{campaign_id:c.id,review_hash:c.review_hash});await step('heartbeat');await step('heartbeat','WA-b');
+ const b=await step('claim','WA-b'),a=await step('claim');assert.ok(b);assert.ok(a);assert.equal(b.contact_id,people[101]);assert.equal(a.contact_id,people[0]);assert.notEqual(a.id,b.id);
+});
+test('sequential ranges keep audience order and reject gaps or unauthorized lines atomically',async()=>{
+ const other=randomUUID();await db.query('insert into contacts values($1,$2,$3,$3)',[other,account,'51900000004']);const p=input({distribution:[{from:1,to:1,line_key:'WA-a'},{from:2,to:2,line_key:'WA-b'}]});p.recipients.push({...p.recipients[0],contact_id:other});
+ await assert.rejects(control('create',{...p,distribution:[{from:1,to:1,line_key:'WA-a'}]}),/cover every/);assert.equal((await db.query('select count(*)::int n from multichannel_campaigns')).rows[0].n,0);
+ await assert.rejects(control('create',{...p,distribution:[{from:1,to:2,line_key:'WA-other'}]}),/selected lines/);
+ const c=await control('create',p);await control('activate',{campaign_id:c.id,review_hash:c.review_hash});await step('heartbeat');await step('heartbeat','WA-b');assert.equal(await step('claim','WA-b'),null);assert.equal((await step('claim')).contact_id,contact);
+});
+
+test('parallel lanes keep a recipient sequence on its actual fallback line',async()=>{
+ const other=randomUUID();await db.query('insert into contacts values($1,$2,$3,$3)',[other,account,'51900000004']);const p=input({dispatch_mode:'parallel',distribution:[{from:1,to:1,line_key:'WA-a'},{from:2,to:2,line_key:'WA-b'}],sequence:[{body:'first',delay_seconds:0},{body:'second',delay_seconds:0}]});p.recipients.push({...p.recipients[0],contact_id:other});const c=await control('create',p);await control('activate',{campaign_id:c.id,review_hash:c.review_hash});await step('heartbeat','WA-b');const root=await step('claim','WA-b');assert.ok(root);await step('authorize','WA-b',root);await step('record','WA-b',{...root,result:'accepted',provider:'fallback-first'});await db.query("update multichannel_jobs set started_at=now()-interval '2 seconds' where id=$1",[root.id]);await step('heartbeat');assert.equal(await step('claim'),null);const child=await step('claim','WA-b');assert.equal(child.predecessor_id,root.id);assert.equal(child.line_key,'WA-b');
+});
+
+test('parallel lane timing accepts a short valid window without changing sequential limits',async()=>{
+ const other=randomUUID();await db.query('insert into contacts values($1,$2,$3,$3)',[other,account,'51900000004']);const p=input({dispatch_mode:'parallel',distribution:[{from:1,to:1,line_key:'WA-a'},{from:2,to:2,line_key:'WA-b'}],run_at:new Date().toISOString(),expires_at:new Date(Date.now()+5000).toISOString(),interval_seconds:50});p.recipients.push({...p.recipients[0],contact_id:other});const c=await control('create',p);assert.ok(c.id);assert.equal((await db.query('select count(distinct run_at)::int n from multichannel_jobs')).rows[0].n,1);
 });

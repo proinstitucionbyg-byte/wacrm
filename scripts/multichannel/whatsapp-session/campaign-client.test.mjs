@@ -3,6 +3,22 @@ import{createCampaignClient,startCampaignPoller}from'./campaign-client.mjs';impo
 const accountId=randomUUID(),campaignId=randomUUID(),id=randomUUID(),claim=randomUUID(),lineKey='WA-fictional',phone='51900000001',recipient='+51900000002',body='Aviso ficticio';
 const token='wcm_'+'a'.repeat(64);
 const rawJob={id,claim_token:claim,account_id:accountId,campaign_id:campaignId,line_key:lineKey,mode:'whatsapp_live',recipient,body};
+
+test('claim retains authorized media and authorization recomputes its hash',async()=>{
+ const media={kind:'image',url:'https://assets.example.test/storage/v1/object/public/course.png',caption:'Curso'};const calls=[];
+ const c=createCampaignClient({origin:'https://crm.example.test',token,lineKey,fetchImpl:async(_url,init)=>{
+  const p=JSON.parse(init.body);calls.push(p);return Response.json(p.action==='claim'?{job:{...rawJob,media}}:{permit:{allowed:false}});
+ }});
+ const job=await c.claim(phone);assert.deepEqual(job.media,media);
+ await c.authorize({...job,sessionPhone:phone,bodyHash:'0'.repeat(64)});
+ assert.equal(calls.at(-1).body_hash,replyBodyHash(body,media));
+ assert.notEqual(calls.at(-1).body_hash,replyBodyHash(body));
+});
+
+test('a malformed campaign attachment is rejected before the adapter can send',async()=>{
+ const c=createCampaignClient({origin:'https://crm.example.test',token,lineKey,fetchImpl:async()=>Response.json({job:{...rawJob,media:{kind:'image',url:'http://untrusted.example/course.png'}}})});
+ await assert.rejects(c.claim(phone),/HTTPS/);
+});
 test('claim, two permits, send and provider receipt retain the same campaign and reservation',async()=>{
  const calls=[];let claimed=false;const records=[],client=new EventEmitter();client.info={wid:{user:phone}};client.initialize=async()=>{};client.destroy=async()=>{};client.getState=async()=> 'CONNECTED';let sends=0;
  client.sendMessage=async(to,text)=>{sends++;assert.equal(text,body);return{id:{_serialized:'provider-real',fromMe:true},fromMe:true,to};};
@@ -36,4 +52,11 @@ test('a paused bot reports unavailable for campaigns and does not claim work',as
  let claims=0;const health=[];const adapter={refreshConnection:async()=>{},status:()=>({status:'ready',linkedPhone:phone,automationPaused:true}),dispatchCampaign:async()=>{throw Error('Must not send');}};
  const p=startCampaignPoller({adapter,client:{heartbeat:async ready=>health.push(ready),claim:async()=>{claims++;}},pollMs:1000});
  const deadline=Date.now()+500;while(!health.length&&Date.now()<deadline)await new Promise(r=>setTimeout(r,5));await p.stop();assert.deepEqual(health,[false]);assert.equal(claims,0);
+});
+
+test('a provider restriction is reported and never claims another campaign task',async()=>{
+ let claims=0;const health=[];
+ const adapter={refreshConnection:async()=>{},status:()=>({status:'disconnected',linkedPhone:phone,connectionReason:'provider_restriction'}),dispatchCampaign:async()=>{throw Error('Must not send');}};
+ const p=startCampaignPoller({adapter,client:{heartbeat:async(...args)=>health.push(args),claim:async()=>{claims++;}},pollMs:1000});
+ const deadline=Date.now()+500;while(!health.length&&Date.now()<deadline)await new Promise(r=>setTimeout(r,5));await p.stop();assert.deepEqual(health,[[false,phone,true]]);assert.equal(claims,0);
 });

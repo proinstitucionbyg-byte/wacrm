@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {campaignPhone} from './campaign-phone';
+import {renderCampaignText} from './campaign-variables';
 export function normalizeCampaignPhone(value:string):string|null {
   return campaignPhone(value)?.phone??null;
 }
@@ -27,8 +28,9 @@ export const liveCampaignSchema=z.object({
   interval_seconds:z.number().int().min(1).max(86400),
   block_size:z.number().int().min(1).max(1000),block_pause_seconds:z.number().int().min(0).max(604800),
   recipients:z.array(z.object({contact_id:z.string().uuid(),permission_expires_at:z.string().datetime({offset:true}),
-    evidence:z.string().trim().min(5).max(1000)}).strict()).min(1).max(1000),
+    evidence:z.string().trim().min(5).max(1000),variables:z.record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),z.string().max(2000)).refine(v=>Object.keys(v).length<=30,'Usa hasta 30 variables.').default({})}).strict()).min(1).max(1000),
 }).strict().superRefine((v,ctx)=>{
+  v.recipients.forEach((r,index)=>{try{for(const s of v.sequence??[{body:v.body}]){renderCampaignText(s.body,r.variables);if('media' in s&&s.media?.caption)renderCampaignText(s.media.caption,r.variables);}if(v.sms_body)renderCampaignText(v.sms_body,r.variables);}catch(e){ctx.addIssue({code:'custom',path:['recipients',index,'variables'],message:'Destinatario '+(index+1)+': '+(e instanceof Error?e.message:'Revisa sus variables.')});}});
   if(v.dispatch_mode==='parallel'&&!v.distribution)ctx.addIssue({code:'custom',path:['distribution'],message:'Elige los rangos para enviar en paralelo.'});
   if(v.distribution){let next=1;for(const part of v.distribution){if(part.from!==next||part.to<part.from||part.to>v.recipients.length||!v.routes.some(r=>r.channel==='whatsapp_support'&&r.line_key===part.line_key))ctx.addIssue({code:'custom',path:['distribution'],message:'Los rangos deben cubrir toda la lista, sin repetir ni saltar posiciones y usando las líneas elegidas.'});next=part.to+1;}if(next!==v.recipients.length+1)ctx.addIssue({code:'custom',path:['distribution'],message:'Falta repartir parte de la lista.'});}
   if(v.sequence&&(v.sequence.length>1||v.sequence.some(s=>s.media))&&v.routes.some(r=>r.channel==='sms')&&!v.sms_body)
