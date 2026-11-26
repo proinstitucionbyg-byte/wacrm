@@ -74,6 +74,13 @@ test('a human message since campaign creation cancels the remaining queue',async
  assert.equal((await db.query('select campaign_safety_sweep() r')).rows[0].r.cancelled_manual,1);
  assert.equal((await db.query('select status from multichannel_jobs')).rows[0].status,'cancelled');
 });
+test('editing personalized drafts renders every pending recipient again and rolls back missing variables',async()=>{
+ const c=await personalized('create',input({body:'Hola [nombre]',recipients:[{...input().recipients[0],variables:{nombre:'Pedro'}}]}));
+ const edit=body=>db.query('select edit_pending_campaign_content_personalized($1,$2,$3,$4,$5,$6,$7)',[account,actor,c.id,c.review_hash,'Editada',JSON.stringify([{body,delay_seconds:0}]),'b'.repeat(64)]);
+ await assert.rejects(edit('Hasta [fecha1]'),/Missing campaign variable/);
+ assert.equal((await db.query('select body from multichannel_jobs')).rows[0].body,'Hola Pedro');
+ await edit('Buen día [nombre]');assert.equal((await db.query('select body from multichannel_jobs')).rows[0].body,'Buen día Pedro');
+});
 
 test('database claim through campaign client and adapter sends each mixed-media step once in order',async()=>{
  const phone='51900000002',lineKey='WA-a',provider=new EventEmitter(),records=[],sent=[];
