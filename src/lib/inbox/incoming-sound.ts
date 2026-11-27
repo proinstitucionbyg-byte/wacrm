@@ -1,4 +1,8 @@
 type IncomingEvent={eventType:string;new:Record<string,unknown>};
+/** Only the owner has a personal mute preference. Staff keep workspace alerts on. */
+export function incomingSoundPreference(canMute:boolean,stored:string|null){return !canMute||stored!=='off';}
+/** Mute follows the user's choice, independently of browser autoplay readiness. */
+export function nextIncomingSoundPreference(canMute:boolean,enabled:boolean){return canMute?!enabled:true;}
 /** Bounded per-session deduplication, only fresh customer INSERTs, never history. */
 export function createIncomingSoundGate(startedAt:number,now:()=>number=Date.now){
  const seen=new Set<string>();let lastPlayed=-Infinity;
