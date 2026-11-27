@@ -44,16 +44,16 @@ export function LiveCampaignManager(){
  }
  async function resolve(){setBusy(true);setError('');try{
   const{parseRecipientPaste}=await import('@/lib/multichannel/recipient-import');const parsed=parseRecipientPaste(phones);
-  if(parsed.errors.length)throw Error(parsed.errors.slice(0,5).join(' '));
+  if(!parsed.recipients.length)throw Error('No se encontraron teléfonos válidos.');
   setImportNames(old=>({...old,...Object.fromEntries(parsed.recipients.filter(row=>row.name).map(row=>[row.phone,row.name]))}));
   setImportVariables(old=>({...old,...Object.fromEntries(parsed.recipients.filter(row=>row.variables).map(row=>[row.phone,row.variables!]))}));
-  const data=await post({action:'resolve_recipients',phones:parsed.recipients.map(row=>row.phone)});changed();setAudience(data.recipients);setNotice(parsed.duplicates?parsed.duplicates+' teléfonos repetidos excluidos de la lista.':'Lista revisada. Todavía no se envió ningún mensaje.');
+  const data=await post({action:'resolve_recipients',phones:parsed.recipients.map(row=>row.phone)});changed();setAudience(data.recipients);setNotice(parsed.errors.length?parsed.errors.length+' filas inválidas omitidas. ':parsed.duplicates?parsed.duplicates+' teléfonos repetidos excluidos de la lista.':'Lista revisada. Todavía no se envió ningún mensaje.');
  }catch(e){setError(e instanceof Error?e.message:'No se pudo revisar la lista.');}finally{setBusy(false);}}
  async function loadFile(file:File){setBusy(true);setError('');try{
   const{readRecipientFile}=await import('@/lib/multichannel/recipient-import');const parsed=await readRecipientFile(file);
-  if(parsed.errors.length)throw Error(parsed.errors.slice(0,5).join(' '));
+  if(!parsed.recipients.length)throw Error('No se encontraron teléfonos válidos.');
   setImportVariables(Object.fromEntries(parsed.recipients.map(row=>[row.phone,row.variables??{}])));
-  setPhonesRaw(parsed.recipients.map(row=>row.phone).join('\n'));setImportNames(Object.fromEntries(parsed.recipients.map(row=>[row.phone,row.name])));setAudience([]);changed();setNotice(parsed.recipients.length+' teléfonos cargados. Revisa la lista antes de registrar o enviar.'+(parsed.duplicates?' Repetidos excluidos: '+parsed.duplicates+'.':''));
+  setPhonesRaw(parsed.recipients.map(row=>row.phone).join('\n'));setImportNames(Object.fromEntries(parsed.recipients.map(row=>[row.phone,row.name])));setAudience([]);changed();setNotice(parsed.recipients.length+' teléfonos cargados. '+(parsed.errors.length?parsed.errors.length+' filas inválidas omitidas. ':'')+'Revisa la lista antes de registrar o enviar.'+(parsed.duplicates?' Repetidos excluidos: '+parsed.duplicates+'.':''));
  }catch(e){setError(e instanceof Error?e.message:'No se pudo leer el archivo.');}finally{setBusy(false);}}
  async function registerNew(){setBusy(true);setError('');try{
   const missing=audience.filter(row=>row.status==='not_found');if(!missing.length)return;
@@ -103,3 +103,4 @@ export function LiveCampaignManager(){
  {editing&&<CampaignContentEditor key={'campaign-edit:'+editing.id} campaign={editing} onClose={()=>setEditing(null)} onSaved={message=>{setEditing(null);setDraft(null);setReviewed(false);setReviewJobs([]);setNotice(message);void load();}}/>}
  </section>;
 }
+

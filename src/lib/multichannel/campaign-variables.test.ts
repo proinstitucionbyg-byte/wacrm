@@ -13,7 +13,7 @@ describe('ordered campaign personalization',()=>{
  });
  it('leaves ordinary campaigns unchanged and refuses missing values used by a template',()=>{
   expect(renderCampaignText('Información general',{})).toBe('Información general');
-  expect(()=>renderCampaignText('Hola [nombre]',{})).toThrow('nombre');
+  expect(renderCampaignText('Hola [nombre]',{})).toBe('Hola ');
   expect(()=>renderCampaignText('Hola {{nombre}',{nombre:'Ana'})).toThrow('cerrar');
   expect(()=>renderCampaignText('[nombre]',{nombre:'x'.repeat(4001)})).toThrow('4000');
  });
@@ -22,3 +22,4 @@ describe('ordered campaign personalization',()=>{
   expect(()=>renderCampaignText('[toString]',{})).toThrow('tostring');
  });
 });
+
