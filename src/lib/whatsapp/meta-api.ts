@@ -494,6 +494,8 @@ export interface UploadResumableMediaArgs {
   fileName: string
   mimeType: string
   bytes: Uint8Array
+  /** Keep credentials out of URLs for new management routes. Existing callers retain their behavior. */
+  authorizationInHeader?: boolean
 }
 
 /**
@@ -511,11 +513,11 @@ export async function uploadResumableMedia(
     file_name: fileName,
     file_length: String(bytes.byteLength),
     file_type: mimeType,
-    access_token: accessToken,
   })
+  if (!args.authorizationInHeader) startParams.set('access_token', accessToken)
   const startRes = await fetch(
     `${META_API_BASE}/${appId}/uploads?${startParams.toString()}`,
-    { method: 'POST' },
+    { method: 'POST', ...(args.authorizationInHeader ? { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(25_000) } : {}) },
   )
   if (!startRes.ok) {
     await throwMetaError(startRes, `Resumable upload start failed: ${startRes.status}`)
@@ -529,6 +531,7 @@ export async function uploadResumableMedia(
   // and the file_offset header, both required by this endpoint.
   const uploadRes = await fetch(`${META_API_BASE}/${startData.id}`, {
     method: 'POST',
+    ...(args.authorizationInHeader ? { signal: AbortSignal.timeout(25_000) } : {}),
     headers: {
       Authorization: `OAuth ${accessToken}`,
       file_offset: '0',
