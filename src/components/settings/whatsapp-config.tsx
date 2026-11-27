@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SettingsPanelHead } from './settings-panel-head';
+import { WhatsAppBusinessPhoto } from './whatsapp-business-photo';
 import {
   Accordion,
   AccordionItem,
@@ -393,6 +394,7 @@ export function WhatsAppConfig() {
         title={t("title")}
         description={t("description")}
       />
+      <WhatsAppBusinessPhoto />
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* Main config form */}
       <div className="space-y-6">

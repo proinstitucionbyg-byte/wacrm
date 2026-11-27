@@ -19,6 +19,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../../supabase/migrations/20261116011432_campaign_line_distribution.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../../supabase/migrations/20261116020000_campaign_parallel_windows.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../../supabase/migrations/20261126230000_campaign_personalization_safety.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261127155000_campaign_technical_fallback_distribution.sql',import.meta.url),'utf8'));
 });
 after(()=>db.close());
 beforeEach(async()=>{
@@ -35,6 +36,28 @@ const sequence=()=>[{body:'Imagen del curso',delay_seconds:0,media},{body:'Audio
 const control=async(action,payload,who=actor)=>(await db.query('select multichannel_campaign_control($1,$2,$3,$4) as r',[account,who,action,JSON.stringify(payload)])).rows[0].r;
 async function step(action,line='WA-a',job={},ready=true){return(await db.query('select multichannel_campaign_worker_step($1,$2,$3,$4,$5,$6,$7,$8,$9) as r',[line==='WA-a'?w1:w2,line,action,job.id??null,job.claim_token??null,ready,line==='WA-a'?'51900000002':'51900000003',job.result??null,job.provider??null])).rows[0].r;}
 async function campaign(patch={}){const c=await control('create',input(patch));await control('activate',{campaign_id:c.id,review_hash:c.review_hash});return c;}
+
+test('four selected lines redistribute an offline primary evenly across the other three, and stop remains final',async()=>{
+ await db.query("insert into multichannel_whatsapp_session_lines(account_id,line_key,worker_id,linked_phone)values($1,'WA-c',$2,'51900000004'),($1,'WA-d',$2,'51900000005')",[account,w2]);
+ const payload=input({routes:['WA-a','WA-b','WA-c','WA-d'].map(line_key=>({channel:'whatsapp_support',line_key}))});
+ for(let i=0;i<5;i++){const id=randomUUID(),phone='5190000010'+i;await db.query('insert into contacts values($1,$2,$3,$3)',[id,account,phone]);payload.recipients.push({...payload.recipients[0],contact_id:id});}
+ const c=await control('create',payload);await control('activate',{campaign_id:c.id,review_hash:c.review_hash});
+ const run=async(action,line,job={})=>{const identity=(await db.query('select worker_id,linked_phone from multichannel_whatsapp_session_lines where account_id=$1 and line_key=$2',[account,line])).rows[0];return(await db.query('select multichannel_campaign_worker_step($1,$2,$3,$4,$5,true,$6,$7,$8) r',[identity.worker_id,line,action,job.id??null,job.claim_token??null,identity.linked_phone,job.result??null,job.provider??null])).rows[0].r;};
+ for(const line of ['WA-b','WA-c','WA-d'])await run('heartbeat',line);
+ const counts={'WA-b':0,'WA-c':0,'WA-d':0};
+ for(let i=0;i<6;i++){
+  await db.query("update multichannel_jobs set run_at=now()-interval '2 seconds',started_at=case when started_at is not null then now()-interval '2 seconds' else null end where campaign_id=$1",[c.id]);
+  let accepted=false;
+  for(const line of Object.keys(counts)){
+   const job=await run('claim',line);if(!job)continue;
+   await run('authorize',line,job);await run('record',line,{...job,result:'accepted',provider:'accepted-'+i});counts[line]++;accepted=true;break;
+  }
+  assert.equal(accepted,true,JSON.stringify((await db.query('select campaign_sequence,line_key,status,routing_alert,run_at from multichannel_jobs where campaign_id=$1 order by campaign_sequence',[c.id])).rows));
+ }
+ assert.deepEqual(counts,{'WA-b':2,'WA-c':2,'WA-d':2});
+ await control('pause',{campaign_id:c.id});
+ for(const line of Object.keys(counts))assert.equal(await run('claim',line),null);
+});
 const personalized=async(action,payload)=>(await db.query('select multichannel_campaign_control_personalized($1,$2,$3,$4) as r',[account,actor,action,JSON.stringify(payload)])).rows[0].r;
 async function safeStep(action,ready=true,restricted=false){return(await db.query('select multichannel_campaign_worker_step_safe($1,$2,$3,null,null,$4,$5,null,null,$6) as r',[w1,'WA-a',action,ready,'51900000002',restricted])).rows[0].r;}
 

@@ -84,19 +84,28 @@ export function ConversationList({
   const [search, setSearch] = useState('');
   const searchInputRef=useRef<HTMLInputElement>(null);
   useEffect(()=>{const focus=()=>searchInputRef.current?.focus();window.addEventListener('wacrm:focus-inbox-search',focus);if(new URLSearchParams(window.location.search).get('focusSearch')==='1')focus();return()=>window.removeEventListener('wacrm:focus-inbox-search',focus);},[]);
-  const [messageSearch, setMessageSearch] = useState<{query:string;ids:string[]}>({query:'',ids:[]});
+  const [filter, setFilter] = useState<InboxFilter>('all');
+  const [remoteSearch, setRemoteSearch] = useState<{query:string;unread:boolean;rows:Conversation[]}>({query:'',unread:false,rows:[]});
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState('');
   useEffect(() => {
-    const query=search.trim();if(query.length<2)return;
+    const query=search.trim(),unread=filter==='unread';if(query.length<2&&!unread)return;
     const controller=new AbortController();
     const timer=setTimeout(async()=>{
-      try{const response=await fetch('/api/inbox/search?q='+encodeURIComponent(query),{signal:controller.signal});
-        if(!response.ok)return;const data=await response.json();
-        if(!controller.signal.aborted)setMessageSearch({query,ids:[...new Set<string>(data.matches.map((row:{conversationId:string})=>row.conversationId))]});
-      }catch{/* Local contact matches remain usable if the history search fails. */}
+      setSearchBusy(true);setSearchError('');
+      try{
+        let offset=0,more=true;const rows:Conversation[]=[];
+        while(more&&!controller.signal.aborted){
+          const response=await fetch('/api/inbox/conversations/search?'+new URLSearchParams({q:query,unread:unread?'1':'0',offset:String(offset)}),{signal:controller.signal});
+          const data=await response.json();if(!response.ok)throw new Error(data.error||'No se pudo completar la búsqueda.');
+          rows.push(...data.conversations);more=data.hasMore;offset=data.nextOffset;
+          if(!controller.signal.aborted)setRemoteSearch({query,unread,rows:[...new Map(rows.map(row=>[row.id,row])).values()]});
+        }
+      }catch{if(!controller.signal.aborted)setSearchError('La búsqueda completa no terminó. Vuelve a intentarlo.');}
+      finally{if(!controller.signal.aborted)setSearchBusy(false);}
     },350);
     return()=>{clearTimeout(timer);controller.abort();};
-  },[search]);
-  const [filter, setFilter] = useState<InboxFilter>('all');
+  },[search,filter,resyncToken]);
   const [visibleLimit, setVisibleLimit] = useState(CONVERSATION_RENDER_BATCH);
   const [loading, setLoading] = useState(() => conversations.length===0);
   const [loadError,setLoadError]=useState(''),[loadAttempt,setLoadAttempt]=useState(0),[loadingOlder,setLoadingOlder]=useState(false);
@@ -239,7 +248,11 @@ export function ConversationList({
   }, [tags]);
 
   const filtered = useMemo(() => {
-    let result = conversations.filter(isVisibleInInbox);
+    const remoteMatches=remoteSearch.query===search.trim()&&remoteSearch.unread===(filter==='unread');
+    const remoteActive=remoteMatches&&(search.trim().length>=2||filter==='unread');
+    // Fresh realtime rows override their remote snapshot without dropping old search hits.
+    const currentById=new Map(conversations.map(row=>[row.id,row]));
+    let result = (remoteActive?remoteSearch.rows.map(row=>currentById.get(row.id)??row):conversations).filter(isVisibleInInbox);
 
     if (filter === 'unread') {
       result = result.filter((c) => c.unread_count > 0);
@@ -259,8 +272,8 @@ export function ConversationList({
       );
     }
 
-    if (search.trim()) {
-      result = result.filter((c) => matchesConversationSearch(c, search) || (messageSearch.query===search.trim()&&messageSearch.ids.includes(c.id)));
+    if (search.trim()&&!remoteActive) {
+      result = result.filter((c) => matchesConversationSearch(c, search));
     }
 
     return result.sort((a, b) =>
@@ -269,7 +282,7 @@ export function ConversationList({
       (a.last_message_at ? Date.parse(a.last_message_at) : 0) ||
       b.created_at.localeCompare(a.created_at)
     );
-  }, [conversations, filter, search, messageSearch, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, search, remoteSearch, selectedTagIds, selectedCompany]);
 
   useEffect(() => {
     setVisibleLimit(CONVERSATION_RENDER_BATCH);
@@ -395,6 +408,10 @@ export function ConversationList({
         </div>
 
         <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap lg:flex-wrap lg:overflow-visible">
+          <button type="button" aria-pressed={filter==='unread'} onClick={()=>setFilter(filter==='unread'?'all':'unread')}
+            className={cn('inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-semibold',filter==='unread'?'border-sky-400 bg-sky-500/20 text-sky-300':'border-slate-700 text-slate-300')}>
+            <span className="size-2 rounded-full bg-sky-400"/>No leídos
+          </button>
           <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 text-xs text-slate-300 transition-all duration-200 hover:border-sky-500 hover:bg-slate-800 hover:text-white light:border-border light:bg-card light:text-foreground light:hover:bg-secondary light:hover:text-sky-900 lg:h-9">
               {activeFilter?.label ?? t('filterAll')}
@@ -420,6 +437,8 @@ export function ConversationList({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {(search.trim().length>=2||filter==='unread')&&<span role="status" className="text-[10px] text-muted-foreground">{searchBusy?'Buscando en todo el historial…':searchError||''}</span>}
 
           {tags.length > 0 && (
             <DropdownMenu>

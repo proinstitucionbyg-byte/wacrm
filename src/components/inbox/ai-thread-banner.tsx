@@ -98,17 +98,15 @@ export function AiThreadBanner({
     try {
       const supabase = createClient();
 
-      const { error } = await supabase
-        .from("conversations")
-        .update({
-          ai_enabled: !nextDisabled,
-          ai_disabled_at: nextDisabled ? new Date().toISOString() : null,
-        })
-        .eq("id", conversationId);
+      const { data, error } = await supabase.rpc('set_conversation_automatic_control', {
+        p_conversation: conversationId, p_control: 'ai', p_enabled: !nextDisabled,
+      });
 
       if (error) throw error;
+      if (data !== true) throw new Error('No se pudo actualizar esta conversación');
 
       setAiDisabled(nextDisabled);
+      window.dispatchEvent(new Event('wacrm:labels-updated'));
 
       onChange?.({
   ai_enabled: !nextDisabled,
@@ -134,17 +132,15 @@ export function AiThreadBanner({
     try {
       const supabase = createClient();
 
-      const { error } = await supabase
-        .from("conversations")
-        .update({
-          automation_enabled: nextEnabled,
-          automation_disabled_at: nextEnabled ? null : new Date().toISOString(),
-        })
-        .eq("id", conversationId);
+      const { data, error } = await supabase.rpc('set_conversation_automatic_control', {
+        p_conversation: conversationId, p_control: 'automation', p_enabled: nextEnabled,
+      });
 
       if (error) throw error;
+      if (data !== true) throw new Error('No se pudo actualizar esta conversación');
 
       setAutomationOn(nextEnabled);
+      window.dispatchEvent(new Event('wacrm:labels-updated'));
 
       onChange?.({
         automation_enabled: nextEnabled,
@@ -176,7 +172,8 @@ export function AiThreadBanner({
       if (data !== true) throw new Error('No se pudo actualizar esta conversación');
       setAiDisabled(!enable);
       setAutomationOn(enable);
-      onChange?.({ ai_enabled: enable, automation_enabled: enable });
+      window.dispatchEvent(new Event('wacrm:labels-updated'));
+      onChange?.({ ai_enabled: enable, automation_enabled: enable, ai_autoreply_disabled: !enable });
       toast.success(enable ? 'IA y automatización reactivadas' : 'IA y automatización desactivadas hasta que las reactives');
     } catch (error) {
       console.error('Failed to toggle both controls:', error);
