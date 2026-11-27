@@ -29,7 +29,7 @@ test('global history search respects RLS and canonical pause survives automated 
    create policy visible on messages to authenticated using(exists(select 1 from conversations c where c.id=conversation_id));
    grant usage on schema public,auth,crm_private to authenticated;
    grant select on all tables in schema public to authenticated;`);
-  for(const name of ['20261127153000_inbox_global_search.sql','20261127154000_durable_manual_automatic_pause.sql','20261127163000_inbox_search_visibility_once.sql'])
+  for(const name of ['20261127153000_inbox_global_search.sql','20261127154000_durable_manual_automatic_pause.sql','20261127163000_inbox_search_visibility_once.sql','20261127170000_inbox_browse_pages.sql'])
    await db.exec(await readFile(new URL('../../supabase/migrations/'+name,import.meta.url),'utf8'));
   await db.query('insert into profiles(user_id,account_id) values($1,$2)',[actor,account]);
   await db.query("insert into contacts values($1,$2,'Jordan','51934218296')",[contact,account]);
@@ -49,6 +49,7 @@ test('global history search respects RLS and canonical pause survives automated 
   }
   assert.equal((await db.query("select * from search_inbox_conversations('hidden unique phrase',false,0)")).rows.length,0);
   assert.equal((await db.query("select * from search_inbox_conversations('',true,0)")).rows.length,1);
+  assert.equal((await db.query("select * from search_inbox_conversations('',false,0)")).rows.length,1);
   await db.exec('reset role');
   await db.query("update conversations set inbox_cleared_at=now()-interval '1 day' where id=$1",[chat]);
   await db.exec('set role authenticated');

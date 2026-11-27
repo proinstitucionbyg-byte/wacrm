@@ -187,27 +187,28 @@ export function ConversationList({
 
     const abort=new AbortController();
     (async () => {
-      const query=()=>supabase.from('conversations').select(CONVERSATION_SELECT).order('last_message_at',{ascending:false});
+      const page=async(offset:number):Promise<{conversations:Conversation[];hasMore:boolean;nextOffset:number}>=>{
+        const response=await fetch('/api/inbox/conversations/search?browse=1&offset='+offset,{signal:AbortSignal.any([abort.signal,AbortSignal.timeout(30000)])});
+        const data=await response.json();if(!response.ok)throw new Error(data.error||'No se pudo cargar el Inbox.');return data;
+      };
       try{
-        const first=await query().limit(CONVERSATION_RENDER_BATCH).abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]));
-        if(first.error)throw first.error;if(cancelled)return;
-        let recent=first.data??[];
+        const first=await page(0);if(cancelled)return;
+        let recent=first.conversations;
         const requested=new URLSearchParams(window.location.search).get('c');
         if(requested&&/^[a-f0-9-]{36}$/i.test(requested)&&!recent.some(row=>row.id===requested)){
           const target=await supabase.from('conversations').select(CONVERSATION_SELECT).eq('id',requested).abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(8000)])).maybeSingle();
-          if(!target.error&&target.data)recent=[target.data,...recent];
+          if(!target.error&&target.data)recent=[...normalizeConversations([target.data]),...recent];
         }
         if(cancelled)return;
-        onConversationsLoadedRef.current(normalizeConversations(recent).filter(isVisibleInInbox));setLoading(false);setLoadError('');
-        if(first.data?.length!==CONVERSATION_RENDER_BATCH)return;
+        onConversationsLoadedRef.current(recent.filter(isVisibleInInbox));setLoading(false);setLoadError('');
+        if(!first.hasMore)return;
         setLoadingOlder(true);
-        // Small pages avoid a slow, default-capped request for the whole inbox.
-        for(let offset=CONVERSATION_RENDER_BATCH;!cancelled;offset+=100){
-          const page=await query().range(offset,offset+99).abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]));
-          if(page.error)throw page.error;if(cancelled)return;
-          recent=[...new Map([...recent,...(page.data??[])].map(row=>[row.id,row])).values()];
-          onConversationsLoadedRef.current(normalizeConversations(recent).filter(isVisibleInInbox));
-          if((page.data?.length??0)<100)break;
+        // Fetch authorized IDs first; avoid evaluating every chat's RLS before each sorted page.
+        for(let offset=first.nextOffset;!cancelled;){
+          const next=await page(offset);if(cancelled)return;
+          recent=[...new Map([...recent,...next.conversations].map(row=>[row.id,row])).values()];
+          onConversationsLoadedRef.current(recent.filter(isVisibleInInbox));
+          if(!next.hasMore)break;offset=next.nextOffset;
         }
       }catch(error){
         if(!cancelled){console.error('Failed to fetch conversations:',error);setLoadError('No se pudo completar la carga. Puedes reintentar sin recargar el CRM.');}

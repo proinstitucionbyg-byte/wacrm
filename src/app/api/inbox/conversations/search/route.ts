@@ -8,8 +8,9 @@ export async function GET(request: Request) {
     const ctx = await requirePermission('inbox', 'view');
     const params = new URL(request.url).searchParams;
     const query = (params.get('q') ?? '').trim(), unread = params.get('unread') === '1';
+    const browse = params.get('browse') === '1';
     const offset = Number(params.get('offset') ?? 0);
-    if (query.length > 120 || (!unread && query.length < 2) || !Number.isSafeInteger(offset) || offset < 0) {
+    if (query.length > 120 || (!unread && query.length < 2 && !(browse && query === '')) || !Number.isSafeInteger(offset) || offset < 0) {
       return NextResponse.json({ error: 'Escribe entre 2 y 120 caracteres.' }, { status: 400 });
     }
     const { data: matches, error } = await ctx.supabase.rpc('search_inbox_conversations', {
