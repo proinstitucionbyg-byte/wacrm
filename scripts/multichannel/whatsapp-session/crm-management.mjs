@@ -55,7 +55,7 @@ export function startCrmManagement({accountId,origin,token,manager,qrToDataUrl,f
  const url=new URL(origin);
  if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash||!/^wcm_[a-f0-9]{64}$/.test(token??'')||!UUID.test(accountId)||!Number.isInteger(pollMs)||pollMs<1000)throw Error('Configuración de gestión inválida.');
  const endpoint=new URL('/api/multichannel/whatsapp/manage',url);
- let stopped=false,timer,wake,completed,failures=0;
+ let stopped=false,timer,wake,completed,failures=0,inFlight=null;
  const wait=()=>new Promise(resolve=>{wake=resolve;timer=setTimeout(()=>{wake=undefined;resolve();},pollMs);});
  const loop=(async()=>{while(!stopped){let flushReadResult=false;try{
   const lines=await managementSnapshot(manager,qrToDataUrl);
@@ -64,15 +64,16 @@ export function startCrmManagement({accountId,origin,token,manager,qrToDataUrl,f
   const raw=await response.text();if(raw.length>20000)throw Error('Respuesta inválida.');const data=JSON.parse(raw);
   if(data.accountId!==accountId)throw Error('Cuenta no reconocida.');
   if(completed){if(data.acknowledged!==completed.id)throw Error('Resultado pendiente de confirmar.');completed=undefined;}
-  if(data.command){
+  if(data.command&&!inFlight){
    const command=data.command;if(!UUID.test(command.id??'')||command.account_id!==accountId)throw Error('Acción fuera de esta cuenta.');
    // A claimed action is never replayed automatically if its outcome is lost.
-   let commandTimer;
+   inFlight=(async()=>{let commandTimer;
    try{const result=await Promise.race([executeManagementCommand(manager,command,accountId),new Promise((_,reject)=>{commandTimer=setTimeout(()=>{onFatal();reject(Error('Management command timed out'));},120000);})]);completed={id:command.id,status:typeof result==='object'&&result.data?.kind==='mutation'&&result.data.state!=='done'?'needs_review':'done',result:typeof result==='string'?result:result.message,...(typeof result==='object'?{result_data:result.data}:{})};}
    catch{completed={id:command.id,status:command.operation==='group_mutate'?'needs_review':'error',result:'No se completó la acción. Revisa el estado y el número de esta línea antes de volver a intentarlo.'};}
-   finally{clearTimeout(commandTimer);}
+   finally{clearTimeout(commandTimer);inFlight=null;}
+   })();
   }
   failures=0;if(completed&&['group_list','group_details'].includes(data.command?.operation))flushReadResult=true;
  }catch{failures++;onError();if(failures>=maxFailures){onFatal();return;}}if(!stopped&&!flushReadResult)await wait();}})();
- return {async stop(){stopped=true;clearTimeout(timer);wake?.();await loop;}};
+ return {async stop(){stopped=true;clearTimeout(timer);wake?.();await loop;await inFlight;}};
 }

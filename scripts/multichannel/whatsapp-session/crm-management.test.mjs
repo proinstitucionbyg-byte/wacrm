@@ -5,6 +5,14 @@ const accountId='11111111-1111-4111-8111-111111111111',id='22222222-2222-4222-82
 const line={lineKey:'WA-test',label:'Soporte',status:'ready',active:true,linkedPhone:'51911111111'};
 const command={id,account_id:accountId,status:'running',operation:'connect',line_key:line.lineKey};
 
+test('slow line recovery keeps publishing other line states without replaying the command',async()=>{
+ let release,requests=0,calls=0,heartbeat;
+ const pending=new Promise(resolve=>{release=resolve;});const observed=new Promise(resolve=>{heartbeat=resolve;});
+ const poller=startCrmManagement({accountId,origin:'https://crm.example.test',token:'wcm_'+'a'.repeat(64),manager:{list:()=>[line],connect:async()=>{calls++;await pending;}},qrToDataUrl:async()=>null,pollMs:1000,
+ fetchImpl:async(_url,init)=>{requests++;const body=JSON.parse(init.body);if(requests===1)return Response.json({accountId,command});assert.equal(body.lines[0].status,'ready');heartbeat();return Response.json({accountId,command:null,...(body.completed?{acknowledged:id}:{})});}});
+ try{await Promise.race([observed,new Promise((_,reject)=>setTimeout(()=>reject(Error('Heartbeat blocked')),2500))]);assert.equal(calls,1);}finally{release();await poller.stop();}
+});
+
 test('detach releases only selected number and never reconnects it',async()=>{
  for(const status of ['ready','stopped','connection_error']){
   const calls=[];const manager={list:()=>[{...line,status}],unlink:async(key,options)=>calls.push({key,options}),connect:async()=>{throw Error('must not reconnect');}};
