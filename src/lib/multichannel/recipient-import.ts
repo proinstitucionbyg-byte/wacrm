@@ -7,24 +7,28 @@ const phoneHeaders=['TELEFONO','CELULAR','WHATSAPP','NUMERO','PHONE','DESTINO','
 export function recipientsFromRows(rows:string[][]){
  const nonempty=rows.filter(row=>row.some(cell=>cell.trim()));
  if(!nonempty.length)throw Error('La lista está vacía.');
- const header=nonempty[0].map(label),column=header.findIndex(cell=>phoneHeaders.includes(cell));
+ const header=nonempty[0].map(label),preferredColumn=header.findIndex(cell=>phoneHeaders.filter(h=>h!=='NUMERO').includes(cell)),column=preferredColumn>=0?preferredColumn:header.indexOf('NUMERO');
  const nameColumn=header.findIndex(cell=>['NOMBRE','NOMBRE COMPLETO','NAME'].includes(cell));
- const extras=column>=0?nonempty[0].map((value,index)=>({key:campaignVariableKey(value),index})).filter(c=>c.index!==column&&c.index!==nameColumn&&c.key):[];
+ const prefixColumn=header.findIndex(cell=>['PREFIJO','CODIGO PAIS','CODIGO DE PAIS','CODIGO_PAIS'].includes(cell));
+ const ordinalColumns=header.map((cell,index)=>['ORDEN','NUMERACION','ITEM','NRO','N°','N.º','NUMERO'].includes(cell)&&index!==column?index:-1);
+ const extras=column>=0?nonempty[0].map((value,index)=>({key:campaignVariableKey(value),index})).filter(c=>c.index!==column&&c.index!==nameColumn&&c.index!==prefixColumn&&!ordinalColumns.includes(c.index)&&c.key):[];
  if(extras.some(c=>! /^[a-z][a-z0-9_]{0,39}$/.test(c.key)||['nombre','telefono','__proto__','constructor','prototype'].includes(c.key))||new Set(extras.map(c=>c.key)).size!==extras.length)throw Error('Revisa los títulos de las columnas de variables.');
- let data=column>=0?nonempty.slice(1):nonempty;
+ let data=column>=0?nonempty.slice(1).filter(row=>Boolean(row[column]?.trim()||row[nameColumn]?.trim()||extras.some(c=>row[c.index]?.trim()))):nonempty;
  // A plain list can contain several phone numbers per row without a header.
  if(column<0&&data.every(row=>row.every(cell=>!cell.trim()||campaignPhone(cell))))data=data.flatMap(row=>row.filter(cell=>cell.trim()).map(cell=>[cell]));
  if(data.length<1||data.length>1000)throw Error('Carga entre 1 y 1000 teléfonos por lista.');
  const seen=new Set<string>(),recipients:ImportedRecipient[]=[],errors:string[]=[];let duplicates=0;
  data.forEach((row,index)=>{
-  const raw=row[column>=0?column:0]??'',parsed=campaignPhone(raw);
-  if(!parsed){errors.push('Fila '+(index+(column>=0?2:1))+': teléfono inválido o sin prefijo internacional.');return;}
+  const raw=row[column>=0?column:0]??'',prefix=prefixColumn>=0?(row[prefixColumn]??'').replace(/[+\s]/g,''):'';
+  const direct=campaignPhone(raw),parsed=prefix?(/^\d{1,3}$/.test(prefix)?direct??campaignPhone('+'+prefix+raw.replace(/[\s().-]/g,'')):null):direct;
+  const withPrefix=prefix&&/^\d{1,3}$/.test(prefix)&&!/^\s*(\+|00)/.test(raw)&&raw.replace(/\D/g,'').length<=10?campaignPhone('+'+prefix+raw.replace(/[\s().-]/g,'')):parsed;
+  if(!withPrefix){errors.push('Fila '+(index+(column>=0?2:1))+': teléfono inválido o sin prefijo internacional.');return;}
   const name=(row[column>=0?nameColumn:1]??'').trim();
   const variables=Object.fromEntries(extras.map(c=>[c.key,(row[c.index]??'').trim()]));
   if(Object.values(variables).some(v=>v.length>2000)){errors.push('Fila '+(index+1)+': variable demasiado larga.');return;}
-  if(seen.has(parsed.phone)){duplicates++;const first=recipients.find(r=>r.phone===parsed.phone);if(first&&(first.name!==name||JSON.stringify(first.variables??{})!==JSON.stringify(variables)))errors.push('Fila '+(index+1)+': teléfono repetido con nombre o variables diferentes.');return;}seen.add(parsed.phone);
+  if(seen.has(withPrefix.phone)){duplicates++;const first=recipients.find(r=>r.phone===withPrefix.phone);if(first&&(first.name!==name||JSON.stringify(first.variables??{})!==JSON.stringify(variables)))errors.push('Fila '+(index+1)+': teléfono repetido con nombre o variables diferentes.');return;}seen.add(withPrefix.phone);
   if(name.length>200){errors.push('Fila '+(index+1)+': nombre demasiado largo.');return;}
-  recipients.push({phone:parsed.phone,country:parsed.country,name,...(extras.length?{variables}:{})});
+  recipients.push({phone:withPrefix.phone,country:withPrefix.country,name,...(extras.length?{variables}:{})});
  });
  return {recipients,duplicates,errors};
 }
