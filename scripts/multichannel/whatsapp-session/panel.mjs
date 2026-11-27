@@ -131,7 +131,7 @@ export async function startSessionPanel({ adapter, qrToSvg, port = 8788, onStop,
         return send(200,JSON.stringify(await currentReader.messages(decodeURIComponent(url.pathname.slice('/api/chats/'.length)))));
       }
       if (url.pathname === '/api/status') {
-        await currentAdapter.refreshConnection?.();
+        if(url.searchParams.get('cached')!=='1')await currentAdapter.refreshConnection?.();
         return send(200, JSON.stringify(currentAdapter.status()));
       }
       if (url.pathname === '/api/qr') {

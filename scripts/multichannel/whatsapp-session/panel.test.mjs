@@ -11,6 +11,12 @@ async function fixture(fn) {
   try { await fn(panel); } finally { await panel.close(); }
 }
 const headers=p=>({Authorization:'Bearer '+p.token});
+
+test('authenticated cached diagnostics remain available when browser refresh is stuck',async()=>{
+ let refreshed=0;const adapter={status:()=>({status:'connection_error',connectionReason:'timeout'}),refreshConnection:()=>{refreshed++;return new Promise(()=>{});},qr:()=>null};
+ const p=await startSessionPanel({adapter,port:0,qrToSvg:async()=>''});
+ try{assert.equal((await fetch(p.origin+'/api/status?cached=1')).status,401);const r=await fetch(p.origin+'/api/status?cached=1',{headers:headers(p),signal:AbortSignal.timeout(1000)});assert.equal((await r.json()).connectionReason,'timeout');assert.equal(refreshed,0);}finally{await p.close();}
+});
 test('pause and recovery require the owner panel token and reject unknown line or forged scope',async()=>{
  const changes=[];let repairs=0;const automationControl={status:()=>({allPaused:false,pausedLines:[]}),isPaused:()=>false,set:async value=>{changes.push(value);return value;}};
  const lineManager={list:()=>[{lineKey:'WA-main'}],recover:async key=>{assert.equal(key,'WA-main');repairs++;return{status:'ready',uncertainReplayed:false};}};
