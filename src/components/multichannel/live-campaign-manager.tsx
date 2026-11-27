@@ -47,7 +47,7 @@ export function LiveCampaignManager(){
   if(!parsed.recipients.length)throw Error('No se encontraron teléfonos válidos.');
   setImportNames(old=>({...old,...Object.fromEntries(parsed.recipients.filter(row=>row.name).map(row=>[row.phone,row.name]))}));
   setImportVariables(old=>({...old,...Object.fromEntries(parsed.recipients.filter(row=>row.variables).map(row=>[row.phone,row.variables!]))}));
-  const data=await post({action:'resolve_recipients',phones:parsed.recipients.map(row=>row.phone)});changed();setAudience(data.recipients);setNotice(parsed.errors.length?parsed.errors.length+' filas inválidas omitidas. ':parsed.duplicates?parsed.duplicates+' teléfonos repetidos excluidos de la lista.':'Lista revisada. Todavía no se envió ningún mensaje.');
+  const data=await post({action:'resolve_recipients',phones:parsed.recipients.map(row=>row.phone)});let resolved:Audience[]=data.recipients;const fresh=resolved.filter(row=>row.status==='not_found');if(fresh.length){const imported=await post({action:'import_recipients',recipients:fresh.map(row=>({phone:row.phone,name:parsed.recipients.find(p=>p.phone===row.phone)?.name||importNames[row.phone]||''}))});resolved=resolved.map(row=>imported.recipients.find((r:Audience)=>r.phone===row.phone)??row);}changed();setAudience(resolved.filter(row=>row.status==='ready'));setNotice(parsed.errors.length?parsed.errors.length+' filas inválidas omitidas. ':parsed.duplicates?parsed.duplicates+' teléfonos repetidos excluidos de la lista.':'Lista revisada. Todavía no se envió ningún mensaje.');
  }catch(e){setError(e instanceof Error?e.message:'No se pudo revisar la lista.');}finally{setBusy(false);}}
  async function loadFile(file:File){setBusy(true);setError('');try{
   const{readRecipientFile}=await import('@/lib/multichannel/recipient-import');const parsed=await readRecipientFile(file);
@@ -103,4 +103,5 @@ export function LiveCampaignManager(){
  {editing&&<CampaignContentEditor key={'campaign-edit:'+editing.id} campaign={editing} onClose={()=>setEditing(null)} onSaved={message=>{setEditing(null);setDraft(null);setReviewed(false);setReviewJobs([]);setNotice(message);void load();}}/>}
  </section>;
 }
+
 
