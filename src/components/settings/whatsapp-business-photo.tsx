@@ -7,6 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 
 type PublicPhoto = { phone: string; photoUrl: string | null };
 
+async function readResponse(response: Response) {
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error(response.status===413 ? 'El servidor rechazó el tamaño de la imagen. Selecciona una imagen más pequeña.' : `El servidor no respondió correctamente (HTTP ${response.status}). Vuelve a consultar la foto publicada antes de repetir.`);
+  }
+  return response.json();
+}
+
 export function WhatsAppBusinessPhoto() {
   const [profile, setProfile] = useState<PublicPhoto | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
@@ -16,7 +23,7 @@ export function WhatsAppBusinessPhoto() {
     setBusy(true);
     try {
       const response = await fetch('/api/whatsapp/business-profile', { cache: 'no-store' });
-      const body = await response.json();
+      const body = await readResponse(response);
       if (!response.ok) throw new Error(body.error);
       setProfile(body); setMessage('Foto consultada directamente en Meta.');
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo consultar Meta.'); }
@@ -29,7 +36,7 @@ export function WhatsAppBusinessPhoto() {
     try {
       const form = new FormData(); form.set('photo', photo); form.set('phone', profile.phone);
       const response = await fetch('/api/whatsapp/business-profile', { method: 'POST', body: form });
-      const body = await response.json();
+      const body = await readResponse(response);
       if (!response.ok) throw new Error(body.error);
       setProfile(body); setPhoto(null);
       setMessage(body.readback ? 'Meta confirmó la publicación. WhatsApp puede tardar en renovar la imagen en otros teléfonos.' : 'Meta aceptó la foto; falta volver a consultar la imagen publicada.');
@@ -44,6 +51,7 @@ export function WhatsAppBusinessPhoto() {
       {profile?.photoUrl && <img src={profile.photoUrl} alt="Foto pública devuelta por Meta" className="size-24 rounded-full object-cover" />}
       <label className="block text-sm" htmlFor="whatsapp-public-photo">Seleccionar nueva foto · PNG o JPG, hasta 5 MB</label>
       <Input id="whatsapp-public-photo" type="file" accept="image/png,image/jpeg" disabled={busy} onChange={event => setPhoto(event.target.files?.[0] ?? null)} />
+      {photo&&<p className="text-sm">Imagen seleccionada: {photo.name}</p>}
       <div className="flex flex-wrap gap-2"><Button type="button" disabled={busy || !photo || !profile?.phone} onClick={publish}>Publicar foto en WhatsApp API</Button>
         <Button type="button" variant="outline" disabled={busy} onClick={refresh}>Consultar foto publicada</Button></div>
       <p role="status" className="text-sm text-muted-foreground">{message}</p>
