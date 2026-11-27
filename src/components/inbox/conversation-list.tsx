@@ -201,9 +201,14 @@ export function ConversationList({
         onConversationsLoadedRef.current(normalizeConversations(recent).filter(isVisibleInInbox));setLoading(false);setLoadError('');
         if(first.data?.length!==CONVERSATION_RENDER_BATCH)return;
         setLoadingOlder(true);
-        const all=await query().abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(30000)]));
-        if(all.error)throw all.error;if(cancelled)return;
-        onConversationsLoadedRef.current(normalizeConversations(all.data??[]).filter(isVisibleInInbox));
+        // Small pages avoid a slow, default-capped request for the whole inbox.
+        for(let offset=CONVERSATION_RENDER_BATCH;!cancelled;offset+=100){
+          const page=await query().range(offset,offset+99).abortSignal(AbortSignal.any([abort.signal,AbortSignal.timeout(15000)]));
+          if(page.error)throw page.error;if(cancelled)return;
+          recent=[...new Map([...recent,...(page.data??[])].map(row=>[row.id,row])).values()];
+          onConversationsLoadedRef.current(normalizeConversations(recent).filter(isVisibleInInbox));
+          if((page.data?.length??0)<100)break;
+        }
       }catch(error){
         if(!cancelled){console.error('Failed to fetch conversations:',error);setLoadError('No se pudo completar la carga. Puedes reintentar sin recargar el CRM.');}
       }finally{if(!cancelled){setLoading(false);setLoadingOlder(false);}}
