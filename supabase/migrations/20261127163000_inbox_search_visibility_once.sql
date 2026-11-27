@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION public.search_inbox_conversations(p_query text DEFAUL
 RETURNS TABLE(conversation_id uuid, contact_match boolean)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' SET statement_timeout = '25s'
 AS $$
-DECLARE q text:=btrim(p_query); digits text; literal text; viewer_account uuid; viewer_role text; full_history boolean;
+DECLARE q text:=btrim(p_query); digits text; numeric_pattern text; literal text; viewer_account uuid; viewer_role text; full_history boolean;
 BEGIN
  IF auth.uid() IS NULL OR NOT public.has_member_permission(auth.uid(),'inbox','view') THEN
    RAISE EXCEPTION 'Forbidden' USING ERRCODE='42501';
@@ -18,6 +18,7 @@ BEGIN
  IF q ~ '^[+0-9 ().-]+$' THEN
    digits:=nullif(regexp_replace(q,'[^0-9]','','g'),'');
    IF digits ~ '^519[0-9]{8}$' THEN digits:=substring(digits FROM 3); END IF;
+   numeric_pattern:='%'||array_to_string(regexp_split_to_array(digits,''),'%')||'%';
  END IF;
  literal:='%'||replace(replace(replace(q,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%';
  RETURN QUERY
@@ -27,7 +28,8 @@ BEGIN
    WHERE q<>'' AND (NOT p_unread OR c.unread_count>0)
      AND (c.inbox_cleared_at IS NULL OR m.created_at>c.inbox_cleared_at)
      AND NOT EXISTS(SELECT 1 FROM public.inbox_hidden_messages h WHERE h.message_id=m.id AND h.user_id=auth.uid())
-     AND CASE WHEN digits IS NOT NULL THEN regexp_replace(coalesce(m.content_text,''),'[^0-9]','','g') LIKE '%'||digits||'%'
+     AND CASE WHEN digits IS NOT NULL THEN CASE WHEN m.content_text ILIKE numeric_pattern
+       THEN regexp_replace(m.content_text,'[^0-9]','','g') LIKE '%'||digits||'%' ELSE false END
        ELSE m.content_text ILIKE literal END
    GROUP BY m.conversation_id
  ), candidates AS MATERIALIZED (
