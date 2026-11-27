@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {EventEmitter} from 'node:events';
+import {createSessionAdapter} from './adapter.mjs';import {sessionScope} from './store.mjs';
+function fixture(){const accountId='11111111-1111-4111-8111-111111111111',lineKey='WA-test',client=new EventEmitter();let destroyed=0;client.initialize=async()=>{};client.sendMessage=async()=>{};client.info={wid:{user:'51911111111'}};client.getState=async()=> 'CONNECTED';client.destroy=async()=>{destroyed++;};const store={scope:sessionScope(accountId,lineKey),records:()=>[],append:async()=>{},close:async()=>{}};return{client,getDestroyed:()=>destroyed,adapter:createSessionAdapter({accountId,lineKey,client,store,enabled:true,startupTimeoutMs:40,connectionTimeoutMs:15})};}
+test('a verified ready event survives an initialization promise that never finishes',async()=>{const f=fixture();f.client.initialize=()=>new Promise(()=>{});const start=f.adapter.start();f.client.emit('ready');await f.adapter.idle();assert.equal(f.adapter.status().status,'ready');await start;assert.equal(f.adapter.status().status,'ready');assert.equal(f.getDestroyed(),0);await f.adapter.stop();});
+test('a stuck browser state check releases the queue and never reports a false connection',async()=>{const f=fixture();f.client.initialize=async()=>{};f.client.getState=()=>new Promise(()=>{});await f.adapter.start();f.client.emit('ready');await f.adapter.idle();assert.notEqual(f.adapter.status().status,'ready');await f.adapter.refreshConnection();await f.adapter.stop();});
+
+

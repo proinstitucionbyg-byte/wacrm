@@ -20,6 +20,9 @@ while true; do
   if docker run --rm --entrypoint node -v "$R:/runtime:ro" -v "$V:/app/output/multichannel-private/whatsapp-session" "$image" --input-type=module -e "import {archiveStoppedLocks} from '/runtime/recover-stopped-locks.mjs'; console.log(JSON.stringify(await archiveStoppedLocks('/app/output/multichannel-private/whatsapp-session',{exclusive:true})));"; then
    docker run --rm --entrypoint cat -v "$R:/runtime:ro" "$image" /runtime/crm-management-resilient.mjs > /tmp/crm-management.mjs
    docker cp /tmp/crm-management.mjs "$W:/app/scripts/multichannel/whatsapp-session/crm-management.mjs"
+   if docker run --rm --entrypoint cat -v "$R:/runtime:ro" "$image" /runtime/adapter-resilient.mjs > /tmp/adapter.mjs; then
+    docker cp /tmp/adapter.mjs "$W:/app/scripts/multichannel/whatsapp-session/adapter.mjs"
+   fi
    docker start "$W" >/dev/null
   else echo "Recovery blocked: profile verification failed"; fi
   sleep 300

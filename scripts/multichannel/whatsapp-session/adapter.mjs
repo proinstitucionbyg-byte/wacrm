@@ -52,13 +52,14 @@ function snapshot(message, now) {
 /** Real client adapter. No automatic rule/AI response or Cloud API fallback.
  * A send requires an injected, fresh CRM policy; the CLI supplies none. */
 export function createSessionAdapter({ accountId, lineKey, client, store, enabled = false,
-  repliesEnabled = false, authorizeReply, prepareMedia, onInbound, resolveSenderPhone, getInboundPollerStatus, expectedPhone, authorizePhone, now = Date.now, startupTimeoutMs = 90_000,
+  repliesEnabled = false, authorizeReply, prepareMedia, onInbound, resolveSenderPhone, getInboundPollerStatus, expectedPhone, authorizePhone, now = Date.now, startupTimeoutMs = 90_000, connectionTimeoutMs = 8000,
   crmRetryInitialMs = 5_000, crmRetryMaxMs = 60_000, campaignsEnabled = false, authorizeCampaign, getAutomationPaused = () => false, onArchiveMessage }) {
   if (store?.scope !== sessionScope(accountId, lineKey) || !client?.on || !client?.initialize || !client?.sendMessage) {
     throw Error('Falta la sesión aislada y su cliente.');
   }
   if (expectedPhone !== undefined && !/^\d{7,15}$/.test(expectedPhone)) throw Error('Número esperado inválido.');
   if (!Number.isInteger(startupTimeoutMs) || startupTimeoutMs < 1 || startupTimeoutMs > 180_000) throw Error('Tiempo de arranque inválido.');
+  if (!Number.isInteger(connectionTimeoutMs) || connectionTimeoutMs < 1 || connectionTimeoutMs > 30000) throw Error('Tiempo de conexión inválido.');
   if (!Number.isInteger(crmRetryInitialMs) || crmRetryInitialMs < 10 || crmRetryInitialMs > 60_000 ||
       !Number.isInteger(crmRetryMaxMs) || crmRetryMaxMs < crmRetryInitialMs || crmRetryMaxMs > 300_000) throw Error('Reintento CRM inválido.');
   let status = 'stopped', connectionReason = null, connectionDetail = null, qr = null, binding = null, tail = Promise.resolve(), started = false, stopping = false;
@@ -214,7 +215,8 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
     let becameReady = false;
     return enqueue(async () => {
       if (!readySignalSeen || stopping || ['wrong_number', 'duplicate_number', 'storage_error', 'auth_failure'].includes(status)) return;
-      try { socketState = await client.getState(); } catch { socketState = null; if(status==='ready'){status='connection_error';connectionReason='connection_state_unavailable';qr=null;} return; }
+      let connectionTimer;
+      try { socketState = await Promise.race([client.getState(),new Promise((_,reject)=>{connectionTimer=setTimeout(()=>reject(Error('Connection check timeout')),connectionTimeoutMs);})]); } catch { socketState = null; if(status==='ready'){status='connection_error';connectionReason='connection_state_unavailable';qr=null;} return; } finally {clearTimeout(connectionTimer);}
       if (socketState !== 'CONNECTED') {
         if(['TOS_BLOCK','SMB_TOS_BLOCK'].includes(socketState))connectionReason='provider_restriction';
         if (status === 'ready') { status = 'disconnected'; qr = null; }
@@ -351,9 +353,10 @@ export function createSessionAdapter({ accountId, lineKey, client, store, enable
       started = true; status = 'connecting';
       let startupTimer;
       try {
-        await Promise.race([client.initialize(), new Promise((_, reject) => {
+        await Promise.race([client.initialize(), new Promise((resolve, reject) => {
           const checkStartup = () => {
-            if (!stopping && status === 'awaiting_qr') startupTimer = setTimeout(checkStartup, startupTimeoutMs);
+            if (!stopping && status === 'ready' && socketState === 'CONNECTED') resolve();
+            else if (!stopping && status === 'awaiting_qr') startupTimer = setTimeout(checkStartup, startupTimeoutMs);
             else reject(Error('Startup timeout'));
           };
           startupTimer = setTimeout(checkStartup, startupTimeoutMs);
