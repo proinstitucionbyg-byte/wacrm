@@ -21,9 +21,12 @@ before(async()=>{
  await db.exec(await readFile(new URL('../../supabase/migrations/20261126230000_campaign_personalization_safety.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../../supabase/migrations/20261127155000_campaign_technical_fallback_distribution.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../../supabase/migrations/20261128033000_campaign_technical_auto_resume.sql',import.meta.url),'utf8'));
+ await db.exec('create table whatsapp_management_state(worker_id uuid,account_id uuid,snapshot jsonb,seen_at timestamptz);');
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261128144046_campaign_manual_dispatch.sql',import.meta.url),'utf8'));
 });
 after(()=>db.close());
 beforeEach(async()=>{
+ await db.exec('reset role;truncate whatsapp_management_state');
  await db.exec('reset role;truncate multichannel_jobs,multichannel_campaigns,multichannel_whatsapp_session_lines,multichannel_sms_authorizations,multichannel_sms_authorization_events,multichannel_sms_bindings,multichannel_workers,multichannel_lines,messages,conversations,contacts,profiles,accounts cascade;');
  await db.query('insert into accounts values($1)',[account]);await db.query("insert into profiles values($1,$2,'owner')",[actor,account]);
  await db.query("insert into contacts values($1,$2,'51900000001','51900000001')",[contact,account]);
@@ -34,6 +37,42 @@ beforeEach(async()=>{
 const input=(patch={})=>({request_id:randomUUID(),review_hash:'a'.repeat(64),name:'Aviso',purpose:'notice',body:'Texto ficticio',routes:[{channel:'whatsapp_support',line_key:'WA-a'},{channel:'whatsapp_support',line_key:'WA-b'}],run_at:new Date(Date.now()-60000).toISOString(),expires_at:new Date(Date.now()+3600000).toISOString(),interval_seconds:1,block_size:10,block_pause_seconds:0,recipients:[{contact_id:contact,permission_expires_at:new Date(Date.now()+7200000).toISOString(),evidence:'Permiso ficticio revisado'}],...patch});
 const media={kind:'image',url:'https://assets.example.test/storage/v1/object/public/course.png'};
 const sequence=()=>[{body:'Imagen del curso',delay_seconds:0,media},{body:'Audio del curso',delay_seconds:60,media:{...media,kind:'audio',url:media.url.replace('png','ogg')}}];
+async function manualReady(){await step('heartbeat');await db.query('insert into whatsapp_management_state values($1,$2,$3,clock_timestamp())',[w1,account,JSON.stringify([{lineKey:'WA-a',linkedPhone:'51900000002',active:true,status:'ready'}])]);}
+async function adjust(id,patch={}){const p={request:randomUUID(),action:'send',lines:['WA-a'],count:1,unit:'messages',interval:1,block:1,pause:5000,enable:false,...patch};return(await db.query('select adjust_campaign_dispatch($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) r',[account,actor,id,p.request,p.action,p.lines,p.count,p.unit,p.interval,p.block,p.pause,p.enable])).rows[0].r;}
+async function manualCampaign(){const other=randomUUID();await db.query('insert into contacts values($1,$2,$3,$3)',[other,account,'51900000004']);const p=input({sequence:[{body:'Primero',delay_seconds:0},{body:'Segundo',delay_seconds:0}]});p.recipients.push({...p.recipients[0],contact_id:other});const c=await control('create',p);await control('activate',{campaign_id:c.id,review_hash:c.review_hash});await control('pause',{campaign_id:c.id,value:true});await manualReady();return c;}
+
+test('manual batch sends only its exact message allowance and pauses while preserving the remaining queue',async()=>{
+ const c=await manualCampaign(),r=await adjust(c.id);assert.equal(r.messages,1);
+ const job=await step('claim');assert.ok(job);await step('authorize','WA-a',job);await step('record','WA-a',{...job,result:'accepted',provider:'manual-first'});
+ assert.equal((await db.query('select status from multichannel_campaigns where id=$1',[c.id])).rows[0].status,'paused');
+ assert.equal(await step('claim'),null);assert.equal((await db.query("select count(*)::int n from multichannel_jobs where status='queued'")).rows[0].n,3);
+});
+test('manual recipient limit includes the complete remaining sequence and request retries are idempotent',async()=>{
+ const c=await manualCampaign(),request=randomUUID(),r=await adjust(c.id,{unit:'recipients',request});assert.equal(r.messages,2);assert.equal(r.recipients,1);
+ assert.equal((await adjust(c.id,{unit:'recipients',request})).duplicate,true);
+ assert.equal((await db.query('select cardinality(manual_batch_job_ids) n from multichannel_campaigns where id=$1',[c.id])).rows[0].n,2);
+});
+test('manual batch never selects uncertain messages or descendants of an uncertain step',async()=>{
+ const c=await manualCampaign();await db.exec("update multichannel_jobs set status='needs_review' where campaign_sequence=0 and campaign_step=0");
+ const r=await adjust(c.id,{count:25});assert.equal(r.messages,2);const root=await step('claim');assert.equal(root.campaign_sequence,1);
+});
+test('manual adjustment rejects offline, stale, restricted and cross-account lines without changing the queue',async()=>{
+ const c=await manualCampaign();await assert.rejects(adjust(c.id,{lines:['WA-b']}),/no está disponible/);
+ await db.exec("update whatsapp_management_state set seen_at=now()-interval '1 minute'");await assert.rejects(adjust(c.id),/no está disponible/);
+ await db.exec("update whatsapp_management_state set seen_at=clock_timestamp();update multichannel_whatsapp_session_lines set campaign_restricted=true where line_key='WA-a'");await assert.rejects(adjust(c.id),/restricción/);
+ await db.exec("update multichannel_whatsapp_session_lines set campaign_restricted=false;update whatsapp_management_state set account_id=worker_id");await assert.rejects(adjust(c.id),/no está disponible/);
+ assert.equal((await db.query('select manual_batch_job_ids from multichannel_campaigns where id=$1',[c.id])).rows[0].manual_batch_job_ids,null);
+});
+test('saving manual dispatch changes only pending schedule and routes and does not activate',async()=>{
+ const c=await manualCampaign(),r=await adjust(c.id,{action:'save',interval:30,block:2,pause:100});assert.equal(r.status,'paused');
+ const campaign=(await db.query('select * from multichannel_campaigns where id=$1',[c.id])).rows[0];assert.equal(campaign.interval_seconds,30);assert.equal(campaign.manual_batch_job_ids,null);assert.equal(campaign.routes.length,1);assert.equal(await step('claim'),null);
+});
+test('paused ready line requires explicit enabling and an in-flight job cannot be edited',async()=>{
+ const c=await manualCampaign();await db.exec("update multichannel_whatsapp_session_lines set paused=true where line_key='WA-a'");await assert.rejects(adjust(c.id),/bot está pausado/);
+ await adjust(c.id,{enable:true});assert.equal((await db.query("select paused from multichannel_whatsapp_session_lines where line_key='WA-a'")).rows[0].paused,false);
+ const j=await step('claim');assert.ok(j);await control('pause',{campaign_id:c.id,value:true});await assert.rejects(adjust(c.id),/en proceso/);
+});
+test('browser database role cannot invoke manual dispatch',async()=>{await db.exec('set role authenticated');await assert.rejects(db.query('select adjust_campaign_dispatch($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',[account,actor,randomUUID(),randomUUID(),'send',['WA-a'],25,'messages',25,25,5000,false]),/permission denied/);});
 const control=async(action,payload,who=actor)=>(await db.query('select multichannel_campaign_control($1,$2,$3,$4) as r',[account,who,action,JSON.stringify(payload)])).rows[0].r;
 async function step(action,line='WA-a',job={},ready=true){return(await db.query('select multichannel_campaign_worker_step($1,$2,$3,$4,$5,$6,$7,$8,$9) as r',[line==='WA-a'?w1:w2,line,action,job.id??null,job.claim_token??null,ready,line==='WA-a'?'51900000002':'51900000003',job.result??null,job.provider??null])).rows[0].r;}
 async function campaign(patch={}){const c=await control('create',input(patch));await control('activate',{campaign_id:c.id,review_hash:c.review_hash});return c;}
