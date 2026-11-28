@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { MessageLinkedText } from "./message-linked-text";
 import { PersistentMessageAudio } from "@/components/media/workspace-audio";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
@@ -263,7 +264,7 @@ function MessageContent({
     case "text":
       return (
         <p className="whitespace-pre-wrap break-words text-sm">
-          {message.content_text}
+          <MessageLinkedText text={message.content_text ?? ""} />
         </p>
       );
 
@@ -281,7 +282,7 @@ function MessageContent({
           )}
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              <MessageLinkedText text={message.content_text ?? ""} />
             </p>
           )}
           <ImageAnalysisPanel message={message} />
@@ -303,7 +304,7 @@ function MessageContent({
           )}
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              <MessageLinkedText text={message.content_text ?? ""} />
             </p>
           )}
         </div>
@@ -317,7 +318,7 @@ function MessageContent({
           ) : (
             <MediaUnavailable label={t("audio")} t={t} />
           )}
-          {message.content_text && <AudioTranscript text={message.content_text} />}
+          {message.content_text && <AudioTranscript text=<MessageLinkedText text={message.content_text ?? ""} /> />}
         </div>
       );
 
@@ -348,7 +349,7 @@ function MessageContent({
           </span>
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              <MessageLinkedText text={message.content_text ?? ""} />
             </p>
           )}
         </div>
@@ -550,3 +551,4 @@ className={cn(
     </div>
   );
 }
+
