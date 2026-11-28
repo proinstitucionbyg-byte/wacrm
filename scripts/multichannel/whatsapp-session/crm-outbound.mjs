@@ -76,8 +76,18 @@ export function createCrmOutboundClient({ origin, token, lineKey, mediaCapable=f
 export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError = () => {} }) {
   if (!adapter?.status || !adapter?.dispatch || !client?.claim || !client?.record ||
       !Number.isInteger(pollMs) || pollMs < 1000 || pollMs > 30000) throw Error('Configuración del ejecutor de salida inválida.');
-  let stopped = false;
+  let stopped = false,heartbeatTimer,heartbeatInFlight;
   const acknowledged=new Set();
+  const heartbeat=()=>{
+    if(stopped||!client.heartbeat)return Promise.resolve();
+    if(heartbeatInFlight)return heartbeatInFlight;
+    const status=adapter.status();
+    if(!/^\d{7,15}$/.test(status.linkedPhone??''))return Promise.resolve();
+    heartbeatInFlight=Promise.resolve().then(()=>client.heartbeat(status.status==='ready'&&!status.automationPaused,status.linkedPhone))
+      .catch(error=>{try{onError(error);}catch{}}).finally(()=>{heartbeatInFlight=null;});
+    return heartbeatInFlight;
+  };
+  if(client.heartbeat){heartbeatTimer=setInterval(()=>{void heartbeat();},Math.min(pollMs,5000));heartbeatTimer.unref?.();}
   let timer, wake;
   const wait = () => new Promise(resolve => {
     wake = resolve;
@@ -86,10 +96,11 @@ export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError
   const loop = (async () => {
     while (!stopped) {
       try {
+        await heartbeat();
         await adapter.refreshReplyAcknowledgements?.();
-        if(client.ack)for(const ack of adapter.replyAcknowledgements?.()??[]){const key=ack.id+':'+ack.providerId+':'+ack.state;if(!acknowledged.has(key)){await client.ack(ack);acknowledged.add(key);}}
-        const status=adapter.status();
-        if(client.heartbeat&&/^\d{7,15}$/.test(status.linkedPhone??''))await client.heartbeat(status.status==='ready'&&!status.automationPaused,status.linkedPhone);
+        if(client.ack)for(const ack of (adapter.replyAcknowledgements?.()??[]).filter(ack=>!acknowledged.has(ack.id+':'+ack.providerId+':'+ack.state)).slice(0,3)){
+          await client.ack(ack);acknowledged.add(ack.id+':'+ack.providerId+':'+ack.state);
+        }
         if (adapter.status().status === 'ready' && !adapter.status().automationPaused) {
           const job = await client.claim();
           if (job) {
@@ -106,10 +117,12 @@ export function startCrmOutboundPoller({ adapter, client, pollMs = 2500, onError
   })();
   return Object.freeze({ async stop() {
     stopped = true;
+    clearInterval(heartbeatTimer);
     clearTimeout(timer);
     const resume = wake;
     wake = undefined;
     resume?.();
     await loop;
+    await heartbeatInFlight;
   } });
 }

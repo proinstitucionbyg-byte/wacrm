@@ -6,6 +6,17 @@ const token = `wcm_${'a'.repeat(64)}`;
 const accountId = '11111111-1111-4111-8111-111111111111';
 const jobId = '22222222-2222-4222-8222-222222222222';
 const claimToken = '33333333-3333-4333-8333-333333333333';
+test('old delivery receipts cannot hide a connected line or starve new replies',async()=>{
+ let release,beats=0,acks=0,claims=0;const gate=new Promise(resolve=>{release=resolve;});
+ const adapter={status:()=>({status:'ready',linkedPhone:'51900000001',automationPaused:false}),dispatch:async()=>{},
+  replyAcknowledgements:()=>Array.from({length:20},(_,i)=>({id:'job-'+i,providerId:'provider-'+i,state:'read'}))};
+ const client={heartbeat:async()=>{beats++;},ack:async()=>{acks++;await gate;},claim:async()=>{claims++;return null;},record:async()=>{}};
+ const poller=startCrmOutboundPoller({adapter,client,pollMs:1000});
+ await new Promise(resolve=>setTimeout(resolve,1100));
+ assert.ok(beats>=2,'availability must continue while an old receipt is slow');
+ release();const deadline=Date.now()+500;while(!claims&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,5));
+ await poller.stop();assert.equal(claims,1);assert.equal(acks,3,'only a bounded receipt batch precedes a new claim');
+});
 
 test('paused automation does not reserve replies from the central queue',async()=>{
  let calls=0;const poller=startCrmOutboundPoller({adapter:{status:()=>({status:'ready',automationPaused:true}),dispatch:async()=>{}},client:{claim:async()=>{calls++;},record:async()=>{}},pollMs:1000});
