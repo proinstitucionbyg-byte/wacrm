@@ -7,17 +7,26 @@ import {isSalesInquiry} from '@/lib/sales/attribution';
 import {readConversationBillingPreflight} from './billing-runtime';
 import {enqueueSupportWait,pendingSupportWait} from './cloud-support-wait';
 import {pauseNoncampaignFidelity} from './noncampaign-fidelity';
+import {cloudBusinessRouteEnabled,prepareCloudBusinessRoute} from './cloud-business-route';
 
 /** A Cloud customer message stays a Cloud source. Only its reply changes line. */
 export async function routeCloudSupportOpening(db:SupabaseClient,args:{accountId:string;conversationId:string;contactId:string;userId:string;messageId:string;hasConfirmedAdOrigin:boolean;contentText?:string|null;interactiveReplyId?:string|null;isFirstInboundMessage?:boolean;contactCreated?:boolean;metaWaitExpired?:boolean}):Promise<boolean>{
  if(await pauseNoncampaignFidelity(db,{...args,channel:'cloud'}))return true;
- if(process.env.MULTICHANNEL_CLOUD_SUPPORT_ENABLED!=='true'||args.hasConfirmedAdOrigin)return false;
+ if(process.env.MULTICHANNEL_CLOUD_SUPPORT_ENABLED!=='true')return false;
+ if(args.hasConfirmedAdOrigin){
+  if(!await cloudBusinessRouteEnabled(db,args.accountId))return false;
+  const chat=await db.from('conversations').select('whatsapp_support_line_key').eq('account_id',args.accountId).eq('id',args.conversationId).maybeSingle();
+  if(chat.error)throw chat.error;
+  if(chat.data?.whatsapp_support_line_key)return false;
+  if(!args.metaWaitExpired){await enqueueSupportWait(db,args);return true;}
+  await prepareCloudBusinessRoute(db,args);return false;
+ }
  const policy=await db.from('whatsapp_support_routes').select('enabled').eq('account_id',args.accountId).maybeSingle();
  if(policy.error)throw Error('No se pudo verificar la ruta de soporte; no se enviará por Cloud.');
  if(!policy.data?.enabled)return false;
  const conversation=await db.from('conversations').select('first_ad_referral,whatsapp_support_line_key').eq('id',args.conversationId).eq('account_id',args.accountId).maybeSingle();
  if(conversation.error||!conversation.data)throw Error('No se pudo verificar el origen del contacto.');
- if(isConfirmedClickToWhatsAppReferral(conversation.data.first_ad_referral))return false;
+ if(isConfirmedClickToWhatsAppReferral(conversation.data.first_ad_referral))return routeCloudSupportOpening(db,{...args,hasConfirmedAdOrigin:true});
  if(conversation.data.whatsapp_support_line_key)return false;
  if(!args.metaWaitExpired&&await pendingSupportWait(db,args.accountId,args.conversationId))return true;
  // Absence of a referral is not proof that an ongoing commercial journey

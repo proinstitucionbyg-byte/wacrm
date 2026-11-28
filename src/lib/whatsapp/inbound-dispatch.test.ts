@@ -24,7 +24,7 @@ vi.mock('@/lib/ai/auto-reply', () => ({ dispatchInboundToAiReply: h.ai }))
 import { dispatchInboundThroughCrm } from './inbound-dispatch'
 
 const common = {
-  db: {} as never, accountId: 'account', userId: 'owner', contactId: 'contact',
+  db: {from:()=>{const q={select:()=>q,eq:()=>q,single:async()=>({data:{whatsapp_support_line_key:null},error:null})};return q}} as never, accountId: 'account', userId: 'owner', contactId: 'contact',
   conversationId: 'conversation', messageId: 'inbound-session-id', contentText: 'Quiero informes',
   isFirstInboundMessage: false, inboundAt: '2026-10-29T10:00:00.000Z',
   contactCreated: false, hasConfirmedAdOrigin: false,

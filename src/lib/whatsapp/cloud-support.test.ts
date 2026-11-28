@@ -41,7 +41,7 @@ describe('Cloud to owner-configured support line',()=>{
   expect(h.rpc).toHaveBeenCalledWith('enqueue_cloud_support_opening',expect.objectContaining({p_account_id:'account',p_conversation_id:'chat',p_provider_id:'wamid.original',p_body:expect.stringContaining('1. Ventas'),p_options:[{id:'actual-sales-branch',title:'Ventas'},{id:'actual-support-branch',title:'Soporte'}]}));
  });
  it('leaves confirmed campaign contacts on their existing commercial route',async()=>{
-  expect(await routeCloudSupportOpening(db,{...args,hasConfirmedAdOrigin:true})).toBe(false);expect(h.from).not.toHaveBeenCalled();
+  expect(await routeCloudSupportOpening(db,{...args,hasConfirmedAdOrigin:true})).toBe(false);expect(h.rpc).not.toHaveBeenCalled();
   h.referral={source_type:'ad',source_id:'confirmed-ad'};expect(await routeCloudSupportOpening(db,args)).toBe(false);expect(h.rpc).not.toHaveBeenCalled();
  });
  it('does not activate the feature without its explicit server flag',async()=>{vi.stubEnv('MULTICHANNEL_CLOUD_SUPPORT_ENABLED','');expect(await routeCloudSupportOpening(db,args)).toBe(false);expect(h.from).not.toHaveBeenCalled();});

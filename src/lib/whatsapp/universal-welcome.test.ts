@@ -6,14 +6,14 @@ vi.mock('@/lib/ai/explicit-human-request', () => ({ handleExplicitHumanRequest: 
 vi.mock('./inbound-dispatch', () => ({ dispatchInboundThroughCrm: h.dispatch }))
 import { gateNewNumberWelcome, drainNewNumberWelcomes, NEW_NUMBER_WELCOME_TEXT, NEW_NUMBER_WELCOME_DELAY_MS, welcomeCanRun } from './universal-welcome'
 
-function database(reservation: object, due: object[] = []) {
+function database(reservation: object, due: object[] = [],handoff=false) {
   const writes: object[] = []
   const db = { rpc: vi.fn().mockResolvedValue({ data: reservation, error: null }),
     from: vi.fn((table: string) => {
-      let value: object | object[] | null = table === 'conversations' ? { automation_enabled: true, last_human_message_at: null } : due
+      let value: object | object[] | null = table === 'whatsapp_support_routes'?{enabled:true,automatic_sales_handoff:handoff}:table === 'conversations' ? { automation_enabled: true, last_human_message_at: null } : due
       const q: Record<string, unknown> = {}
       for (const name of ['select', 'eq', 'neq', 'in', 'lt', 'lte', 'limit']) q[name] = () => q
-      q.update = (patch: object) => { writes.push(patch); value = null; return q }
+      q.update = (patch: object) => { writes.push(patch); value = 'state' in patch&&patch.state==='routing'?{id:'claim'}:null; return q }
       q.single = q.maybeSingle = () => Promise.resolve({ data: value, error: null })
       q.then = (resolve: (r: object) => unknown) => Promise.resolve(resolve({ data: value, error: null }))
       return q
@@ -27,6 +27,30 @@ const base = { channel: 'session' as const, accountId: 'account', userId: 'owner
 beforeEach(() => { vi.clearAllMocks(); h.human.mockResolvedValue(false); h.send.mockResolvedValue({ whatsapp_message_id: 'waweb-job:test' }) })
 
 describe('universal first contact welcome', () => {
+  it('waits three minutes after the API welcome is confirmed before changing to Business',async()=>{
+    const now=Date.now();h.delivery.mockResolvedValue({status:'accepted',error:false})
+    const d=database({},[{id:'event',account_id:'account',conversation_id:'chat',contact_id:'contact',state:'waiting_delivery',message_reference:'cloud-ref',payload:{...base,channel:'cloud',hasConfirmedAdOrigin:true}}],true)
+    await drainNewNumberWelcomes(d.db)
+    const scheduled=d.writes.find(x=>'run_at' in x) as {run_at:string}
+    expect(Date.parse(scheduled.run_at)).toBeGreaterThanOrEqual(now+180000)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+  it('routes the original API question through Business without losing the ad context or sending another welcome',async()=>{
+    const d=database({},[{id:'event',account_id:'account',conversation_id:'chat',contact_id:'contact',state:'waiting_route',payload:{...base,channel:'cloud',contentText:'Farmacia',hasConfirmedAdOrigin:true}}],true)
+    d.rpc.mockResolvedValue({data:{ready:true},error:null})
+    await drainNewNumberWelcomes(d.db)
+    expect(d.rpc).toHaveBeenCalledWith('prepare_cloud_business_route',{p_account_id:'account',p_conversation_id:'chat',p_provider_id:'source'})
+    expect(h.dispatch).toHaveBeenCalledWith(expect.objectContaining({contentText:'Farmacia',hasConfirmedAdOrigin:true,channel:'cloud',welcomeContinuation:true}))
+    expect(h.send).not.toHaveBeenCalled()
+    expect(d.writes).toContainEqual(expect.objectContaining({state:'done'}))
+  })
+  it('keeps the original question for review if Business cannot be confirmed',async()=>{
+    const d=database({},[{id:'event',account_id:'account',conversation_id:'chat',contact_id:'contact',state:'waiting_route',payload:{...base,channel:'cloud',hasConfirmedAdOrigin:true}}],true)
+    d.rpc.mockResolvedValue({data:{ready:false},error:null})
+    await drainNewNumberWelcomes(d.db)
+    expect(h.dispatch).not.toHaveBeenCalled()
+    expect(d.writes).toContainEqual(expect.objectContaining({state:'needs_review',reason:'route_not_confirmed'}))
+  })
   it('preserves the exact owner text, including the closing exclamation mark', () => {
     expect(NEW_NUMBER_WELCOME_TEXT).toBe('👋🏻 ¡Bienvenid@ a *INSTICRECE*! 💙 Gracias por comunicarte con nosotros.\n\nEn breve, nuestro equipo se pondrá en contacto contigo para resolver tus consultas y brindarte la asistencia que necesites. 👩🏻‍💻📚\n\n¡Si creces tú, crecemos nosotros!')
     expect(NEW_NUMBER_WELCOME_DELAY_MS).toBe(30_000)

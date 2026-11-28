@@ -9,6 +9,7 @@ import { handleExplicitHumanRequest } from '@/lib/ai/explicit-human-request'
 import { inboundRoutingText } from '@/lib/automations/routing-text'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { isConfirmedClickToWhatsAppReferral } from './billing'
+import {cloudBusinessRouteEnabled,prepareCloudBusinessRoute,CLOUD_BUSINESS_OPENING_DELAY_MS} from './cloud-business-route'
 
 export const NEW_NUMBER_WELCOME_TEXT = '👋🏻 ¡Bienvenid@ a *INSTICRECE*! 💙 Gracias por comunicarte con nosotros.\n\nEn breve, nuestro equipo se pondrá en contacto contigo para resolver tus consultas y brindarte la asistencia que necesites. 👩🏻‍💻📚\n\n¡Si creces tú, crecemos nosotros!'
 export const NEW_NUMBER_WELCOME_DELAY_MS = 30_000
@@ -97,8 +98,10 @@ export async function drainNewNumberWelcomes(db: SupabaseClient): Promise<number
       if (['failed', 'cancelled', 'needs_review'].includes(delivery.status ?? '')) {
         await checked(db.from('whatsapp_new_number_welcomes').update({ state: 'needs_review', reason: 'welcome_delivery_failed' }).eq('id', row.id).eq('state', row.state))
       } else if (['accepted', 'sent', 'delivered', 'read'].includes(delivery.status ?? '')) {
+        const delay=row.payload.channel==='cloud'&&!conversation.data.whatsapp_support_line_key
+          &&await cloudBusinessRouteEnabled(db,row.account_id)?CLOUD_BUSINESS_OPENING_DELAY_MS:NEW_NUMBER_WELCOME_DELAY_MS
         await checked(db.from('whatsapp_new_number_welcomes').update({ state: 'waiting_route',
-          run_at: new Date(Date.now() + NEW_NUMBER_WELCOME_DELAY_MS).toISOString() }).eq('id', row.id).eq('state', row.state))
+          run_at: new Date(Date.now() + delay).toISOString() }).eq('id', row.id).eq('state', row.state))
       }
       continue
     }
@@ -110,6 +113,9 @@ export async function drainNewNumberWelcomes(db: SupabaseClient): Promise<number
       const { dispatchInboundThroughCrm: dispatch } = await import('./inbound-dispatch')
       const input: Input = { ...row.payload, db, welcomeContinuation: true, conversation: conversation.data,
         hasConfirmedAdOrigin: row.payload.hasConfirmedAdOrigin || isConfirmedClickToWhatsAppReferral(conversation.data.first_ad_referral) }
+      if(input.channel==='cloud'&&!conversation.data.whatsapp_support_line_key&&await cloudBusinessRouteEnabled(db,row.account_id)){
+        await prepareCloudBusinessRoute(db,input)
+      }
       if (input.channel === 'session') {
         const source = await db.from('messages').select('id,whatsapp_session_line_key').eq('conversation_id', row.conversation_id)
           .eq('message_id', input.messageId).eq('sender_type', 'customer').single()

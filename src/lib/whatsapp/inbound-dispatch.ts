@@ -52,6 +52,8 @@ export async function dispatchInboundThroughCrm(args: {
   preparedCommand?: { requestId: string; actorId: string; automationId: string }
   /** Internal durable welcome continuation; never accepted from browser input. */
   welcomeContinuation?: boolean
+  /** Server queue has already observed the three-minute Meta evidence wait. */
+  metaWaitExpired?: boolean
   conversation: ConversationControls
 }): Promise<void> {
   const { db } = args
@@ -119,7 +121,7 @@ export async function dispatchInboundThroughCrm(args: {
 
   let billingBlockedForThisInbound = false
   const automaticWasEnabled = args.conversation.ai_enabled !== false || args.conversation.automation_enabled !== false
-  const supportRouted = welcome === 'enrolled' && args.channel === 'cloud'
+  const supportRouted = args.channel === 'cloud'
     ? await db.from('conversations').select('whatsapp_support_line_key').eq('id', args.conversationId).eq('account_id', args.accountId).single()
     : null
   if (supportRouted?.error) throw supportRouted.error
