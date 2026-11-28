@@ -318,7 +318,7 @@ function MessageContent({
           ) : (
             <MediaUnavailable label={t("audio")} t={t} />
           )}
-          {message.content_text && <AudioTranscript text=<MessageLinkedText text={message.content_text ?? ""} /> />}
+          {message.content_text && <AudioTranscript text={message.content_text} />}
         </div>
       );
 
@@ -551,4 +551,3 @@ className={cn(
     </div>
   );
 }
-
