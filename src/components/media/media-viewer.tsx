@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { X, Download, RotateCw, Plus, Minus } from "lucide-react";
+import { downloadFile } from '@/lib/media/download-file';
+import { toast } from 'sonner';
 
 interface MediaViewerProps {
   open: boolean;
@@ -16,6 +18,7 @@ export function MediaViewer({
 }: MediaViewerProps) {
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);
+  const [downloading,setDownloading]=useState(false);
   useEffect(() => {
   if (open) {
     setRotation(0);
@@ -57,15 +60,15 @@ overflow: "hidden",
             </button>
 
       <button
-        onClick={(e) => {
+        aria-label={downloading?'Descargando imagen':'Descargar imagen'}
+        disabled={downloading}
+        onClick={async(e) => {
           e.stopPropagation();
-
           if (!imageUrl) return;
-
-          const link = document.createElement("a");
-          link.href = imageUrl;
-          link.download = "imagen";
-          link.click();
+          setDownloading(true);
+          try{await downloadFile(imageUrl);toast.success('Descarga iniciada');}
+          catch{toast.error('No se pudo descargar la imagen. Vuelve a intentarlo.');}
+          finally{setDownloading(false);}
         }}
         style={{
           position: "absolute",
