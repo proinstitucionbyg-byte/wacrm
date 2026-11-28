@@ -67,6 +67,15 @@ test('saving manual dispatch changes only pending schedule and routes and does n
  const c=await manualCampaign(),r=await adjust(c.id,{action:'save',interval:30,block:2,pause:100});assert.equal(r.status,'paused');
  const campaign=(await db.query('select * from multichannel_campaigns where id=$1',[c.id])).rows[0];assert.equal(campaign.interval_seconds,30);assert.equal(campaign.manual_batch_job_ids,null);assert.equal(campaign.routes.length,1);assert.equal(await step('claim'),null);
 });
+test('saved block timing restarts from the pending messages and still enforces a real pause after catching up',async()=>{
+ const c=await manualCampaign();await db.exec('update multichannel_jobs set campaign_sequence=campaign_sequence+100');
+ await adjust(c.id,{action:'save',block:1,pause:100});await control('pause',{campaign_id:c.id,value:false});
+ const root=await step('claim');assert.ok(root);await step('authorize','WA-a',root);await step('record','WA-a',{...root,result:'accepted',provider:'manual-block'});
+ await db.exec("update multichannel_jobs set run_at=now()-interval '1 minute' where status='queued'");
+ assert.equal(await step('claim'),null);
+ await db.query("update multichannel_jobs set started_at=now()-interval '101 seconds' where id=$1",[root.id]);
+ assert.ok(await step('claim'));
+});
 test('paused ready line requires explicit enabling and an in-flight job cannot be edited',async()=>{
  const c=await manualCampaign();await db.exec("update multichannel_whatsapp_session_lines set paused=true where line_key='WA-a'");await assert.rejects(adjust(c.id),/bot está pausado/);
  await adjust(c.id,{enable:true});assert.equal((await db.query("select paused from multichannel_whatsapp_session_lines where line_key='WA-a'")).rows[0].paused,false);

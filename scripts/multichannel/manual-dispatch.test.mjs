@@ -1,0 +1,6 @@
+import test from'node:test';import assert from'node:assert/strict';
+import{safeDispatchJobs,selectDispatchBatch}from'../../src/lib/multichannel/manual-dispatch.ts';
+const job=(id,person,step=0,patch={})=>({id,contact_id:person,recipient:'51900000001',status:'queued',started_at:null,provider_id:null,predecessor_id:null,campaign_sequence:Number(person),campaign_step:step,line_key:'WA-a',...patch});
+test('preview distinguishes an exact message limit from complete recipient sequences',()=>{const rows=[job('a','0'),job('b','0',1,{predecessor_id:'a'}),job('c','1')];assert.deepEqual(selectDispatchBatch(rows,1,'messages').map(j=>j.id),['a']);assert.deepEqual(selectDispatchBatch(rows,1,'recipients').map(j=>j.id),['a','b']);});
+test('uncertain and already attempted messages never appear among safe pending steps',()=>{const rows=[job('a','0',0,{status:'needs_review'}),job('b','0',1,{predecessor_id:'a'}),job('c','1',0,{started_at:'2026-11-28'}),job('d','2')];assert.deepEqual(safeDispatchJobs(rows).map(j=>j.id),['d']);});
+test('confirmed predecessor permits continuation, but missing predecessor does not',()=>{const a=job('a','0',0,{status:'accepted',provider_id:'ok'}),b=job('b','0',1,{predecessor_id:'a'});assert.deepEqual(safeDispatchJobs([b,a]).map(j=>j.id),['b']);assert.deepEqual(safeDispatchJobs([b]),[]);});

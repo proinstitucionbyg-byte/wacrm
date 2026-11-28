@@ -1,5 +1,6 @@
 BEGIN;
-ALTER TABLE public.multichannel_campaigns ADD COLUMN manual_batch_job_ids uuid[], ADD COLUMN manual_request_id uuid;
+ALTER TABLE public.multichannel_campaigns ADD COLUMN manual_batch_job_ids uuid[], ADD COLUMN manual_request_id uuid, ADD COLUMN manual_dispatch_rebased boolean NOT NULL DEFAULT false;
+ALTER TABLE public.multichannel_jobs ADD COLUMN manual_dispatch_position integer;
 
 CREATE FUNCTION public.adjust_campaign_dispatch(p_account uuid,p_actor uuid,p_campaign uuid,p_request uuid,p_action text,p_lines text[],p_count integer,p_unit text,p_interval integer,p_block integer,p_pause integer,p_enable boolean DEFAULT false) RETURNS jsonb
 LANGUAGE plpgsql SECURITY INVOKER SET search_path='' AS $$
@@ -36,11 +37,12 @@ BEGIN
  SELECT * FROM ranked WHERE p_action='save' OR p_unit='messages' OR person<=p_count ORDER BY campaign_sequence,campaign_step,id LIMIT CASE WHEN p_action='send' AND p_unit='messages' THEN p_count ELSE 21000 END
  ) SELECT array_agg(id ORDER BY campaign_sequence,campaign_step,id),count(DISTINCT contact_id) INTO ids,people FROM chosen;
  IF coalesce(cardinality(ids),0)=0 THEN RAISE EXCEPTION 'No hay pendientes seguros para enviar';END IF;
+ IF tick+make_interval(secs=>((cardinality(ids)-1)*p_interval+CASE WHEN p_action='save' THEN ((cardinality(ids)-1)/p_block)*p_pause ELSE 0 END)::double precision)>=c.expires_at THEN RAISE EXCEPTION 'Los nuevos tiempos superan la fecha límite de la campaña; reduce la pausa o la cantidad';END IF;
  IF EXISTS(SELECT 1 FROM public.multichannel_jobs WHERE id=ANY(ids) AND (NOT campaign_permission OR permission_expires_at IS NULL OR permission_expires_at<=c.expires_at)) THEN RAISE EXCEPTION 'Los permisos no cubren la campaña';END IF;
  UPDATE public.multichannel_campaigns SET routes=chosen_routes,distribution=NULL,dispatch_mode='sequential',interval_seconds=p_interval,block_size=p_block,block_pause_seconds=p_pause,
- manual_batch_job_ids=CASE WHEN p_action='send' THEN ids ELSE NULL END,manual_request_id=p_request,status=CASE WHEN p_action='send' THEN 'active' ELSE 'paused' END,technical_pause_at=NULL,updated_at=tick WHERE id=c.id;
+ manual_batch_job_ids=CASE WHEN p_action='send' THEN ids ELSE NULL END,manual_request_id=p_request,manual_dispatch_rebased=true,status=CASE WHEN p_action='send' THEN 'active' ELSE 'paused' END,technical_pause_at=NULL,updated_at=tick WHERE id=c.id;
  WITH ranked AS (SELECT id,row_number() OVER(ORDER BY campaign_sequence,campaign_step,id)-1 ord,dense_rank() OVER(ORDER BY campaign_sequence,contact_id)-1 person FROM public.multichannel_jobs WHERE id=ANY(ids))
- UPDATE public.multichannel_jobs j SET line_key=p_lines[1+(r.person%cardinality(p_lines))::int],campaign_primary_line_key=p_lines[1+(r.person%cardinality(p_lines))::int],campaign_lane_sequence=r.person,
+ UPDATE public.multichannel_jobs j SET manual_dispatch_position=r.ord,line_key=p_lines[1+(r.person%cardinality(p_lines))::int],campaign_primary_line_key=p_lines[1+(r.person%cardinality(p_lines))::int],campaign_lane_sequence=r.person,
  campaign_routes=jsonb_build_array(jsonb_build_object('channel','whatsapp_support','line_key',p_lines[1+(r.person%cardinality(p_lines))::int]))||(SELECT coalesce(jsonb_agg(x),'[]'::jsonb) FROM jsonb_array_elements(chosen_routes) x WHERE x->>'line_key'<>p_lines[1+(r.person%cardinality(p_lines))::int]),
  run_at=tick+make_interval(secs=>(r.ord*p_interval+CASE WHEN p_action='save' THEN (r.ord/p_block)*p_pause ELSE 0 END)::double precision),routing_alert=NULL
  FROM ranked r WHERE j.id=r.id;
@@ -63,7 +65,13 @@ DO $patch$ DECLARE source text;needle text:='and ca.status=''active'' and (';BEG
  source:=replace(source,needle,'and ca.status=''active'' and (ca.manual_batch_job_ids is null or q.id=any(ca.manual_batch_job_ids)) and (');
  source:=replace(source,'earlier.campaign_sequence<j.campaign_sequence and','earlier.campaign_sequence<j.campaign_sequence and (c.manual_batch_job_ids is null or earlier.id=any(c.manual_batch_job_ids)) and');
  IF position('if j.campaign_sequence>0 and' IN source)=0 THEN RAISE EXCEPTION 'Inspect block fence before manual dispatch';END IF;
- source:=replace(source,'if j.campaign_sequence>0 and','if c.manual_batch_job_ids is null and j.campaign_sequence>0 and');
+ source:=replace(source,'if j.campaign_sequence>0 and','if not c.manual_dispatch_rebased and c.manual_batch_job_ids is null and j.campaign_sequence>0 and');
+ needle:='select * into c from public.multichannel_campaigns where id=j.campaign_id;';
+ IF position(needle IN source)=0 THEN RAISE EXCEPTION 'Inspect worker campaign load before rebasing';END IF;
+ source:=replace(source,needle,needle||$fence$
+   if c.manual_dispatch_rebased and c.manual_batch_job_ids is null and j.manual_dispatch_position>0 and mod(j.manual_dispatch_position,c.block_size)=0
+   and exists(select 1 from public.multichannel_jobs earlier where earlier.campaign_id=c.id and earlier.account_id=c.account_id and earlier.manual_dispatch_position<j.manual_dispatch_position and earlier.started_at>tick-make_interval(secs=>c.block_pause_seconds)) then continue;end if;
+ $fence$);
  EXECUTE source;
 END;$patch$;
 REVOKE ALL ON FUNCTION public.adjust_campaign_dispatch(uuid,uuid,uuid,uuid,text,text[],integer,text,integer,integer,integer,boolean),public.finish_manual_campaign_batch() FROM PUBLIC,anon,authenticated;
