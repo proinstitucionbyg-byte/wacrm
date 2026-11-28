@@ -13,7 +13,7 @@ describe('campaign contact registration',()=>{
  it('uses exact normalized phones in the current account and preserves existing names',async()=>{
   const f=fixture([{id:'old',account_id:'own',phone:'937 467 119',phone_normalized:'937467119',name:'Original'},{id:'foreign',account_id:'other',phone:'+14155552671',phone_normalized:'14155552671',name:'Otro'}]);
   const result=await importCampaignContacts(f.db,'own','actor',[{phone:'+51937467119',name:'No reemplazar'},{phone:'+14155552671',name:'Nuevo'}]);
-  expect(result.remaining).toBe(0);expect(f.inserted[0]).toEqual([{account_id:'own',user_id:'actor',phone:'+14155552671',name:'Nuevo'}]);expect(f.rows[0].name).toBe('Original');
+  expect(result.remaining).toBe(0);expect(f.inserted[0]).toEqual([{account_id:'own',user_id:'actor',channel:'whatsapp',phone:'+14155552671',name:'Nuevo'}]);expect(f.rows[0].name).toBe('Original');
   await importCampaignContacts(f.db,'own','actor',[{phone:'+14155552671',name:'Tampoco reemplazar'}]);expect(f.inserted).toHaveLength(1);
  });
  it('does not merge ambiguous records, infer consent or accept invalid numbers',async()=>{

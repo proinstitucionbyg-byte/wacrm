@@ -28,7 +28,7 @@ export async function importCampaignContacts(db:SupabaseClient,accountId:string,
  const fresh=normalized.filter(row=>existing.find(value=>value.phone===row.phone)?.status==='not_found');
  if(fresh.length){
   // Insert only missing exact numbers. Never update names, tags or existing identities.
-  const inserted=await db.from('contacts').insert(fresh.map(row=>({account_id:accountId,user_id:userId,phone:row.phone,name:row.name?.trim()||row.phone})));
+  const inserted=await db.from('contacts').insert(fresh.map(row=>({account_id:accountId,user_id:userId,channel:'whatsapp',phone:row.phone,name:row.name?.trim()||row.phone})));
   if(inserted.error&&inserted.error.code!=='23505')throw Error('No se pudo registrar la lista.');
   // A concurrent insert can win the unique constraint. Re-resolve; don't merge.
  }
