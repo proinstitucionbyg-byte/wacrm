@@ -7,10 +7,11 @@ const MESSAGE_ID = value => typeof value === 'string' && value.length > 0 && val
  * are never replayed into CRM automation.
  */
 export function createInboundPoller({ client, onMessage, isReady, intervalMs = 5000,
-  startedAt = Date.now(), now = Date.now } = {}) {
+  startedAt = Date.now(), now = Date.now, catchupSince, onHistoricalMessage } = {}) {
   if (typeof client?.getChats !== 'function' || typeof onMessage !== 'function' || typeof isReady !== 'function' ||
       !Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 30_000 ||
       !Number.isFinite(startedAt) || typeof now !== 'function') throw Error('Configuración de recepción inválida.');
+  if(catchupSince!==undefined&&(!Number.isFinite(catchupSince)||catchupSince>startedAt||catchupSince<startedAt-2*3600000||typeof onHistoricalMessage!=='function'))throw Error('Ventana de recuperación inválida.');
 
   let stopped = false, polling = false, timer = null;
   const forwarded = new Set();
@@ -23,7 +24,7 @@ export function createInboundPoller({ client, onMessage, isReady, intervalMs = 5
     let count = 0;
     try {
       if (!await isReady()) { diagnostics.notReady++; return 0; }
-      const chats = await client.getChats({ after: startedAt });
+      const chats = await client.getChats({ after: catchupSince??startedAt });
       diagnostics.lastChatCount = Array.isArray(chats) ? chats.length : 0;
       for (const chat of Array.isArray(chats) ? chats : []) {
         const id = chat?.id?._serialized;
@@ -33,10 +34,11 @@ export function createInboundPoller({ client, onMessage, isReady, intervalMs = 5
           const messageId = message?.id?._serialized;
           const timestamp = Number(message?.timestamp) * 1000;
           if (!MESSAGE_ID(messageId) || message.fromMe === true || message.id?.fromMe === true ||
-              !Number.isFinite(timestamp) || timestamp <= startedAt || timestamp > now() + 300_000 ||
+              !Number.isFinite(timestamp) || timestamp <= (catchupSince??startedAt) || timestamp > now() + 300_000 ||
               forwarded.has(messageId)) continue;
           diagnostics.candidates++;
-          onMessage(message);
+          if(timestamp<=startedAt)onHistoricalMessage({...message,__crmHistoryOnly:true});
+          else onMessage(message);
           forwarded.add(messageId);
           if (forwarded.size > 5000) forwarded.delete(forwarded.values().next().value);
           count++;

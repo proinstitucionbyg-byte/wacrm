@@ -145,7 +145,13 @@ async function main() {
     void adapter.start();
     if (outboundClient) outboundPoller = startCrmOutboundPoller({ adapter, client: outboundClient,
       onError: () => console.error('Cola de respuestas CRM temporalmente no disponible.') });
+    const pollStartedAt=Date.now();
+    const receivedWatermark=store.records().filter(row=>row.kind==='inbound'&&Number.isFinite(row.payload?.timestamp))
+      .reduce((latest,row)=>Math.max(latest,row.payload.timestamp),0);
     inboundPoller=createInboundPoller({client:chatSource,onMessage:message=>client.emit('message_create',message),
+      startedAt:pollStartedAt,
+      ...(receivedWatermark?{catchupSince:Math.max(pollStartedAt-2*3600000,Math.min(pollStartedAt,receivedWatermark-60000)),
+        onHistoricalMessage:message=>client.emit('message_create',message)}:{}),
       isReady:()=>adapter.status().status==='ready'});
     inboundPoller.start();
     if(campaignClient)campaignPoller=startCampaignPoller({adapter,client:campaignClient,onError:()=>console.error('Campañas CRM temporalmente no disponibles.')});

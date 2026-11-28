@@ -46,7 +46,8 @@ function snapshot(message, now) {
     text: typeof message.body === 'string' ? message.body.slice(0, 65536) : '',
     type: typeof message.type === 'string' ? message.type.slice(0, 32) : 'unknown',
     ...(Number.isInteger(message.ack)&&message.ack>=-1&&message.ack<=4?{ack:message.ack}:{}),
-    hasMedia: message.hasMedia === true };
+    hasMedia: message.hasMedia === true,
+    ...(message.__crmHistoryOnly===true?{historyOnly:true}:{}) };
 }
 
 /** Real client adapter. No automatic rule/AI response or Cloud API fallback.

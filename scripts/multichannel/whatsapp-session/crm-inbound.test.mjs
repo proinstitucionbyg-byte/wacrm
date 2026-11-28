@@ -5,6 +5,13 @@ import { createCrmInboundSync } from './crm-inbound.mjs';
 const token = `wcm_${'a'.repeat(64)}`;
 const event = { id:'provider-1',lineKey:'WA-test',linkedPhone:'51911111111',chatId:'51922222222@c.us',
   senderPhone:'51922222222',timestamp:Date.parse('2026-10-29T08:00:00Z'),type:'chat',text:'Mensaje ficticio' };
+test('marks restored messages as history so the CRM does not replay their sales flows',async()=>{
+ let body;const sync=createCrmInboundSync({origin:'https://crm.example',token,fetchImpl:async(url,options)=>{
+  body=JSON.parse(options.body);return new Response(JSON.stringify({result:'recorded'}),{status:200});
+ }});
+ assert.deepEqual(await sync({...event,historyOnly:true}),{state:'synced'});
+ assert.equal(body.history_only,true);
+});
 
 test('sends only bounded message metadata to the authenticated CRM intake',async()=>{
   const calls=[];const sync=createCrmInboundSync({origin:'https://crm.example',token,fetchImpl:async(url,options)=>{

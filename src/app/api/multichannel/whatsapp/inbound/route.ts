@@ -85,6 +85,8 @@ export async function POST(request: Request) {
       .eq('account_id',worker.data.account_id).eq('linked_phone',senderPhone).eq('paused',false).limit(1).maybeSingle();
     if(internalLine.error)throw internalLine.error;
     if(internalLine.data)return NextResponse.json({result:result.data,automation:'internal_line_skipped'},{headers:{'Cache-Control':'no-store'}});
+    // A reconnect catch-up is durable Inbox history, never a new sales trigger.
+    if(parsed.data.history_only===true)return NextResponse.json({result:result.data,automation:'history_only'},{headers:{'Cache-Control':'no-store'}});
 
     // Only plain text is sent to the shared CRM dispatcher for now. Other
     // media remain visible in the Inbox as placeholders until their CRM

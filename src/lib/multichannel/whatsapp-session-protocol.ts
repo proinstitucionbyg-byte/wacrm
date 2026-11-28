@@ -13,6 +13,7 @@ export const whatsappSessionInboundSchema = z.object({
   text: z.string().max(65536).default(''),
   direction:z.literal('outbound').optional(),
   ack:z.number().int().min(-1).max(4).optional(),
+  history_only:z.boolean().optional(),
 }).strict();
 
 export function sessionSenderPhone(chatId: string, resolvedPhone?: string): string | null {

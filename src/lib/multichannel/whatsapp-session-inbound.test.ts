@@ -39,6 +39,13 @@ beforeEach(() => {
 });
 
 describe('entrada de WhatsApp Web', () => {
+  it('persists reconnect history without resolving menus or replaying automations',async()=>{
+    const response=await POST(request({...payload,history_only:true}));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({result:'recorded',automation:'history_only'});
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('record_whatsapp_session_inbound',expect.objectContaining({p_provider_message_id:payload.provider_message_id}));
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
   it('records a linked phone outgoing echo without dispatching a new automation or AI response',async()=>{
     mocks.rpc.mockResolvedValue({data:{recorded:true},error:null});
     const response=await POST(request({...payload,direction:'outbound',ack:2}));expect(response.status).toBe(200);

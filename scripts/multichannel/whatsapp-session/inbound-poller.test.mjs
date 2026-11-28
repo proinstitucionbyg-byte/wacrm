@@ -3,6 +3,20 @@ import assert from 'node:assert/strict';
 import { createInboundPoller } from './inbound-poller.mjs';
 
 const now = 1_800_000_000_000;
+test('recovers the reconnect gap only as history and emits each ID once',async()=>{
+ const old=message('missed-during-restart',{timestamp:(now-90000)/1000}),fresh=message('live-after-restart');
+ const historic=[],live=[];
+ const poller=createInboundPoller({client:{getChats:async()=>[{id:{_serialized:old.from},recentMessages:[old,fresh]}]},isReady:async()=>true,
+  startedAt:now-60000,catchupSince:now-120000,now:()=>now,onMessage:m=>live.push(m),onHistoricalMessage:m=>historic.push(m)});
+ assert.equal(await poller.pollOnce(),2);assert.equal(await poller.pollOnce(),0);
+ assert.equal(historic[0].__crmHistoryOnly,true);assert.equal(historic[0].id._serialized,'missed-during-restart');
+ assert.deepEqual(live,[fresh]);poller.stop();
+});
+test('rejects unbounded history or recovery without a separate history callback',()=>{
+ for(const extra of [{catchupSince:now-3*3600000,onHistoricalMessage(){}},{catchupSince:now-120000}]){
+  assert.throws(()=>createInboundPoller({client:{getChats:async()=>[]},isReady:async()=>true,onMessage(){},startedAt:now-60000,...extra}));
+ }
+});
 function message(id, { timestamp = now / 1000, own = false, chat = '133548417802244@lid' } = {}) {
   return { id: { _serialized: id, fromMe: own }, fromMe: own, from: chat, timestamp, body: 'PRUEBA' };
 }
