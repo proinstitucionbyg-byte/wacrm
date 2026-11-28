@@ -13,7 +13,20 @@ export async function GET(request: Request) {
     if (query.length > 120 || (!unread && query.length < 2 && !(browse && query === '')) || !Number.isSafeInteger(offset) || offset < 0) {
       return NextResponse.json({ error: 'Escribe entre 2 y 120 caracteres.' }, { status: 400 });
     }
-    const { data: matches, error } = await ctx.supabase.rpc('search_inbox_conversations', {
+    let exactIds:string[]|null=null;
+    if(/^[+0-9 ().-]+$/.test(query)){
+      let digits=query.replace(/\D/g,'');if(digits.startsWith('00'))digits=digits.slice(2);
+      if(digits.length>=9){
+        const values=new Set([digits,'+'+digits]);if(/^9\d{8}$/.test(digits)){values.add('51'+digits);values.add('+51'+digits);}
+        const contacts=await ctx.supabase.from('contacts').select('id').eq('account_id',ctx.accountId).in('phone',[...values]);if(contacts.error)throw contacts.error;
+        if(contacts.data?.length){
+          let request=ctx.supabase.from('conversations').select('id').eq('account_id',ctx.accountId).in('contact_id',contacts.data.map(c=>c.id)).order('last_message_at',{ascending:false}).range(offset,offset+100);
+          if(unread)request=request.gt('unread_count',0);
+          const direct=await request;if(direct.error)throw direct.error;if(direct.data?.length)exactIds=direct.data.map(c=>c.id);
+        }
+      }
+    }
+    const { data: matches, error } = exactIds?{data:exactIds.map(conversation_id=>({conversation_id})),error:null}:await ctx.supabase.rpc('search_inbox_conversations', {
       p_query: query, p_unread: unread, p_offset: offset,
     });
     if (error) throw error;

@@ -89,14 +89,15 @@ export function ConversationList({
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState('');
   useEffect(() => {
-    const query=search.trim(),unread=filter==='unread';if(query.length<2&&!unread)return;
+    const query=search.trim(),unread=filter==='unread';if(query.length<2&&!unread){setSearchBusy(false);return;}
+    setRemoteSearch({query,unread,rows:[]});setSearchBusy(true);setSearchError('');
     const controller=new AbortController();
     const timer=setTimeout(async()=>{
       setSearchBusy(true);setSearchError('');
       try{
         let offset=0,more=true;const rows:Conversation[]=[];
         while(more&&!controller.signal.aborted){
-          const response=await fetch('/api/inbox/conversations/search?'+new URLSearchParams({q:query,unread:unread?'1':'0',offset:String(offset)}),{signal:controller.signal});
+          const response=await fetch('/api/inbox/conversations/search?'+new URLSearchParams({q:query,unread:unread?'1':'0',offset:String(offset)}),{signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])});
           const data=await response.json();if(!response.ok)throw new Error(data.error||'No se pudo completar la búsqueda.');
           rows.push(...data.conversations);more=data.hasMore;offset=data.nextOffset;
           if(!controller.signal.aborted)setRemoteSearch({query,unread,rows:[...new Map(rows.map(row=>[row.id,row])).values()]});

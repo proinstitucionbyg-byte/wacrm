@@ -1,0 +1,9 @@
+import{beforeEach,it,expect,vi}from'vitest';
+const h=vi.hoisted(()=>({permission:vi.fn(),rpc:vi.fn(),from:vi.fn(),phones:[] as string[]}));
+vi.mock('@/lib/auth/permissions',()=>({requirePermission:h.permission}));vi.mock('@/lib/auth/account',()=>({toErrorResponse:()=>new Response(null,{status:403})}));
+vi.mock('@/lib/inbox/conversations',()=>({CONVERSATION_SELECT:'full',normalizeConversations:(rows:unknown[])=>rows}));
+import{GET}from'@/app/api/inbox/conversations/search/route';
+beforeEach(()=>{vi.resetAllMocks();h.phones=[];h.rpc.mockResolvedValue({data:[],error:null});h.from.mockImplementation((table:string)=>{let selection='';const q={select:(s:string)=>{selection=s;return q;},eq:()=>q,in:(k:string,v:string[])=>{if(k==='phone')h.phones=v;return q;},order:()=>q,range:()=>q,gt:()=>q,then:(resolve:(v:unknown)=>unknown)=>Promise.resolve(resolve({data:table==='contacts'?[{id:'contact'}]:selection==='id'?[{id:'conversation'}]:[{id:'conversation',name:'Jordan'}],error:null}))};return q;});h.permission.mockResolvedValue({accountId:'account',supabase:{from:h.from,rpc:h.rpc}});});
+it.each(['934218296','+51 934 218 296'])('finds the exact phone without scanning all message text: %s',async number=>{const r=await GET(new Request('http://localhost/api/inbox/conversations/search?'+new URLSearchParams({q:number})));expect(r.status).toBe(200);expect((await r.json()).conversations[0].id).toBe('conversation');expect(h.phones).toContain('51934218296');expect(h.rpc).not.toHaveBeenCalled();});
+it('retains history search for text queries',async()=>{await GET(new Request('http://localhost/api/inbox/conversations/search?q=Vladimir'));expect(h.rpc).toHaveBeenCalled();});
+it('checks permission before any lookup',async()=>{h.permission.mockRejectedValue(Error());expect((await GET(new Request('http://localhost/api/inbox/conversations/search?q=934218296'))).status).toBe(403);expect(h.from).not.toHaveBeenCalled();});
