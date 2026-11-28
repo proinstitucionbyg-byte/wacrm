@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
+import { OPEN_CONVERSATION_EVENT } from '@/lib/inbox/open-conversation';
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -554,6 +555,12 @@ if (activeConversation?.id === fetched.id) {
     autoSelectedForDeepLinkRef.current = null;
     window.history.replaceState(null,"","/inbox");
   }, []);
+
+  useEffect(()=>{
+    const open=(event:Event)=>{if(!(event instanceof CustomEvent)||!event.detail?.id)return;event.preventDefault();setInboxView('chats');handleSelectConversation(event.detail as Conversation);};
+    window.addEventListener(OPEN_CONVERSATION_EVENT,open);
+    return()=>window.removeEventListener(OPEN_CONVERSATION_EVENT,open);
+  },[handleSelectConversation]);
 
   // Keep the mobile pane in sync with the browser Back/Forward gestures.
   useEffect(() => {
