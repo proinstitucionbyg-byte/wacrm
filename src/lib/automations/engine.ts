@@ -33,7 +33,7 @@ import { automationAudioEvidence } from './audio-evidence'
 import { greetingAutomationId, INITIAL_GREETING_ID, isGreetingAutomation, matchesGreeting, RETURN_GREETING_ID, shouldShowGreeting } from './greeting-continuity'
 import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
-import { captureCourseCheckpoint, currentCourseCheckpoint, isCourseContinue, isCourseDetour, isSavedCourseName, restoreCourseCheckpoint, type CourseCheckpoint } from './course-detour'
+import { advanceMaterialCheckpoint, captureCourseCheckpoint, currentCourseCheckpoint, isCourseContinue, isCourseDetour, isSavedCourseName, restoreCourseCheckpoint, type CourseCheckpoint } from './course-detour'
 import { applyCommercialCadence, readCommercialCadence, COMPLETE_CADENCE_VERSION, ESSENTIAL_POSITIONS, INFORMATION_GROUP_POSITIONS, splitCommercialCaption, type CommercialCadence } from './commercial-cadence'
 import { COMMERCIAL_SCHEDULE_VERSION, COMMERCIAL_TIMEZONE, planCommercialWait } from './commercial-schedule'
 import {resumeCommercialWindow} from './commercial-window-resume'
@@ -1674,15 +1674,7 @@ case 'send_media': {
           // Its linked range begins at the following wait, so a saved course
           // cursor at that same material must advance past it once.
           if (checkpoint?.pending_ids.length) {
-            const { error: skipError } = await db.from('automation_pending_executions')
-              .update({ next_step_position: (cfg.start_step ?? 1) - 1 })
-              .eq('account_id', args.automation.account_id)
-              .eq('contact_id', args.contactId!)
-              .eq('automation_id', targetId)
-              .eq('status', 'cancelled')
-              .in('id', checkpoint.pending_ids)
-              .lte('next_step_position', responseEnd)
-            if (skipError) throw skipError
+            await advanceMaterialCheckpoint(db,{account:args.automation.account_id,contact:args.contactId!,chat:args.context.conversation_id!,automationId:targetId,checkpoint,nextPosition:(cfg.start_step??1)-1})
           }
           return 'Respuesta enviada; conservar la posición guardada del curso'
         }

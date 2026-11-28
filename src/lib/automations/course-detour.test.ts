@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest'
-import {captureCourseCheckpoint,currentCourseCheckpoint,restoreCourseCheckpoint,isCourseDetour,isCourseContinue} from './course-detour'
+import {advanceMaterialCheckpoint,captureCourseCheckpoint,currentCourseCheckpoint,restoreCourseCheckpoint,isCourseDetour,isCourseContinue} from './course-detour'
 
 const NOW=Date.parse('2026-10-19T18:00:00Z')
 const checkpoint={pending_ids:['parent','leaf'],captured_at:'2026-10-19T17:45:00Z'}
@@ -29,6 +29,8 @@ function fixture(){
    in:(k:string,v:any[])=>(filters.push(r=>v.includes(r[k])),q),
    gt:(k:string,v:any)=>(filters.push(r=>r[k]>v),q),
    gte:(k:string,v:any)=>(filters.push(r=>r[k]>=v),q),
+   lt:(k:string,v:any)=>(filters.push(r=>r[k]<v),q),
+   contains:(k:string,v:any)=>(filters.push(r=>Object.entries(v).every(([a,b])=>r[k]?.[a]===b)),q),
    update:(value:any)=>(update=value,q),
    maybeSingle:()=>{single=true;return Promise.resolve(resolve())},
    then:(fn:any)=>Promise.resolve(resolve()).then(fn),
@@ -38,6 +40,20 @@ function fixture(){
  return {db,state,restore}
 }
 describe('saved course detours',()=>{
+ it('after requested material, begins the next saved wait now without reusing the old unanswered timer',async()=>{
+  const {db,state}=fixture();state.automation_pending_executions[1].next_step_position=5;
+  await advanceMaterialCheckpoint(db,{account:'a',contact:'c',chat:'chat',automationId:'course',checkpoint,nextPosition:7,now:NOW});
+  expect(state.automation_pending_executions[1]).toMatchObject({next_step_position:7,run_at:new Date(NOW).toISOString(),status:'cancelled'});
+  expect(state.automation_pending_executions[0].next_step_position).toBe(3);
+ });
+ it('never rewinds an already advanced cursor or modifies another conversation',async()=>{
+  const {db,state}=fixture(),before=structuredClone(state.automation_pending_executions);
+  await advanceMaterialCheckpoint(db,{account:'a',contact:'c',chat:'chat',automationId:'course',checkpoint,nextPosition:7,now:NOW});
+  expect(state.automation_pending_executions).toEqual(before);
+  state.automation_pending_executions[1].next_step_position=5;
+  await advanceMaterialCheckpoint(db,{account:'a',contact:'c',chat:'other',automationId:'course',checkpoint,nextPosition:7,now:NOW});
+  expect(state.automation_pending_executions[1].next_step_position).toBe(5);
+ });
  it('only enables the explicit detour/continue flags',()=>{
   expect(isCourseDetour({trigger_config:{course_detour:true}})).toBe(true)
   expect(isCourseContinue({trigger_config:{course_continue:true}})).toBe(true)

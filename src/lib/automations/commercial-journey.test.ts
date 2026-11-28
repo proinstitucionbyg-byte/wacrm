@@ -34,7 +34,7 @@ vi.mock('./admin-client',()=>({supabaseAdmin:()=>({
       is:(k:string,v:any)=>(predicates.push(r=>(get(r,k)??null)===v),q),
       in:(k:string,v:any[])=>(predicates.push(r=>v.includes(get(r,k))),q),
       gt:(k:string,v:any)=>(predicates.push(r=>get(r,k)>v),q),gte:(k:string,v:any)=>(predicates.push(r=>get(r,k)>=v),q),
-      lte:(k:string,v:any)=>(predicates.push(r=>get(r,k)<=v),q),contains:(k:string,v:any)=>(predicates.push(r=>contains(get(r,k),v)),q),
+      lt:(k:string,v:any)=>(predicates.push(r=>get(r,k)<v),q),lte:(k:string,v:any)=>(predicates.push(r=>get(r,k)<=v),q),contains:(k:string,v:any)=>(predicates.push(r=>contains(get(r,k),v)),q),
       like:(k:string,v:string)=>(predicates.push(r=>String(get(r,k)??'').endsWith(v.replace(/^%/,''))),q),
       order:(key:string,o:{ascending?:boolean}={})=>(ordering={key,asc:o.ascending!==false},q),limit:(n:number)=>(take=n,q),
       single:()=>{single=true;return Promise.resolve(resolve())},maybeSingle:()=>{single=true;return Promise.resolve(resolve())},
