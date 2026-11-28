@@ -20,6 +20,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../../supabase/migrations/20261116020000_campaign_parallel_windows.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../../supabase/migrations/20261126230000_campaign_personalization_safety.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../../supabase/migrations/20261127155000_campaign_technical_fallback_distribution.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261128033000_campaign_technical_auto_resume.sql',import.meta.url),'utf8'));
 });
 after(()=>db.close());
 beforeEach(async()=>{
@@ -75,11 +76,29 @@ test('a missing variable rolls back the entire campaign instead of leaving a par
  assert.equal((await db.query('select count(*)::int n from multichannel_campaigns')).rows[0].n,0);
  assert.equal((await db.query('select count(*)::int n from multichannel_jobs')).rows[0].n,0);
 });
-test('no available lines pauses pending work and reconnection alone does not resume it',async()=>{
+test('technical pause resumes on the next sweep when a selected line reconnects',async()=>{
  const c=await campaign();await db.query("update multichannel_campaigns set created_at=now()-interval '2 minutes' where id=$1",[c.id]);
  assert.equal((await db.query('select campaign_safety_sweep() r')).rows[0].r.paused_no_lines,1);
- await step('heartbeat');assert.equal(await step('claim'),null);
+ await step('heartbeat');await db.query('select campaign_safety_sweep()');assert.equal((await db.query('select status from multichannel_campaigns')).rows[0].status,'active');
  assert.equal((await db.query('select status from multichannel_jobs')).rows[0].status,'queued');
+});
+
+test('a manual pause during an automatic outage never auto-resumes',async()=>{
+ const c=await campaign();await db.query("update multichannel_campaigns set created_at=now()-interval '2 minutes' where id=$1",[c.id]);await db.query('select campaign_safety_sweep()');
+ await personalized('pause',{campaign_id:c.id,value:true});await step('heartbeat');await db.query('select campaign_safety_sweep()');
+ assert.equal((await db.query('select status from multichannel_campaigns')).rows[0].status,'paused');assert.equal((await db.query('select technical_pause_at from multichannel_campaigns')).rows[0].technical_pause_at,null);
+});
+
+test('a technical pause cannot resume through a provider restriction on another selected line',async()=>{
+ const c=await campaign();await db.query("update multichannel_campaigns set created_at=now()-interval '2 minutes' where id=$1",[c.id]);await db.query('select campaign_safety_sweep()');
+ await step('heartbeat','WA-b');await db.query("update multichannel_whatsapp_session_lines set campaign_restricted=true where line_key='WA-a'");await db.query('select campaign_safety_sweep()');
+ assert.equal((await db.query('select status from multichannel_campaigns')).rows[0].status,'paused');
+});
+
+test('editing a technical pause makes it manual even if its name is unchanged',async()=>{
+ const c=await campaign();await db.query("update multichannel_campaigns set created_at=now()-interval '2 minutes' where id=$1",[c.id]);await db.query('select campaign_safety_sweep()');
+ await db.query('update multichannel_campaigns set name=name where id=$1',[c.id]);await step('heartbeat');await db.query('select campaign_safety_sweep()');
+ assert.equal((await db.query('select status from multichannel_campaigns')).rows[0].status,'paused');
 });
 test('manual attention cancels pending steps and preserves an uncertain attempted step',async()=>{
  const c=await campaign({sequence:sequence()});await step('heartbeat');const first=await step('claim');await step('authorize','WA-a',first);await step('record','WA-a',{...first,result:'needs_review'});
