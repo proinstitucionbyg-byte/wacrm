@@ -57,6 +57,8 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261104232000_whatsapp_owner_management.sql', import.meta.url), 'utf8'));
   await db.exec('alter table public.messages add column media_url text;');
   await db.exec(await readFile(new URL('../../supabase/migrations/20261105055837_whatsapp_session_media_queue.sql', import.meta.url), 'utf8'));
+  await db.exec("create function public.has_member_permission(actor uuid,section text,capability text) returns boolean language sql as $$select exists(select 1 from public.profiles where user_id=actor)$$;");
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261128161849_manual_conversation_outbound_origin.sql',import.meta.url),'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -75,7 +77,7 @@ beforeEach(async () => {
 });
 
 async function cloudSource(){
- const contact=(await db.query('insert into public.contacts(account_id,user_id,phone)values($1,$2,$3)returning id',[accountId,ownerId,'51933333333'])).rows[0].id;
+ const contact=(await db.query("insert into public.contacts(account_id,user_id,phone,channel)values($1,$2,$3,'whatsapp')returning id",[accountId,ownerId,'51933333333'])).rows[0].id;
  const conversation=(await db.query('insert into public.conversations(account_id,user_id,contact_id,automation_enabled)values($1,$2,$3,false)returning id',[accountId,ownerId,contact])).rows[0].id;
  await db.query("insert into public.messages(conversation_id,sender_type,content_type,content_text,message_id,status)values($1,'customer','text','Hola','wamid.cloud-test','delivered')",[conversation]);
  await db.query('insert into public.whatsapp_support_routes(account_id,enabled,line_order)values($1,true,$2)',[accountId,[lineKey]]);
@@ -139,7 +141,25 @@ test('manual replies remain on support after Cloud opening without inventing a s
  assert.equal((await db.query('select count(*)::int n from whatsapp_session_inbound_receipts')).rows[0].n,0);
  await step('record',manual,'accepted','real-support-manual');
  await db.query('update multichannel_whatsapp_session_lines set paused=true where line_key=$1',[lineKey]);
- await assert.rejects(db.query('select enqueue_whatsapp_session_manual_text($1,$2,$3,$4,$5,$6)',[accountId,conversation,lineKey,ownerId,'No usar Cloud','offline-sticky']),/unavailable/);
+ await assert.rejects(db.query('select enqueue_whatsapp_session_manual_text($1,$2,$3,$4,$5,$6)',[accountId,conversation,lineKey,ownerId,'No usar Cloud','offline-sticky']),/disponible/);
+});
+
+async function campaignOnly(){const conversation=await cloudSource();await db.query('delete from messages where conversation_id=$1',[conversation]);await db.query("insert into messages(conversation_id,sender_type,content_type,content_text,message_id,status,whatsapp_session_line_key)values($1,'bot','image','Promo','mass-real','delivered',$2)",[conversation,lineKey]);return conversation;}
+const startManual=(conversation,source=null,request=randomUUID(),line=lineKey,phone='51911111111')=>db.query('select continue_whatsapp_conversation($1,$2,$3,$4,$5,$6,$7,$8) result',[accountId,conversation,ownerId,source,line,phone,'Respuesta manual',request]);
+test('campaign-only conversations can receive human text and a worker permit without a fabricated incoming receipt',async()=>{
+ const conversation=await campaignOnly(),r=await enqueueManual(conversation,'campaign-manual');const claimed=await step('claim');assert.equal(claimed.id,r.job_id);assert.equal(claimed.manual_initiated,true);
+ const permit=await step('authorize',claimed);assert.equal(permit.allowed,true);assert.equal(permit.inbound_source,'cloud_support');assert.equal(permit.sender_type,'agent');assert.equal((await db.query('select count(*)::int n from whatsapp_session_inbound_receipts')).rows[0].n,0);
+});
+test('explicit start works with no incoming message, pins the line and retries the same job',async()=>{
+ const conversation=await campaignOnly(),request=randomUUID();const first=(await startManual(conversation,null,request)).rows[0].result,again=(await startManual(conversation,null,request)).rows[0].result;assert.equal(first.job_id,again.job_id);assert.equal(again.duplicate,true);assert.equal((await db.query('select whatsapp_support_line_key from conversations where id=$1',[conversation])).rows[0].whatsapp_support_line_key,lineKey);
+});
+test('explicit start can select another connected account line without changing automatic support routes',async()=>{
+ const conversation=await campaignOnly();await db.query("insert into multichannel_whatsapp_session_lines(account_id,line_key,worker_id,linked_phone,paused,support_ready_at)values($1,'WA-picked',$2,'51955555555',false,clock_timestamp()) on conflict(account_id,line_key) do update set support_ready_at=clock_timestamp()",[accountId,workerId]);const r=(await startManual(conversation,null,randomUUID(),'WA-picked','51955555555')).rows[0].result;assert.equal(r.line_key,'WA-picked');
+});
+test('a new incoming message invalidates a stale start, and offline lines never create an outgoing message',async()=>{
+ const conversation=await campaignOnly();await db.query("insert into messages(conversation_id,sender_type,content_type,content_text,message_id,status)values($1,'customer','text','Nuevo','real-inbound','delivered')",[conversation]);await assert.rejects(startManual(conversation),/Llegó otro mensaje/);
+ const source=(await db.query("select id from messages where conversation_id=$1 and sender_type='customer'",[conversation])).rows[0].id;
+ await db.query('update multichannel_whatsapp_session_lines set paused=true where line_key=$1',[lineKey]);await assert.rejects(startManual(conversation,source),/no está disponible/);assert.equal((await db.query('select count(*)::int n from whatsapp_session_outbound_jobs')).rows[0].n,0);
 });
 test('Cloud first contact is sent through an available owner line without inventing a session inbound or billing reservation',async()=>{
  const conversation=await cloudSource(),first=await supportOpening(conversation),again=await supportOpening(conversation);assert.equal(first.state,'queued');assert.equal(first.job_id,again.job_id);
@@ -208,6 +228,7 @@ async function setupInbound({ humanAt = null } = {}) {
     workerId,lineKey,'51911111111','inbound-provider-1','51922222222',new Date().toISOString(),'text','Hola',
   ]);
   await db.query(`update public.conversations set automation_enabled=true,last_human_message_at=$1 where account_id=$2`, [humanAt,accountId]);
+  await db.query('update multichannel_whatsapp_session_lines set support_ready_at=clock_timestamp() where account_id=$1',[accountId]);
   const row = await db.query(`select id from public.conversations where account_id=$1`, [accountId]);
   return row.rows[0].id;
 }

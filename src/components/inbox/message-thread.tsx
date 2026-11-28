@@ -246,7 +246,7 @@ export function MessageThread({
   const canAssign = useCan('inbox.assign');
   const canHideMessages = useCan('inbox_management.messages');
   const [manualSupport,setManualSupport]=useState<{id:string;line:string}|null>(null);
-  const sessionOriginLine = useMemo(() => latestSessionOrigin(messages,manualSupport?.id===conversation?.id?manualSupport?.line:conversation?.whatsapp_support_line_key), [messages,conversation?.id,conversation?.whatsapp_support_line_key,manualSupport]);
+  const sessionOriginLine = useMemo(() => manualSupport&&manualSupport.id===conversation?.id?manualSupport.line:latestSessionOrigin(messages,conversation?.whatsapp_support_line_key), [messages,conversation?.id,conversation?.whatsapp_support_line_key,manualSupport]);
 
   useEffect(() => {
     let cancelled = false;

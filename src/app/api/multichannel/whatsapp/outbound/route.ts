@@ -82,7 +82,7 @@ export async function POST(request: Request) {
         ...(data.media?{media:normalizeSessionMedia(data.media)}:{}),
         claimToken: data.claim_token,
         senderType:data.sender_type,
-        ...(data.cloud_support_source_id?{inboundSource:'cloud_support'}:{}),
+        ...(data.cloud_support_source_id||data.manual_initiated?{inboundSource:'cloud_support'}:{}),
       } });
     }
 

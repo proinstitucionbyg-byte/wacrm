@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createHash, randomUUID } from 'node:crypto';
 import{currentSessionInbound}from'./session-inbound-context';
 import { currentSessionCommand } from './session-command-context';
+import {latestSessionOrigin} from './session-origin';
 import {normalizeSessionMedia,isSignedEnrollmentDocument,type SessionMedia} from '../../../scripts/multichannel/whatsapp-session/session-media.mjs';
 
 /** Prevents an unimplemented session channel from silently falling back to
@@ -16,7 +17,7 @@ export async function getSessionOriginLineForConversation(
   const pinned=currentSessionInbound(conversationId);if(pinned)return pinned.lineKey;
 
   const { data, error } = await db.from('messages')
-    .select('whatsapp_session_line_key')
+    .select('id,sender_type,created_at,whatsapp_session_line_key')
     .eq('conversation_id', conversationId)
     .eq('sender_type', 'customer')
     .order('created_at', { ascending: false })
@@ -25,7 +26,10 @@ export async function getSessionOriginLineForConversation(
     .maybeSingle();
 
   if (error) throw new Error('No se pudo verificar con seguridad el canal de esta conversación.');
-  if(data?.whatsapp_session_line_key)return data.whatsapp_session_line_key;
+  const linked=await db.from('messages').select('id,sender_type,created_at,whatsapp_session_line_key').eq('conversation_id',conversationId).not('whatsapp_session_line_key','is',null).order('created_at',{ascending:false}).order('id',{ascending:false}).limit(1).maybeSingle();
+  if(linked.error)throw Error('No se pudo verificar la línea de los envíos anteriores.');
+  const origin=latestSessionOrigin([...(data?[data]:[]),...(linked.data?[linked.data]:[])]);
+  if(origin)return origin;
   const support=await db.from('conversations').select('whatsapp_support_line_key,whatsapp_support_wait_until').eq('id',conversationId).maybeSingle();
   if(support.error)throw Error('No se pudo verificar la derivación a soporte; no se usará Cloud.');
   if(support.data?.whatsapp_support_wait_until&&!support.data.whatsapp_support_line_key)throw Error('Se está comprobando el origen de Meta antes de responder. La espera inicial es de tres minutos; si ya pasó, revisa la derivación antes de enviar.');

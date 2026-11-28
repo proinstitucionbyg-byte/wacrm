@@ -16,4 +16,10 @@ describe('latest customer transport',()=>{
     expect(latestSessionOrigin([row('a','WA-old'),row('b','WA-new')])).toBe('WA-new');
     expect(latestSessionOrigin([])).toBeNull();
   });
+  it('recognizes a campaign-only chat before the customer has replied',()=>{
+    expect(latestSessionOrigin([{...row('campaign','WA-mass'),sender_type:'bot'}])).toBe('WA-mass');
+  });
+  it('a newer explicit linked send continues the chat after an older Cloud message',()=>{
+    expect(latestSessionOrigin([row('cloud',null),{...row('manual','WA-picked','2026-11-04T11:00:00Z'),sender_type:'agent'}])).toBe('WA-picked');
+  });
 });
