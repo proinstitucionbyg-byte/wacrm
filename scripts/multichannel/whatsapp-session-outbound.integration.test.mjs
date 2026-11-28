@@ -59,6 +59,7 @@ before(async () => {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261105055837_whatsapp_session_media_queue.sql', import.meta.url), 'utf8'));
   await db.exec("create function public.has_member_permission(actor uuid,section text,capability text) returns boolean language sql as $$select exists(select 1 from public.profiles where user_id=actor)$$;");
   await db.exec(await readFile(new URL('../../supabase/migrations/20261128161849_manual_conversation_outbound_origin.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261128165231_manual_reply_archived_line_recipient.sql',import.meta.url),'utf8'));
   const result = await db.query(`insert into public.multichannel_workers(account_id,name,token_hash)
     values ($1,'Laptop de prueba',repeat('c',64)) returning id`, [accountId]);
   workerId = result.rows[0].id;
@@ -160,6 +161,15 @@ test('a new incoming message invalidates a stale start, and offline lines never 
  const conversation=await campaignOnly();await db.query("insert into messages(conversation_id,sender_type,content_type,content_text,message_id,status)values($1,'customer','text','Nuevo','real-inbound','delivered')",[conversation]);await assert.rejects(startManual(conversation),/Llegó otro mensaje/);
  const source=(await db.query("select id from messages where conversation_id=$1 and sender_type='customer'",[conversation])).rows[0].id;
  await db.query('update multichannel_whatsapp_session_lines set paused=true where line_key=$1',[lineKey]);await assert.rejects(startManual(conversation,source),/no está disponible/);assert.equal((await db.query('select count(*)::int n from whatsapp_session_outbound_jobs')).rows[0].n,0);
+});
+test('an old paused line registration does not prevent a human reply to that contact',async()=>{
+ const conversation=await campaignOnly();await db.query("insert into multichannel_whatsapp_session_lines(account_id,line_key,worker_id,linked_phone,paused)values($1,'WA-former-personal',$2,'51933333333',true) on conflict(account_id,line_key) do update set paused=true",[accountId,workerId]);
+ const result=(await startManual(conversation)).rows[0].result;assert.ok(result.job_id);assert.equal(result.line_key,lineKey);
+ await db.query("delete from multichannel_whatsapp_session_lines where account_id=$1 and line_key='WA-former-personal'",[accountId]);
+});
+test('a human cannot send a conversation to the same phone as the selected sender',async()=>{
+ const conversation=await campaignOnly();await db.query('update contacts set phone=$1 where id=(select contact_id from conversations where id=$2)',['51911111111',conversation]);
+ await assert.rejects(startManual(conversation),/teléfono del destinatario/);assert.equal((await db.query('select count(*)::int n from whatsapp_session_outbound_jobs')).rows[0].n,0);
 });
 test('Cloud first contact is sent through an available owner line without inventing a session inbound or billing reservation',async()=>{
  const conversation=await cloudSource(),first=await supportOpening(conversation),again=await supportOpening(conversation);assert.equal(first.state,'queued');assert.equal(first.job_id,again.job_id);
