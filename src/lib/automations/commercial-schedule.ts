@@ -1,4 +1,4 @@
-export const COMMERCIAL_SCHEDULE_VERSION = 'lima-2026-10-27-v1'
+export const COMMERCIAL_SCHEDULE_VERSION = 'lima-2026-11-28-v2'
 export const COMMERCIAL_TIMEZONE = 'America/Lima'
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -8,6 +8,26 @@ const lima = new Intl.DateTimeFormat('en-CA', {timeZone:COMMERCIAL_TIMEZONE, yea
 function dayStart(at:number) {
   const parts = Object.fromEntries(lima.formatToParts(at).map(p=>[p.type,p.value]))
   return Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day),5)
+}
+
+/** Silent leads only. Requested materials keep their own response waits. */
+export function nextCommercialBand(earliest:number):number {
+  const day=dayStart(earliest), hour=(earliest-day)/HOUR
+  if(hour<8)return day+8*HOUR
+  if(hour<9)return earliest
+  if(hour<12)return day+12*HOUR
+  if(hour<14)return earliest
+  if(hour<17)return day+17*HOUR
+  if(hour<23)return earliest
+  return day+DAY+8*HOUR
+}
+
+/** Schedule the owner's saved course, without replacing/reordering its blocks. */
+export function planSavedCourseWait(args:{now:number;lastCustomerAt:string;waitMs:number;initial:boolean;interactive:boolean}):string {
+  const earliest=args.now+args.waitMs
+  // First material and explicit student interaction are independent of bands.
+  if(args.initial||args.interactive)return new Date(earliest).toISOString()
+  return new Date(nextCommercialBand(earliest)).toISOString()
 }
 
 /** Pure calendar calculation. No AI, network, timers or sending side effects. */
@@ -30,20 +50,8 @@ export function planCommercialWait(args:{now:number; lastCustomerAt:string; star
   } else {
     const spacing=Math.max(20,args.minimumMinutes??(args.position%2 ? 25:20))*MINUTE
     const earliest=args.now+spacing
-    const day=dayStart(earliest), hour=(earliest-day)/HOUR
-    if (hour<6) due=day+6*HOUR
-    else if (hour<8) due=day+Math.ceil(hour)*HOUR
-    else if (hour<11) due=day+11*HOUR
-    else if (hour>=14.5 && hour<16) due=day+16*HOUR
-    else if (hour>=22) due=day+DAY+6*HOUR
-    else due=earliest
+    due=nextCommercialBand(earliest)
     reason=due===earliest?'Seguimiento espaciado':'Horario estratégico de Lima'
-    // Night sends are exceptional: only when waiting until morning would
-    // make the remaining journey unviable. Never emit a backlog in one batch.
-    const remainingBudget=Math.max(1,args.remainingWaits)*20*MINUTE
-    if (due+remainingBudget>Math.min(target,deadline) && due>earliest) {
-      due=earliest;reason='Continuidad antes del vencimiento; intervalo mínimo respetado'
-    }
   }
   if (due>=deadline) return {runAt:null,deadline:new Date(deadline).toISOString(),reason:'No queda tiempo seguro para el siguiente bloque',prioritizeEssential}
   return {runAt:new Date(due).toISOString(),deadline:new Date(deadline).toISOString(),reason,prioritizeEssential}

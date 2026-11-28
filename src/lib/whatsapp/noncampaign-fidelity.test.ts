@@ -9,12 +9,12 @@ function database(referral: unknown = null) {
   for (const method of ['select', 'eq', 'is', 'update', 'in', 'not', 'limit']) q[method] = vi.fn(() => q)
   q.maybeSingle = vi.fn(async () => ({ data: null, error: null }))
   q.single = vi.fn(async () => ({ data: { first_ad_referral: referral, whatsapp_support_line_key: null }, error: null }))
-  q.then = vi.fn((resolve) => Promise.resolve({ error: null }).then(resolve))
+  q.then = vi.fn((resolve) => Promise.resolve({ data: [], error: null }).then(resolve))
   const from = vi.fn(() => q)
   return { db: { from } as never, from, q }
 }
 beforeEach(() => vi.clearAllMocks())
-describe('temporary organic fidelity policy', () => {
+describe('organic sales and fidelity classification', () => {
   it('allows replies after an accepted commercial campaign', async () => {
     const {db,q}=database()
     q.maybeSingle.mockResolvedValue({data:{id:'sent'},error:null})
@@ -51,3 +51,7 @@ describe('temporary organic fidelity policy', () => {
     expect(h.wait).not.toHaveBeenCalled()
   })
 })
+
+it('allows unknown first sales greetings',async()=>{const {db,q}=database();expect(await pauseNoncampaignFidelity(db,{...args,contentText:'Hola',isFirstInboundMessage:true})).toBe(false);expect(q.update).not.toHaveBeenCalled()})
+it('keeps established sales running',async()=>{const {db,q}=database();q.then=vi.fn(resolve=>Promise.resolve({data:[{tags:{name:'AREA VENTAS'}}],error:null}).then(resolve));expect(await pauseNoncampaignFidelity(db,{...args,contentText:'1'})).toBe(false);expect(q.update).not.toHaveBeenCalled()})
+it('keeps paid student support separate',async()=>{const {db,q}=database();q.then=vi.fn(resolve=>Promise.resolve({data:[{tags:{name:'PAGO VALIDADO'}}],error:null}).then(resolve));expect(await pauseNoncampaignFidelity(db,{...args,contentText:'clases'})).toBe(true);expect(h.route).toHaveBeenCalledWith(db,'a','c','fidelizacion')})

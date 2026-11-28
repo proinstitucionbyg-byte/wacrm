@@ -7,12 +7,13 @@ export interface CourseCheckpoint {
 }
 /** Material was just sent by the detour. Start the following wait now, rather
  * than first waiting out the old unanswered-material timer as well. */
-export async function advanceMaterialCheckpoint(db:SupabaseClient,args:{account:string;contact:string;chat:string;automationId:string;checkpoint:CourseCheckpoint;nextPosition:number;now?:number}){
+export async function advanceMaterialCheckpoint(db:SupabaseClient,args:{account:string;contact:string;chat:string;automationId:string;checkpoint:CourseCheckpoint;nextPosition:number;minimumPosition?:number;now?:number}){
  if(!args.checkpoint.pending_ids.length||!Number.isInteger(args.nextPosition)||args.nextPosition<0)return;
- const {error}=await db.from('automation_pending_executions').update({next_step_position:args.nextPosition,run_at:new Date(args.now??Date.now()).toISOString()})
+ let query=db.from('automation_pending_executions').update({next_step_position:args.nextPosition,run_at:new Date(args.now??Date.now()).toISOString()})
   .eq('account_id',args.account).eq('contact_id',args.contact).eq('automation_id',args.automationId).eq('status','cancelled')
   .in('id',args.checkpoint.pending_ids).contains('context',{conversation_id:args.chat}).lt('next_step_position',args.nextPosition);
- if(error)throw error;
+ if(args.minimumPosition!==undefined)query=query.gte('next_step_position',args.minimumPosition);
+ const {error}=await query;if(error)throw error;
 }
 interface WaitRow {
   id: string

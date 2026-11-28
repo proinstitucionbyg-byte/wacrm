@@ -2,12 +2,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { isConfirmedClickToWhatsAppReferral } from './billing'
 import { enqueueSupportWait } from './cloud-support-wait'
 import { routeConversationToArea } from '@/lib/ai/handoff-routing'
+import { isSalesInquiry } from '@/lib/sales/attribution'
 
-/** Temporary owner policy: organic contacts receive human fidelity attention only. */
+/** Keep student support separate, without pausing ordinary organic sales leads. */
 export async function pauseNoncampaignFidelity(db: SupabaseClient, args: {
   accountId: string; conversationId: string; contactId: string; messageId: string
   hasConfirmedAdOrigin: boolean; channel: 'cloud' | 'session'
   isFirstInboundMessage?: boolean; contactCreated?: boolean; metaWaitExpired?: boolean
+  contentText?: string | null; audioTranscript?: string | null
 }): Promise<boolean> {
   if (args.hasConfirmedAdOrigin) return false
   const { data, error } = await db.from('conversations')
@@ -28,6 +30,13 @@ export async function pauseNoncampaignFidelity(db: SupabaseClient, args: {
     await enqueueSupportWait(db, args)
     return true
   }
+  const tags=await db.from('contact_tags').select('tags!inner(name)').eq('contact_id',args.contactId)
+    .eq('tags.account_id',args.accountId)
+  if(tags.error)throw tags.error
+  const names=((tags.data??[]) as unknown as {tags:{name:string}|{name:string}[]}[])
+    .flatMap(row=>Array.isArray(row.tags)?row.tags:[row.tags]).filter(Boolean).map(row=>row.name.toUpperCase())
+  const student=names.some(name=>['AREA FIDELIZACION','PAGO VALIDADO','VENTA REALIZADA'].includes(name)||name.includes('MATRICUL'))
+  if(!student&&(names.includes('AREA VENTAS')||isSalesInquiry(args.contentText??args.audioTranscript??'',{firstInbound:args.isFirstInboundMessage})))return false
   const paused = await db.from('conversations').update({ ai_enabled: false,
     automation_enabled: false, automation_disabled_at: new Date().toISOString() })
     .eq('account_id', args.accountId).eq('id', args.conversationId)

@@ -51,7 +51,8 @@ export async function routeCloudSupportOpening(db:SupabaseClient,args:{accountId
  if(!lookup.error&&!tagId){const created=await db.from('tags').insert({account_id:args.accountId,user_id:args.userId,name,color:'#0d9488',kind:'process'}).select('id').single();tagId=created.data?.id;}
  if(tagId)await db.from('contact_tags').upsert({contact_id:args.contactId,tag_id:tagId},{onConflict:'contact_id,tag_id',ignoreDuplicates:true});
  // Reuse the institution's existing support area; never invent staff access.
- const area=await db.from('tags').select('id').eq('account_id',args.accountId).eq('name','AREA FIDELIZACION').eq('kind','access').limit(1).maybeSingle();
+ const areaName=!paid.data?.length&&isSalesInquiry(args.contentText??'',{firstInbound:args.isFirstInboundMessage})?'AREA VENTAS':'AREA FIDELIZACION';
+ const area=await db.from('tags').select('id').eq('account_id',args.accountId).eq('name',areaName).limit(1).maybeSingle();
  if(!area.error&&area.data?.id)await db.from('contact_tags').upsert({contact_id:args.contactId,tag_id:area.data.id},{onConflict:'contact_id,tag_id',ignoreDuplicates:true});
  return true;
 }

@@ -4,7 +4,7 @@ import { buildConversationContext } from './context'
 import { idleFollowupArea } from './followup-policy'
 export function salesClosingWindowOpen(inboundAt: string, now = Date.now()): boolean {
   const age = now - Date.parse(inboundAt)
-  return age >= 23.5 * 3_600_000 && age < 24 * 3_600_000
+  return age >= 23 * 3_600_000 && age < 24 * 3_600_000
 }
 export interface SalesClosingCandidate {
   conversation_id: string; account_id: string; user_id: string; contact_id: string

@@ -10,11 +10,11 @@ function fixture(text='Quiero información de Nutrición'){
 }
  beforeEach(()=>{vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-11-05T11:30:00Z'));h.context.mockResolvedValue([])})
  afterEach(()=>vi.restoreAllMocks())
- describe('closing 30 minutes before the customer window ends',()=>{
- it('starts at 23h30 and never sends at or after 24h',()=>{
+ describe('closing at 23 hours',()=>{
+ it('starts at 23h and never sends at or after 24h',()=>{
  const start=Date.parse('2026-11-04T12:00:00Z')
- expect(salesClosingWindowOpen(new Date(start).toISOString(),start+23.5*3600000-1)).toBe(false)
- expect(salesClosingWindowOpen(new Date(start).toISOString(),start+23.5*3600000)).toBe(true)
+ expect(salesClosingWindowOpen(new Date(start).toISOString(),start+23*3600000-1)).toBe(false)
+ expect(salesClosingWindowOpen(new Date(start).toISOString(),start+23*3600000)).toBe(true)
  expect(salesClosingWindowOpen(new Date(start).toISOString(),start+24*3600000)).toBe(false)
  expect(salesClosingWindowOpen('invalid')).toBe(false)
  })

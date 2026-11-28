@@ -16,7 +16,7 @@ function fixture(){
  const db={from:(table:string)=>{
   const filters:((r:any)=>boolean)[]=[];let update:any;let single=false
   const resolve=()=>{
-   let rows=(state[table]||[]).filter(r=>filters.every(f=>f(r)))
+   let rows=((state as unknown as Record<string,any[]>)[table]||[]).filter((r:any)=>filters.every(f=>f(r)))
    if(update){
     if(state.race&&table==='automation_pending_executions') {rows=rows.slice(0,1);state.race=false}
     state.updates.push({table,payload:update,ids:rows.map(r=>r.id)})
@@ -40,6 +40,11 @@ function fixture(){
  return {db,state,restore}
 }
 describe('saved course detours',()=>{
+ it('does not jump over unrelated earlier course material',async()=>{
+  const {db,state}=fixture();state.automation_pending_executions[1].next_step_position=5;
+  await advanceMaterialCheckpoint(db,{account:'a',contact:'c',chat:'chat',automationId:'course',checkpoint,nextPosition:29,minimumPosition:27,now:NOW});
+  expect(state.automation_pending_executions[1].next_step_position).toBe(5);
+ });
  it('after requested material, begins the next saved wait now without reusing the old unanswered timer',async()=>{
   const {db,state}=fixture();state.automation_pending_executions[1].next_step_position=5;
   await advanceMaterialCheckpoint(db,{account:'a',contact:'c',chat:'chat',automationId:'course',checkpoint,nextPosition:7,now:NOW});

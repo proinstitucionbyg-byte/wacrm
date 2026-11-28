@@ -84,6 +84,19 @@ function inbound(text:string){
 afterEach(()=>vi.useRealTimers())
 beforeEach(()=>vi.clearAllMocks())
 describe('complete course journey: real catalog, local dispatch → waits → delivery → resume',()=>{
+  it('preserves native blocks and moves only silent waits into the requested Lima bands',async()=>{
+    const c=setup(0,'01:00'),flow=h.tables.automations.find(r=>r.id===c.id)!
+    delete flow.trigger_config.commercial_cadence
+    flow.trigger_config.followup_schedule={initial_wait_step_id:c.steps.find(s=>s.step_type==='wait')!.id}
+    await start(c.id)
+    // Initial image/audio, followed by the owner's original one minute wait.
+    for(let i=0;i<5&&h.sends.filter(s=>s.mediaUrl).length<2;i++)await tick()
+    expect(h.sends.filter(s=>s.mediaUrl).slice(0,2).map(s=>s.mediaUrl)).toEqual(c.steps.slice(0,2).map(s=>(s.step_config as Row).url))
+    // Advance delivery suspension and the first wait, without emitting malla overnight.
+    for(let i=0;i<5&&Date.parse(nextPending().run_at)<time('08:00').getTime();i++)await tick()
+    expect(nextPending().run_at).toBe(time('08:00').toISOString())
+    expect(h.sends.some(s=>s.mediaUrl===(c.steps[5].step_config as Row).url)).toBe(false)
+  })
   it.each(snapshot.courses.map((c,i)=>[c.name,i] as const))('%s completes without any click or reply',async(_,index)=>{
     const course=setup(index)
     expect(await start(course.id)).toBe(true)
@@ -111,11 +124,11 @@ describe('complete course journey: real catalog, local dispatch → waits → de
     expect(h.sends.at(-1)!.payload.buttons).toEqual((c.steps.at(-1)!.step_config as Row).buttons)
     expect(h.tables.automation_logs.every(r=>r.status==='success')).toBe(true)
   })
-  it('preserves initial contents and delays the proactive night follow-up until six',async()=>{
+  it('preserves initial contents and delays the proactive night follow-up until eight',async()=>{
     const c=setup();await start(c.id);await tick()
     expect(h.sends.map(s=>s.payload?.buttons?.some((b:Row)=>b.id==='commercial_human'))).not.toContain(true)
     expect(h.sends[0].caption+(h.sends[1].text??'')).toBe((c.steps[0].step_config as Row).caption)
-    expect(nextPending().run_at).toBe('2026-10-27T11:00:00.000Z')
+    expect(nextPending().run_at).toBe('2026-10-27T13:00:00.000Z')
   })
   it('keeps the entire long introduction and its closing phrase in one text, before the audio',async()=>{
     const c=setup(0);await start(c.id);await tick();

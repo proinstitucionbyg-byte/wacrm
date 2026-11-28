@@ -35,7 +35,7 @@ import { isLikelyAutomatedInbound } from '@/lib/ai/automated-inbound'
 import { HUMAN_PAUSE_MS } from '@/lib/ai/human-pause'
 import { advanceMaterialCheckpoint, captureCourseCheckpoint, currentCourseCheckpoint, isCourseContinue, isCourseDetour, isSavedCourseName, restoreCourseCheckpoint, type CourseCheckpoint } from './course-detour'
 import { applyCommercialCadence, readCommercialCadence, COMPLETE_CADENCE_VERSION, ESSENTIAL_POSITIONS, INFORMATION_GROUP_POSITIONS, splitCommercialCaption, type CommercialCadence } from './commercial-cadence'
-import { COMMERCIAL_SCHEDULE_VERSION, COMMERCIAL_TIMEZONE, planCommercialWait } from './commercial-schedule'
+import { COMMERCIAL_SCHEDULE_VERSION, COMMERCIAL_TIMEZONE, planCommercialWait, planSavedCourseWait } from './commercial-schedule'
 import {resumeCommercialWindow} from './commercial-window-resume'
 import {deliveryReferenceAliases,isSessionDeliveryReference,readDeliveryReference} from './delivery-reference'
 
@@ -53,6 +53,7 @@ export interface AutomationContext {
   commercial_deferred_reason?: string
   commercial_remaining_step_ids?: string[]
   commercial_window_hold?: boolean
+  course_material_return?: {automation_id:string;next_position:number;minimum_position:number}
   commercial_caption_tail?: {automation_id:string;step_id:string;position:number;text:string}
   /** Server-owned enrollment sequence. Its two-hour wait is independent of ordinary chat activity. */
   enrollment_sequence_id?: string
@@ -717,6 +718,8 @@ export async function resumePendingExecution(pending: {
   }
   if (isCourseDetour(automation) && pending.context?.course_detour_resume && pending.contact_id && pending.context.conversation_id) {
     try {
+      const material=pending.context.course_material_return
+      if(material&&pending.context.course_checkpoint)await advanceMaterialCheckpoint(db,{account:pending.account_id,contact:pending.contact_id,chat:pending.context.conversation_id,automationId:material.automation_id,checkpoint:pending.context.course_checkpoint,nextPosition:material.next_position,minimumPosition:material.minimum_position})
       await restoreCourseCheckpoint(db, { account: pending.account_id, contact: pending.contact_id,
         chat: pending.context.conversation_id, checkpoint: pending.context.course_checkpoint,
         automatic: false, ignorePendingId: pending.id })
@@ -950,6 +953,8 @@ interface ExecuteArgs {
 
 async function completeCourseDetour(args:ExecuteArgs):Promise<string|null> {
   if(!isCourseDetour(args.automation) || !args.contactId || !args.context.conversation_id || !args.context.course_checkpoint) return null
+  const material=args.context.course_material_return
+  if(material)await advanceMaterialCheckpoint(supabaseAdmin(),{account:args.automation.account_id,contact:args.contactId,chat:args.context.conversation_id,automationId:material.automation_id,checkpoint:args.context.course_checkpoint,nextPosition:material.next_position,minimumPosition:material.minimum_position})
   const restored=await restoreCourseCheckpoint(supabaseAdmin(),{
     account:args.automation.account_id,contact:args.contactId,chat:args.context.conversation_id,
     checkpoint:args.context.course_checkpoint,automatic:false,ignorePendingId:args.pendingExecutionId,
@@ -1004,9 +1009,12 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     ? readCommercialCadence(args.context.commercial_cadences?.[args.automation.id]) : null
   let executionSteps = cadence ? applyCommercialCadence(steps as AutomationStep[], cadence) : steps as AutomationStep[]
   const completeCourse = cadence?.version === COMPLETE_CADENCE_VERSION
+  const savedSchedule=(args.automation.trigger_config as Record<string,unknown>)?.followup_schedule as {initial_wait_step_id?:string}|undefined
+  const scheduleSavedCourse=!!savedSchedule && !cadence && args.parentStepId===null
+    && !args.context.manual_agent_id && !args.context.enrollment_sequence_id
   const unpaidPaymentFlow = isPaymentFlow(args.automation)
     && (args.automation.trigger_config as Record<string, unknown>)?.payment_only_unpaid === true
-  if ((cadence || unpaidPaymentFlow) && args.context.conversation_id) {
+  if ((cadence || scheduleSavedCourse || unpaidPaymentFlow) && args.context.conversation_id) {
     // A receipt awaiting review is already a payment case, not a silent lead.
     const { data: payment, error: paymentError } = await activeConversationPayments(db,args.automation.account_id,args.context.conversation_id)
       .in('status', ['pending', 'validated']).limit(1).maybeSingle()
@@ -1103,6 +1111,13 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         .eq('account_id', args.automation.account_id)
         .maybeSingle()
       if (pauseError) throw pauseError
+      if(scheduleSavedCourse){
+        const last=Date.parse(conversation?.last_customer_message_at??'')
+        if(!Number.isFinite(last)||Date.now()>=last+24*3_600_000){
+          await holdRemaining(step.position,'Seguimiento detenido al terminar la ventana del estudiante')
+          return
+        }
+      }
       if(completeCourse) {
         const last=conversation?.last_customer_message_at??''
         const window=planCommercialWait({now:Date.now(),lastCustomerAt:last,
@@ -1169,7 +1184,17 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         await holdRemaining(step.position,planned.reason)
         return
       }
-      const dueAt = planned?.runAt ?? new Date(Date.now() + ms).toISOString()
+      let dueAt = planned?.runAt ?? new Date(Date.now() + ms).toISOString()
+      if(scheduleSavedCourse&&args.context.conversation_id){
+        const {data:chat,error:scheduleError}=await db.from('conversations').select('last_customer_message_at')
+          .eq('id',args.context.conversation_id).eq('account_id',args.automation.account_id).maybeSingle()
+        if(scheduleError)throw scheduleError
+        const last=Date.parse(chat?.last_customer_message_at??'')
+        const source=Date.parse(args.context.inbound_at??'')
+        const interactive=Number.isFinite(last)&&Number.isFinite(source)&&last>source&&Date.now()-last<5*60_000
+        dueAt=planSavedCourseWait({now:Date.now(),lastCustomerAt:chat?.last_customer_message_at??'',waitMs:ms,
+          initial:step.id===savedSchedule.initial_wait_step_id,interactive})
+      }
       const {error: waitError} = await db.from('automation_pending_executions').insert({
         automation_id: args.automation.id,
         // Tenancy: account_id required NOT NULL post-017.
@@ -1464,7 +1489,8 @@ case 'send_media': {
     config: step.step_config as Record<string, unknown>, url: mediaUrl,
     writtenText: args.writtenOfferText,
   }) : undefined
-  const split=args.context.commercial_cadences?.[args.automation.id]?.version===COMPLETE_CADENCE_VERSION
+  const split=(args.context.commercial_cadences?.[args.automation.id]?.version===COMPLETE_CADENCE_VERSION
+    || !!(args.automation.trigger_config as Record<string,unknown>)?.followup_schedule)
     && mediaType!=='audio'?splitCommercialCaption(rawCfg.caption??''):null
   const { whatsapp_message_id } = await engineSendMedia({
     accountId: args.automation.account_id,
@@ -1669,6 +1695,7 @@ case 'send_media': {
         if (responseError || !responseSteps?.length) throw new Error('No se pudo comprobar el bloque solicitado')
         const firstWait = responseSteps.find(row => row.step_type === 'wait')
         responseEnd = firstWait ? firstWait.position - 1 : (cfg.end_step ?? 1) - 1
+        args.context.course_material_return={automation_id:targetId,next_position:responseEnd+1,minimum_position:(cfg.start_step??1)-1}
         if (responseEnd < (cfg.start_step ?? 1) - 1) {
           // The material route already sent the requested image and audio.
           // Its linked range begins at the following wait, so a saved course
